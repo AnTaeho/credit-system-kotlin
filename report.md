@@ -96,7 +96,7 @@ data class JobCreateRequest(val idemKey: String, val prompt: String)
 
 ---
 
-## B. 결정 사항 (B-1·B-2 확정, B-3·B-5는 미결)
+## B. 결정 사항 (B-1~B-5 모두 확정)
 
 ### B-1. 엔티티 `id: Long?` 이 코드 전반에 번지는 문제 — **(b)로 확정** ✅
 
@@ -249,7 +249,7 @@ fun from(job: Job) = JobResponse(job.persistedId, ...)
 
 ---
 
-### B-3. 엔티티 프로퍼티 스타일 — 캡슐화 vs 간결함
+### B-3. 엔티티 프로퍼티 스타일 — **현행 유지로 확정** ✅
 
 현재는 Java의 Lombok `@Getter` + setter 없음을 재현하려고 `protected set` 을 쓴다.
 `src/main` 전체에 **25곳**.
@@ -268,14 +268,22 @@ class Organization(
 ```
 
 **대안의 대가**: 생성자 프로퍼티에는 `protected set` 을 못 쓴다 → 외부에서 `org.balance = 999` 가 가능해진다.
-잔액을 다루는 도메인이라 현재 방식(캡슐화 유지)을 권하지만, 장황함이 거슬리면 바꿀 수 있다.
+
+**→ 현행 유지로 확정** (2026-08-20).
+
+잔액과 job 상태를 다루는 도메인에서 **외부에서 아무나 `balance` / `status` 를 대입할 수 있게 되는 것**이
+줄어드는 줄 수보다 훨씬 비싸다. 상태 전이는 전부 조건부 UPDATE(`transitionIfStatusAndAttemptMatch` 등)로
+리포지토리에서만 일어나야 하는데, setter가 열리면 그 규율을 타입이 더 이상 지켜 주지 못한다.
+
+장황함(25곳 × 3줄)은 인정하지만, 그건 **읽을 때만 드는 비용**이고
+setter 개방은 **틀리게 쓸 수 있게 되는 비용**이다. 후자가 크다.
 
 > 참고: `allOpen` 플러그인이 `@Entity` 를 open으로 만들기 때문에 `private set` 은 **컴파일 에러**다
 > (`Private setters for open properties are prohibited`). `protected set` 만 가능.
 
 ---
 
-### B-4. `HeartbeatRegistry` 의 생성자 2개
+### B-4. `HeartbeatRegistry` 의 생성자 2개 — **현행 유지** ✅
 
 테스트용 `Clock` 주입을 위해 Java의 구조(주 생성자 + `@Autowired` 보조 생성자)를 그대로 유지했다.
 
@@ -287,11 +295,17 @@ class HeartbeatRegistry internal constructor(..., private val clock: Clock) {
 
 Kotlin다운 방식은 기본값 파라미터(`clock: Clock = Clock.systemUTC()`)지만,
 그러면 Spring이 생성자를 하나만 보고 `Clock` 빈을 찾다가 실패할 수 있어 검증 없이는 바꾸지 않았다.
-**정리하고 싶다면 실제 기동 테스트가 필요하다.**
+
+**→ 현행 유지.** 원래 "실제 기동 테스트가 필요하다"고 적어 뒀는데, 그 검증은 이후
+테스트 이식으로 자연히 채워졌다 — `CreditSystemKotlinApplicationTests` 가 컨텍스트를 띄우고,
+`GenerationPipelineEndToEndTest` / `RetryRefundTest` 는 **실제 Redis 위에서 워커와 스케줄러를
+돌리며 `HeartbeatRegistry` 를 Spring이 생성한 빈으로 사용한다.** 현재 구조가 동작하는 것은 확인됐다.
+
+바꿀 이유가 없어졌으므로 Java와 같은 형태를 그대로 둔다.
 
 ---
 
-### B-5. 새로 추가한 의존성 2개 — Java에 없던 것
+### B-5. Java에 없던 의존성 — **현행 유지로 확정** ✅
 
 ```kotlin
 testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")   // 필수에 가까움
@@ -302,7 +316,31 @@ testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")   // 필수에 가
 실제로 `GenerationWorkerUnitTest` 7개가 전부 이 에러로 실패했다.
 
 부수 효과로 `` `when` `` 백틱이 `whenever` 로 바뀌어 가독성도 좋아진다.
-**의존성을 늘리기 싫다면** 직접 래퍼를 만들 수 있지만 권하지 않는다.
+
+**→ 현행 유지로 확정** (2026-08-20). 직접 래퍼를 만들 수도 있지만,
+Mockito 매처의 null 반환을 Kotlin 타입 시스템에 맞추는 코드를 손으로 관리하는 쪽이
+의존성 한 줄보다 비싸다. 이식 이후 `DeadJobSchedulerTaskTest`(11개),
+`WorkerBatchSizeBenchmark` 도 전부 이 라이브러리를 쓰고 있어 실사용 근거도 늘었다.
+
+#### 부기: 실제로 Java에 없는 의존성은 6개다
+
+제목이 "2개"였지만 대조해 보니 다음 6개다.
+
+| 의존성 | 성격 |
+|---|---|
+| `mockito-kotlin` | **의도한 추가.** 위 사유 |
+| `kotlin-reflect` | Kotlin + Spring 필수. 선택의 여지 없음 |
+| `kotlin-test-junit5` | Kotlin 프로젝트 생성 시 기본 |
+| `spring-boot-starter-validation` (+ `-test`) | **현재 미사용** |
+| `spring-boot-h2console` | **현재 미사용** |
+
+뒤의 둘은 Spring Initializr가 붙여 준 것이지 이식 과정에서 고른 게 아니다.
+Bean Validation은 A-4에서 **의도적으로 쓰지 않기로** 했으므로
+(`jakarta.validation` / `@Valid` / `@field:NotBlank` 사용처 0곳) `starter-validation` 은
+앞으로도 쓸 계획이 없고, `h2console` 도 설정이 없다(`application.yml` 에 항목 0곳).
+
+**정리해도 되지만 이번 결정 범위 밖이라 손대지 않았다.** 지우려면 3줄 삭제 후
+`./gradlew test` 로 확인하면 된다. Java 원본에도 없는 것들이라 이식 충실도와도 무관하다.
 
 ---
 
