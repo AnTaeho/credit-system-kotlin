@@ -3,8 +3,8 @@
 작성일: 2026-08-20
 대상: `credit_system` (Java) → `credit-system-kotlin` (Kotlin)
 
-현재 상태: **`src/main` 이식 완료**, 테스트는 순수 단위 + Spring/JPA 통합 + 동시성 계층까지 완료 (27개 클래스 / 133 테스트).
-남은 것은 벤치마크 10파일뿐이다.
+현재 상태: **이식 완료.** `src/main` 과 테스트 4개 계층을 모두 옮겼다.
+`test` 태스크 28개 클래스 / 137 테스트 통과 + `benchmark` 태스크 2개 실행 확인.
 
 > 2026-08-20 갱신: 이 시점부터 git 저장소로 관리한다 (`5d39be6` 이 이식 작업본 첫 커밋).
 
@@ -280,9 +280,25 @@ fun appProperties(
 | 순수 단위 | 9 | ✅ 56 테스트 통과 |
 | Spring/JPA 통합 | 13 | ✅ 72 테스트 통과 (+ 컨트롤러 1개 신규 = 73) |
 | 동시성(Testcontainers) | 6 | ✅ 5 테스트 통과 (실제 MySQL 8.4 / Redis 7) |
-| 벤치마크 | 10 | **맨 마지막으로 미루기로 합의** — 유일하게 남은 계층 |
+| 벤치마크 | 10 | ✅ 이식 완료. `benchmark` 태스크로 실측 확인 |
 
-합계 27개 클래스 / 133 테스트 통과.
+`test` 태스크 합계 28개 클래스 / 137 테스트 통과. **남은 이식 대상 없음.**
+
+### 벤치마크 실행 방법
+
+```bash
+./gradlew benchmark                       # 기본값
+./gradlew benchmark -Dbench.requests=300 -Dbench.concurrency=1,8 \
+                    -Dbench.window-seconds=2 -Dbench.durations=200 -Dbench.batch-sizes=1,4
+```
+
+`build.gradle.kts` 의 `benchmark` 태스크가 `bench.` 로 시작하는 시스템 프로퍼티를
+테스트 JVM으로 넘겨준다. Docker 데몬이 필요하다.
+
+`@Tag("benchmark")` 가 붙은 `BalanceStrategyBenchmark` / `WorkerBatchSizeBenchmark` 만
+이 태스크에서 돌고 `test` 에서는 제외된다. **`BenchmarkHarnessTest` 는 태그가 없어**
+평소 `test` 에 포함된다 — 하네스 자체를 in-memory 가짜 전략으로 검증하는 순수 단위 테스트라
+Java 원본에서도 그렇게 되어 있다.
 
 ### 동시성 계층 실행 조건
 
@@ -308,6 +324,27 @@ Java 원본처럼 `@AfterEach` 정리가 없어도 간섭하지 않는다.
   이식 때 빠졌다. `TestRestTemplate` 이 `RestTemplateBuilder` 를 찾지 못해
   `@SpringBootTest(RANDOM_PORT)` 컨텍스트가 통째로 뜨지 않았다. 컨트롤러 테스트 3개를
   이식하기 전까지는 아무도 이 경로를 쓰지 않아 드러나지 않았다.
+
+---
+
+## 부록 4: 벤치마크에서 Java와 다르게 한 것
+
+**1. `OptimisticLockStrategy` 의 3갈래 결과를 enum으로 바꿨다.**
+Java는 한 번의 시도 결과를 `Boolean` 의 `true`(성공) / `false`(버전 충돌, 재시도) /
+`null`(잔액 부족, 즉시 포기)로 구분했다. Kotlin에서 `Boolean?` 를 트랜잭션 콜백 밖으로
+흘리면 세 갈래가 전혀 읽히지 않아 `AttemptResult { SUCCESS, CONFLICT, INSUFFICIENT }` 로
+바꿨다. **분기 조건과 재시도 횟수 계산은 원본과 동일하다.**
+
+**2. `seedBacklog` 의 INSERT에서 `result_url` 컬럼을 뺐다.**
+Java는 그 자리에 `null` 을 넘겼는데, Kotlin에서 `jdbcTemplate.batchUpdate` 는
+`List<Array<Any>>` (원소 non-null)를 요구한다. `result_url` 은 nullable 컬럼이라
+INSERT 목록에서 빼면 그대로 NULL 이 들어가므로 결과가 같고, 언체크 캐스트도 피할 수 있다.
+
+**3. `queryForObject` 에 `Long::class.javaObjectType` 를 쓴다.**
+Kotlin에서 `Long::class.java` 는 **primitive `long.class`** 로, Spring JDBC가 기대하는
+박싱 타입이 아니다. 이건 벤치마크만의 문제가 아니라 Kotlin + Spring JDBC 전반의 함정이다.
+
+**4. `DeductStrategy.name()` 을 `val name` 으로 바꿨다.** Kotlin 프로퍼티 관례를 따랐다.
 
 ---
 
