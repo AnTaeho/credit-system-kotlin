@@ -56,7 +56,7 @@ class GenerationJobProcessor(
                 lastFailure = e
                 log.warn(
                     "생성 결과 반영 실패: jobId={}, attemptNo={}, 시도={}/{}",
-                    job.id, job.attemptNo, attempt, CONFIRM_MAX_ATTEMPTS, e
+                    job.persistedId, job.attemptNo, attempt, CONFIRM_MAX_ATTEMPTS, e
                 )
             }
             if (attempt < CONFIRM_MAX_ATTEMPTS) {
@@ -68,7 +68,7 @@ class GenerationJobProcessor(
                 }
             }
         }
-        throw lastFailure ?: IllegalStateException("confirm 재시도가 한 번도 수행되지 않았습니다: jobId=${job.id}")
+        throw lastFailure ?: IllegalStateException("confirm 재시도가 한 번도 수행되지 않았습니다: jobId=${job.persistedId}")
     }
 
     companion object {

@@ -35,12 +35,6 @@ class LedgerEntryTest {
     }
 
     @Test
-    fun `charge에 idemKey가 null이면 예외가 발생한다`() {
-        assertThatThrownBy { LedgerEntry.charge(1L, null, 500L) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-    }
-
-    @Test
     fun `charge에 idemKey가 공백이면 예외가 발생한다`() {
         assertThatThrownBy { LedgerEntry.charge(1L, "   ", 500L) }
             .isInstanceOf(IllegalArgumentException::class.java)

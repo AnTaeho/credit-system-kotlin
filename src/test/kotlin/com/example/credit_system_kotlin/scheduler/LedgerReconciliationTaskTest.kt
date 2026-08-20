@@ -57,7 +57,7 @@ class LedgerReconciliationTaskTest @Autowired constructor(
     fun `충전과 hold가 반영된 조직도 대사를 통과한다`() {
         val org = organizationRepository.save(Organization("acme", 1000L))
         ledgerRepository.save(LedgerEntry.charge(org.persistedId, "charge-key-2", 500L))
-        ledgerRepository.save(LedgerEntry.of(org.persistedId, null, LedgerType.HOLD, -100L))
+        ledgerRepository.save(LedgerEntry.of(org.persistedId, 1L, LedgerType.HOLD, -100L))
         organizationRepository.addBalance(org.persistedId, 400L, Instant.now())
         organizationRepository.flush()
 

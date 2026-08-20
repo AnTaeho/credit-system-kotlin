@@ -13,9 +13,6 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 @ActiveProfiles("test")
 @SpringBootTest
@@ -38,32 +35,13 @@ class ConcurrentChargeTest @Autowired constructor(
         val organization = organizationRepository.save(Organization("acme", 10_000L))
         val idemKey = "shared-charge-key"
 
-        val threadCount = 10
-        val executor = Executors.newFixedThreadPool(threadCount)
-        val ready = CountDownLatch(threadCount)
-        val start = CountDownLatch(1)
-        val done = CountDownLatch(threadCount)
-
-        repeat(threadCount) {
-            executor.submit {
-                ready.countDown()
-                try {
-                    start.await()
-                    chargeService.charge(organization.persistedId, idemKey, 300L)
-                } catch (e: DataIntegrityViolationException) {
-                    // 유니크 제약에서 밀린 쪽. 잔액이 오르지 않는 것이 정상이므로 무시한다.
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                } finally {
-                    done.countDown()
-                }
+        runConcurrently(10) {
+            try {
+                chargeService.charge(organization.persistedId, idemKey, 300L)
+            } catch (e: DataIntegrityViolationException) {
+                // 유니크 제약에서 밀린 쪽. 잔액이 오르지 않는 것이 정상이므로 무시한다.
             }
         }
-
-        ready.await()
-        start.countDown()
-        done.await(30, TimeUnit.SECONDS)
-        executor.shutdown()
 
         assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId))
             .filteredOn { it.type == LedgerType.CHARGE }

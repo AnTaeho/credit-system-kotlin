@@ -64,15 +64,15 @@ class LedgerEntry private constructor(
 
     companion object {
 
-        fun of(organizationId: Long, jobId: Long?, type: LedgerType, amount: Long): LedgerEntry {
+        fun of(organizationId: Long, jobId: Long, type: LedgerType, amount: Long): LedgerEntry {
             require(type != LedgerType.CHARGE) {
                 "CHARGE 타입은 멱등키 없이 생성할 수 없습니다. charge(organizationId, idemKey, amount)를 사용하세요."
             }
             return LedgerEntry(organizationId, jobId, type, amount, null)
         }
 
-        fun charge(organizationId: Long, idemKey: String?, amount: Long): LedgerEntry {
-            require(!idemKey.isNullOrBlank()) {
+        fun charge(organizationId: Long, idemKey: String, amount: Long): LedgerEntry {
+            require(idemKey.isNotBlank()) {
                 "CHARGE 원장은 idemKey가 비어 있으면 안 됩니다: idemKey=$idemKey"
             }
             return LedgerEntry(organizationId, null, LedgerType.CHARGE, amount, idemKey)

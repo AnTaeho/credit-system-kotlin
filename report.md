@@ -4,7 +4,7 @@
 대상: `credit_system` (Java) → `credit-system-kotlin` (Kotlin)
 
 현재 상태: **이식 완료.** `src/main` 과 테스트 4개 계층을 모두 옮겼다.
-`./gradlew test` 27개 클래스 / 133 테스트 통과.
+`./gradlew test` 27개 클래스 / 132 테스트 통과.
 
 > 2026-08-20 갱신: 이 시점부터 git 저장소로 관리한다 (`5d39be6` 이 이식 작업본 첫 커밋).
 
@@ -420,12 +420,12 @@ fun appProperties(
 
 | 계층 | 파일 | 상태 |
 |---|---|---|
-| 순수 단위 | 9 | ✅ 56 테스트 통과 |
+| 순수 단위 | 9 | ✅ 55 테스트 통과 (F-2로 1개 삭제) |
 | Spring/JPA 통합 | 13 | ✅ 72 테스트 통과 (+ 컨트롤러 1개 신규 = 73) |
 | 동시성(Testcontainers) | 6 | ✅ 5 테스트 통과 (실제 MySQL 8.4 / Redis 7) |
 | ~~벤치마크~~ | ~~10~~ | **이식했다가 삭제** (아래) |
 
-합계 27개 클래스 / 133 테스트 통과. **남은 이식 대상 없음.**
+합계 27개 클래스 / 132 테스트 통과. **남은 이식 대상 없음.**
 
 ### 벤치마크는 삭제했다 (2026-08-20)
 
@@ -459,6 +459,103 @@ Java 원본의 벤치마크 10파일(`BalanceStrategyBenchmark`, `WorkerBatchSiz
 테스트마다 별도 데이터베이스를 쓴다 (`concurrent_charge`, `concurrent_hold`,
 `duplicate_idem_key`, `pipeline_e2e`, `retry_refund`). 서로 격리되므로
 Java 원본처럼 `@AfterEach` 정리가 없어도 간섭하지 않는다.
+
+---
+
+## F. 전체 코드 점검 (2026-08-20)
+
+이식이 끝난 뒤 `src/main` 1,719줄과 `src/test` 2,830줄을 전부 읽고,
+기계적 스윕(컴파일 경고, 미사용 import, 심볼 참조 수)도 함께 돌렸다.
+
+**죽은 코드는 사실상 없었다.** 리포지토리 메서드 14개 전부 호출되고,
+DTO·예외 클래스 전부 참조되며, `catch (e:)` 22곳 모두 `e` 를 실제로 쓴다.
+컴파일 경고 0건. 대신 아래 세 가지가 나왔다.
+
+### F-1. 스모크 테스트가 로컬 개발 MySQL에 붙고 있었다 🔴
+
+`CreditSystemKotlinApplicationTests` 는 Spring 테스트 30개 중
+**유일하게 `@ActiveProfiles("test")` 가 없었다.** Initializr가 만들어준 파일이
+그대로 딸려 온 것이다(탭 들여쓰기가 남아 있던 것도 그 흔적).
+
+실행해서 확인한 결과:
+
+```
+Database JDBC URL [jdbc:mysql://localhost:3306/credit_system_k]
+GenerationWorker : 워커 처리량 상한: batch-size=3, concurrency=3, ...
+```
+
+H2가 아니라 `application.yml` 의 개발용 MySQL에 `ddl-auto: update` 로 붙고,
+워커와 스케줄러까지 기동해 그 DB를 폴링하고 있었다.
+지금까지 통과한 건 개발 머신에 MySQL·Redis가 떠 있었기 때문이고,
+깨끗한 환경이나 CI에서는 `./gradlew test` 가 여기서 깨진다.
+
+`@ActiveProfiles("test")` 를 붙여 해소했다. 이후 로그는 `jdbc:h2:mem:credit_test`.
+
+지우는 선택지도 있었다 — 다른 `@SpringBootTest` 20여 개가 이미 컨텍스트 기동을
+증명하므로 엄밀히는 중복이다. 13줄이고 관례적이라 남겼다.
+
+### F-2. `LedgerEntry` 팩토리의 nullable 파라미터를 좁혔다
+
+B-1·B-2와 같은 결의 정리다. **팩토리 파라미터만** 좁혔고,
+엔티티 필드와 private 생성자는 nullable 그대로 두었다 —
+CHARGE 원장은 `jobId` 가 진짜로 없고, 나머지 타입은 `idemKey` 가 진짜로 없기 때문이다.
+
+| | 전 | 후 |
+|---|---|---|
+| `of(...)` | `jobId: Long?` | `jobId: Long` |
+| `charge(...)` | `idemKey: String?` | `idemKey: String` |
+
+`charge` 의 검증도 `require(!idemKey.isNullOrBlank())` → `require(idemKey.isNotBlank())`.
+
+D-1과 같은 일이 또 일어났다: **`charge에 idemKey가 null이면 예외가 발생한다`
+테스트가 컴파일 불가가 되어 삭제**했다. 런타임에 검증하던 걸 컴파일러가 대신
+막아주게 된 것이다. 공백 검증 테스트는 여전히 런타임 책임이라 남아 있다.
+(133 → 132 테스트)
+
+`LedgerReconciliationTaskTest` 가 `of(..., null, ...)` 로 넘기던 자리는 `1L` 로 바꿨다.
+그 테스트는 원장 금액 합계만 검증하므로 jobId 값은 판정에 영향이 없다.
+
+### F-3. 동시성 테스트의 latch 하네스를 헬퍼로 묶었다
+
+`ConcurrentChargeTest` / `ConcurrentHoldTest` / `DuplicateIdemKeyTest` 가
+"ready / start / done" 3-latch 패턴을 25줄씩 그대로 복사해 쓰고 있었다.
+`Concurrently.kt` 의 `runConcurrently(threadCount) { idx -> ... }` 하나로 묶어 약 50줄을 없앴다.
+
+**동작이 완전히 똑같은 순수 리팩터링이다.** `done.await(30, TimeUnit.SECONDS)` 의
+반환값을 무시하는 것도 원본 그대로 두었다.
+
+각 테스트가 기대하는 도메인 예외(`DataIntegrityViolationException`,
+`InsufficientBalanceException`, `DuplicateRequestInProgressException`)는
+서로 달라서 헬퍼가 잡지 않는다. 호출하는 쪽 블록에 그대로 남겼다 —
+"어떤 실패를 정상으로 보는가"가 각 테스트의 핵심 단언이기 때문이다.
+
+### F-4. 함께 정리한 자잘한 것
+
+- `GenerationWorkerUnitTest` 의 미사용 import `org.mockito.kotlin.anyOrNull`
+- `ErrorResponse` 의 빈 본문 `) { }` → `)`
+- 파일 끝 개행 누락 4건 (`WorkerExecutorConfig`, `WorkerProperties`,
+  `ErrorResponse`, `StubGenerationException`)
+- `GenerationJobProcessor.confirmWithRetry` 가 nullable인 `job.id` 를 쓰던 2곳 →
+  `job.persistedId`. `runGeneration` 은 이미 `val jobId = job.persistedId` 를
+  만들어 두는데 private 함수 안에서만 옛 방식이 남아 있었다 (B-1 (b) 취지와 어긋남)
+
+### F-5. 그대로 두기로 한 것
+
+- **`confirmWithRetry` 의 `throw lastFailure ?: IllegalStateException(...)`** —
+  루프가 최소 1회 돌므로 elvis 오른쪽은 실제로 도달 불가하다. 그래도
+  `lastFailure` 가 nullable이라 컴파일러가 요구하고, `!!` 보다 낫다.
+- **리포지토리의 들쭉날쭉해 보이는 `@Transactional`** — 의도적이다.
+  스케줄러·워커가 직접 부르는 메서드(`JobRepository` 전부, `deleteByIdIn`)에만 붙어 있고,
+  항상 `@Transactional` 서비스 안에서만 불리는 것(`deductBalance`, `addBalance`,
+  `attachJobId`)에는 없다. 호출 경로를 전부 따라가 확인했다.
+- **`HeartbeatRegistry` 의 생성자 2개** — B-4에서 이미 확정.
+- **`application.yml` 의 DB 비밀번호** — Java 원본과 같은 값이고 로컬 개발용이다.
+  다만 이번에 git 히스토리에 들어갔다는 점은 알고 있어야 한다.
+
+### 점검에서 헛짚은 것
+
+`AppPropertiesFixture.kt` 가 참조 0으로 잡혀 죽은 파일처럼 보였다.
+파일명과 심볼명(`appProperties`)이 달라서 생긴 착시였고 실제로는 6곳에서 쓴다.
 
 ---
 

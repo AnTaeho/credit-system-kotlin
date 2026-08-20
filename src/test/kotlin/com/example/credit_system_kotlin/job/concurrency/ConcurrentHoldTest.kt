@@ -11,9 +11,6 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 @ActiveProfiles("test")
@@ -36,34 +33,17 @@ class ConcurrentHoldTest @Autowired constructor(
         val organization = organizationRepository.save(Organization("acme", 500L))
 
         val threadCount = 10
-        val executor = Executors.newFixedThreadPool(threadCount)
-        val ready = CountDownLatch(threadCount)
-        val start = CountDownLatch(1)
-        val done = CountDownLatch(threadCount)
         val successCount = AtomicInteger()
         val rejectedCount = AtomicInteger()
 
-        repeat(threadCount) { idx ->
-            executor.submit {
-                ready.countDown()
-                try {
-                    start.await()
-                    holdService.requestGeneration(organization.persistedId, "concurrent-key-$idx", "cat")
-                    successCount.incrementAndGet()
-                } catch (e: InsufficientBalanceException) {
-                    rejectedCount.incrementAndGet()
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                } finally {
-                    done.countDown()
-                }
+        runConcurrently(threadCount) { idx ->
+            try {
+                holdService.requestGeneration(organization.persistedId, "concurrent-key-$idx", "cat")
+                successCount.incrementAndGet()
+            } catch (e: InsufficientBalanceException) {
+                rejectedCount.incrementAndGet()
             }
         }
-
-        ready.await()
-        start.countDown()
-        done.await(30, TimeUnit.SECONDS)
-        executor.shutdown()
 
         assertThat(successCount.get() + rejectedCount.get()).isEqualTo(threadCount)
         assertThat(successCount.get()).isEqualTo(5)
