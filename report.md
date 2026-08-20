@@ -3,7 +3,10 @@
 작성일: 2026-08-20
 대상: `credit_system` (Java) → `credit-system-kotlin` (Kotlin)
 
-현재 상태: **`src/main` 이식 완료**, 테스트는 순수 단위 계층(8개 파일 / 56 테스트)까지 완료.
+현재 상태: **`src/main` 이식 완료**, 테스트는 순수 단위 + Spring/JPA 통합 계층까지 완료 (22개 클래스 / 128 테스트).
+남은 것은 동시성(Testcontainers) 6파일과 벤치마크 10파일.
+
+> 2026-08-20 갱신: 이 시점부터 git 저장소로 관리한다 (`5d39be6` 이 이식 작업본 첫 커밋).
 
 ---
 
@@ -124,6 +127,17 @@ val jobId = requireNotNull(job.id) { "저장되지 않은 job은 confirm할 수 
 
 > 8곳이면 (b)를 검토할 만한 양. 다만 (a)도 충분히 방어 가능.
 
+**테스트 이식 중 취한 임시 조치**: 통합 테스트에서 같은 문제가 훨씬 많이 나와,
+`src/test/.../support/PersistedId.kt` 에 확장 프로퍼티로 한 번만 확정했다.
+
+```kotlin
+val Organization.persistedId: Long get() = requireNotNull(id) { "저장되지 않은 Organization" }
+```
+
+이름을 (b)의 `persistedId` 와 일부러 똑같이 맞췄다. B-1을 (b)/(c)로 정하면
+**이 파일만 지우면 되고 호출부는 손대지 않아도 된다.** (a)로 정하면 그대로 두면 된다.
+즉 B-1 결정은 아직 열려 있고, 테스트 이식이 그 결정을 앞당겨 잠그지는 않았다.
+
 ---
 
 ### B-2. 응답 DTO의 nullable `id` — JSON 계약 문제
@@ -212,9 +226,10 @@ testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")   // 필수에 가
 
 ### 확인되지 **않은** 것 ⚠️
 
-- **heartbeat 만료 회수 경로** (`markExpiredJobsAsFailed`, `markStalledJobsAsFailed`).
-  워커가 처리 도중 죽는 상황이라 재현하지 않았다. 코드는 옮겼지만 실행 검증이 없다.
-  → `DeadJobSchedulerTaskTest` 이식 시 커버될 예정.
+- ~~**heartbeat 만료 회수 경로**~~ → **해소됨.** `DeadJobSchedulerTaskTest` 11개를 이식해
+  `markExpiredJobsAsFailed` / `markStalledJobsAsFailed` 를 모두 덮었다.
+  (실제 워커가 죽는 상황을 재현한 게 아니라 mock 기반이므로, 끝단 확인은
+  동시성 테스트 계층에서 다시 볼 것.)
 
 ---
 
@@ -232,6 +247,10 @@ Kotlin에서는 타입 시스템이 그 경우를 막았으니 테스트가 불�
 
 **선택지**: (1) 해당 테스트를 삭제하고 "컴파일 타임에 보장됨"으로 간주,
 (2) 컨트롤러 레벨 테스트로 옮겨 400 응답을 검증, (3) A-4를 되돌린다.
+
+**→ (2)로 처리했다.** `ChargeServiceTest` 의 null 테스트는 옮기지 않고(주석으로 사유를 남김),
+`OrganizationApiControllerTest` 에 `idemKey 필드가 없는 본문은 400으로 거부된다` 를 새로 추가했다.
+Java에 없던 유일한 테스트다. 되돌리려면 이 테스트를 지우면 된다.
 
 ### D-2. 테스트 픽스처의 `null` 인자
 
@@ -255,10 +274,20 @@ fun appProperties(
 
 | 계층 | 파일 | 상태 |
 |---|---|---|
-| 순수 단위 | 8 | ✅ 56 테스트 통과 |
-| Spring/JPA 통합 | 15 | 다음 차례 |
-| 동시성(Testcontainers) | 6 | 대기 |
+| 순수 단위 | 9 | ✅ 56 테스트 통과 |
+| Spring/JPA 통합 | 13 | ✅ 72 테스트 통과 (+ 컨트롤러 1개 신규 = 73) |
+| 동시성(Testcontainers) | 6 | **다음 차례** |
 | 벤치마크 | 10 | **맨 마지막으로 미루기로 합의** |
+
+합계 22개 클래스 / 128 테스트 통과.
+
+### 동시성 계층에서 미리 알아 둘 것
+
+- `SharedContainers` 가 MySQL 컨테이너를 띄운다. `build.gradle.kts` 의 testcontainers 2.0.5,
+  awaitility 는 이미 들어가 있다.
+- 이 계층은 `@DataJpaTest` 롤백이 없으므로 정리를 직접 해야 한다.
+  이미 이식한 `ServiceTransactionRollbackTest` 의 `@AfterEach` 정리 순서
+  (ledger → idempotency → job → organization)를 따르면 된다.
 
 ---
 
@@ -271,3 +300,32 @@ fun appProperties(
   생성되던 것을 수정.
 - `BaseEntity` 필드가 `private` 이라 `createdAt`/`updatedAt` 을 읽을 수 없던 것을 수정.
 - `WorkerProperties` 의 `require` 조건이 뒤집혀 **정상 설정에서 기동 실패**하던 버그 수정.
+- **`spring-boot-restclient` 의존성 누락** (2026-08-20). Java 쪽 `build.gradle` 에는 있는데
+  이식 때 빠졌다. `TestRestTemplate` 이 `RestTemplateBuilder` 를 찾지 못해
+  `@SpringBootTest(RANDOM_PORT)` 컨텍스트가 통째로 뜨지 않았다. 컨트롤러 테스트 3개를
+  이식하기 전까지는 아무도 이 경로를 쓰지 않아 드러나지 않았다.
+
+---
+
+## 부록 2: 테스트를 쓸 때 걸린 함정
+
+**준비용 엔티티를 프로퍼티 초기화 자리에서 save하면 안 된다.**
+
+```kotlin
+// 이렇게 하면 롤백되지 않는다
+class SomeTest @Autowired constructor(private val repo: OrganizationRepository) {
+    private val organization = repo.save(Organization("acme", 1000L))   // ✗
+}
+```
+
+Spring의 테스트 트랜잭션은 인스턴스 생성이 아니라 `@BeforeEach` 직전에 열린다.
+프로퍼티 초기화는 그보다 먼저 실행되므로 `save` 가 트랜잭션 **밖에서** 커밋되고,
+`@DataJpaTest` 의 롤백이 이 행을 되돌리지 못한다.
+
+Java는 `@BeforeEach` 로 쓸 수밖에 없어서 이 문제가 없었는데, Kotlin에서 생성자 주입 +
+프로퍼티 초기화로 줄이려다 실제로 `HoldServiceTest` 가 organization 8건을 흘렸다.
+같은 컨텍스트를 공유하는 `LedgerReconciliationTaskTest` 가 **전체 조직을 대사**하므로
+그대로 뒀으면 거기서 터졌을 것이다.
+
+→ 엔티티 준비는 `lateinit var` + `@BeforeEach`. DB를 건드리지 않는 협력 객체
+(`HoldService(...)`, `ListAppender()`) 는 프로퍼티 초기화 자리에 둬도 된다.
