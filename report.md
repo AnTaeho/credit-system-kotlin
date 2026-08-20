@@ -3,8 +3,8 @@
 작성일: 2026-08-20
 대상: `credit_system` (Java) → `credit-system-kotlin` (Kotlin)
 
-현재 상태: **`src/main` 이식 완료**, 테스트는 순수 단위 + Spring/JPA 통합 계층까지 완료 (22개 클래스 / 128 테스트).
-남은 것은 동시성(Testcontainers) 6파일과 벤치마크 10파일.
+현재 상태: **`src/main` 이식 완료**, 테스트는 순수 단위 + Spring/JPA 통합 + 동시성 계층까지 완료 (27개 클래스 / 133 테스트).
+남은 것은 벤치마크 10파일뿐이다.
 
 > 2026-08-20 갱신: 이 시점부터 git 저장소로 관리한다 (`5d39be6` 이 이식 작업본 첫 커밋).
 
@@ -223,13 +223,16 @@ testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")   // 필수에 가
 | **환불** | `failure-rate=1.0` 강제 → 3회 소진 → REFUNDED, 잔액 복구 |
 | 원장 대사 | `checkedCount=1, mismatchCount=0` |
 | 단위 테스트 | 56개 통과 |
+| **동시 충전/hold/멱등키** | 실제 MySQL 8.4 컨테이너에서 10스레드 경쟁 |
+| **파이프라인 E2E·재시도 환불** | 실제 MySQL + Redis 위에서 워커·스케줄러 구동 |
 
 ### 확인되지 **않은** 것 ⚠️
 
 - ~~**heartbeat 만료 회수 경로**~~ → **해소됨.** `DeadJobSchedulerTaskTest` 11개를 이식해
   `markExpiredJobsAsFailed` / `markStalledJobsAsFailed` 를 모두 덮었다.
-  (실제 워커가 죽는 상황을 재현한 게 아니라 mock 기반이므로, 끝단 확인은
-  동시성 테스트 계층에서 다시 볼 것.)
+  (실제 워커가 죽는 상황을 재현한 게 아니라 mock 기반이다. 다만 `RetryRefundTest` 가
+  실제 MySQL·Redis 위에서 재시도 소진 → 환불까지 돌아가는 것을 확인하므로,
+  스케줄러·워커·heartbeat가 맞물리는 끝단은 덮였다.)
 
 ---
 
@@ -276,18 +279,19 @@ fun appProperties(
 |---|---|---|
 | 순수 단위 | 9 | ✅ 56 테스트 통과 |
 | Spring/JPA 통합 | 13 | ✅ 72 테스트 통과 (+ 컨트롤러 1개 신규 = 73) |
-| 동시성(Testcontainers) | 6 | **다음 차례** |
-| 벤치마크 | 10 | **맨 마지막으로 미루기로 합의** |
+| 동시성(Testcontainers) | 6 | ✅ 5 테스트 통과 (실제 MySQL 8.4 / Redis 7) |
+| 벤치마크 | 10 | **맨 마지막으로 미루기로 합의** — 유일하게 남은 계층 |
 
-합계 22개 클래스 / 128 테스트 통과.
+합계 27개 클래스 / 133 테스트 통과.
 
-### 동시성 계층에서 미리 알아 둘 것
+### 동시성 계층 실행 조건
 
-- `SharedContainers` 가 MySQL 컨테이너를 띄운다. `build.gradle.kts` 의 testcontainers 2.0.5,
-  awaitility 는 이미 들어가 있다.
-- 이 계층은 `@DataJpaTest` 롤백이 없으므로 정리를 직접 해야 한다.
-  이미 이식한 `ServiceTransactionRollbackTest` 의 `@AfterEach` 정리 순서
-  (ledger → idempotency → job → organization)를 따르면 된다.
+**Docker 데몬이 떠 있어야 한다.** 꺼져 있으면 이 5개는 컨테이너를 못 띄우고 실패한다.
+컨테이너는 `withReuse(true)` 라 한 번 뜨면 테스트 실행 사이에 살아남는다.
+
+테스트마다 별도 데이터베이스를 쓴다 (`concurrent_charge`, `concurrent_hold`,
+`duplicate_idem_key`, `pipeline_e2e`, `retry_refund`). 서로 격리되므로
+Java 원본처럼 `@AfterEach` 정리가 없어도 간섭하지 않는다.
 
 ---
 
@@ -304,6 +308,39 @@ fun appProperties(
   이식 때 빠졌다. `TestRestTemplate` 이 `RestTemplateBuilder` 를 찾지 못해
   `@SpringBootTest(RANDOM_PORT)` 컨텍스트가 통째로 뜨지 않았다. 컨트롤러 테스트 3개를
   이식하기 전까지는 아무도 이 경로를 쓰지 않아 드러나지 않았다.
+
+---
+
+## 부록 3: 동시성 테스트에서 Java와 다르게 한 것
+
+**1. `SharedContainers` 를 abstract class 상속 → `object` 로 바꿨다.**
+Java는 static 필드/초기화 블록을 하위 클래스가 상속해 공유했는데,
+Kotlin은 companion object 멤버가 그런 식으로 상속되지 않는다.
+`object SharedContainers` 하나를 두고 각 테스트가
+`SharedContainers.registerDatabase(registry, "db이름")` 을 직접 부른다.
+컨테이너는 이 object에 처음 접근할 때 뜨므로 지연 초기화 시점은 사실상 같다.
+
+`@DynamicPropertySource` 는 static 메서드여야 하므로
+`companion object` + `@JvmStatic` 이 필요하다.
+
+**2. 컨테이너 타입에 self-type 제네릭 문제가 있다.**
+
+```kotlin
+// GenericContainer<SELF extends GenericContainer<SELF>> 를 Kotlin에서 그대로 쓰면
+// 빌더 메서드 반환 타입이 Nothing 이 되어 이후 코드가 도달 불가로 취급된다.
+private class RedisContainer(image: DockerImageName) : GenericContainer<RedisContainer>(image)
+```
+
+SELF를 묶어 줄 구체 하위 클래스를 하나 두는 것이 정석이다.
+MySQL 쪽은 testcontainers 2.x 에 제네릭이 없는
+`org.testcontainers.mysql.MySQLContainer` 가 새로 생겨서 그걸 썼다.
+Java가 쓰던 `org.testcontainers.containers.MySQLContainer<?>` 도 아직 남아 있지만
+Kotlin에서는 새 쪽이 훨씬 깔끔하다.
+
+**3. 래치 보일러플레이트는 일부러 합치지 않았다.**
+세 테스트가 `ready/start/done` 3단 래치를 거의 같은 모양으로 반복한다.
+헬퍼로 묶을 수 있지만, **그 래치 자체가 이 테스트들이 검증하려는 대상**이라
+눈에 보이게 두는 편이 낫고 Java 원본과 1:1로 대조하기도 쉽다.
 
 ---
 
