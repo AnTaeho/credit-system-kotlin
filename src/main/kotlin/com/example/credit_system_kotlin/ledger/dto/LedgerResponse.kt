@@ -4,7 +4,7 @@ import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import java.time.Instant
 
 data class LedgerResponse(
-    val id: Long?,
+    val id: Long,
     val type: String,
     val amount: Long,
     val jobId: Long?,
@@ -12,6 +12,6 @@ data class LedgerResponse(
 ) {
     companion object {
         fun from(entry: LedgerEntry): LedgerResponse =
-            LedgerResponse(entry.id, entry.type.name, entry.amount, entry.jobId, entry.createdAt)
+            LedgerResponse(entry.persistedId, entry.type.name, entry.amount, entry.jobId, entry.createdAt)
     }
 }

@@ -18,7 +18,7 @@ class GenerationJobProcessor(
 ) {
 
     fun runGeneration(job: Job) {
-        val jobId = requireNotNull(job.id) { "저장되지 않은 job은 실행할 수 없습니다." }
+        val jobId = job.persistedId
         val attemptNo = job.attemptNo
         val heartbeatFuture = heartbeatRegistry.startHeartbeat(jobId, attemptNo)
         try {

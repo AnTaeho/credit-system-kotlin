@@ -96,9 +96,9 @@ data class JobCreateRequest(val idemKey: String, val prompt: String)
 
 ---
 
-## B. 아직 결정하지 않은 것 (당신의 판단 필요)
+## B. 결정 사항 (B-1·B-2 확정, B-3·B-5는 미결)
 
-### B-1. 엔티티 `id: Long?` 이 코드 전반에 번지는 문제 ★ 가장 큰 건
+### B-1. 엔티티 `id: Long?` 이 코드 전반에 번지는 문제 — **(b)로 확정** ✅
 
 JPA 특성상 `persist` 전에는 id가 없어 `Long?` 이 불가피하다. 문제는 이게 밖으로 새어나간다는 점.
 
@@ -189,7 +189,40 @@ test 쪽 변경은 `import` 16줄과 `PersistedId.kt` 삭제뿐이다.
 
 ---
 
-### B-2. 응답 DTO의 nullable `id` — JSON 계약 문제
+### → 결정: **(b) 엔티티 접근자** (2026-08-20 적용 완료)
+
+```kotlin
+@Id
+@GeneratedValue(strategy = GenerationType.IDENTITY)
+var id: Long? = null
+    protected set
+
+/**
+ * persist 이후에만 유효한 id. 저장된 엔티티를 다루는 자리에서는 이쪽을 쓴다.
+ * `id` 는 JPA가 persist 전 상태를 표현해야 해서 nullable로 남아 있을 뿐이다.
+ */
+val persistedId: Long
+    get() = requireNotNull(id) { "아직 저장되지 않은 Job입니다." }
+```
+
+엔티티 4개에 넣었고, main 호출부 8곳의 `requireNotNull(job.id)` 가 `job.persistedId` 가 되면서
+**`src/main` 에 `requireNotNull(...id)` 는 0곳**이 되었다.
+테스트는 `support/PersistedId.kt` 를 지우고 import 16줄을 지운 것이 전부다 —
+**호출부 173곳은 한 글자도 바뀌지 않았다.** 이식 때 이름을 미리 맞춰 둔 값을 여기서 받았다.
+
+**(c)를 택하지 않은 이유**: 최종 형태는 (c)가 더 깔끔하지만, 치르는 값이 나쁘다.
+측정에서 드러난 함정 3개가 **전부 컴파일러가 잡아주지 않는 종류**다 —
+스키마 불일치는 테스트가 통과해버리고, `setField` 는 런타임에만 깨지고,
+`job.id` 읽기 예외는 장애 상황(catch 블록)에서만 터진다.
+잔액을 다루는 도메인에서 "에러 핸들러가 원래 예외를 가리며 터질 수 있는 자리" 5곳은 싸지 않다.
+
+**남은 대가**: 엔티티에 `id`(nullable)와 `persistedId`(non-null)가 공존한다.
+어느 쪽을 써야 하는지는 위 KDoc으로 안내한다. 나중에 (c)로 옮기고 싶어지면
+그때 이 문서의 측정치를 그대로 쓰면 된다.
+
+---
+
+### B-2. 응답 DTO의 nullable `id` — **닫음** ✅
 
 ```kotlin
 data class LedgerResponse(val id: Long?, ...)
@@ -197,8 +230,22 @@ data class JobResponse(val id: Long?, ...)
 ```
 
 Java도 `Long id` 라 동작은 동일하지만, **DB에서 읽어온 엔티티는 id가 반드시 있다.**
-API 스펙상 `"id": null` 이 나올 수 있는 것처럼 보이는 게 정확하지 않다.
-B-1을 (b)나 (c)로 정하면 여기도 함께 닫을 수 있다.
+API 스펙상 `"id": null` 이 나올 수 있는 것처럼 보이는 게 정확하지 않았다.
+
+**→ B-1 (b)와 함께 닫았다** (2026-08-20).
+
+```kotlin
+data class JobResponse(val id: Long, ...)      // Long? → Long
+data class LedgerResponse(val id: Long, ...)   // Long? → Long
+
+fun from(job: Job) = JobResponse(job.persistedId, ...)
+```
+
+`LedgerResponse.jobId` 는 **nullable로 남겼다.** CHARGE 원장은 job과 무관해서
+실제로 null이고, 이건 타입이 사실을 정확히 말하고 있는 경우다.
+
+직렬화 결과는 달라지지 않는다 — 원래도 null이 나온 적이 없다.
+바뀐 것은 **타입이 그 사실을 말하게 된 것**뿐이다.
 
 ---
 

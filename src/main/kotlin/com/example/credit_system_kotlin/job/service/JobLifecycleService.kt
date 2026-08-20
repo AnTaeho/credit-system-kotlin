@@ -23,7 +23,7 @@ class JobLifecycleService(
 
     @Transactional
     fun confirm(job: Job, resultUrl: String) {
-        val jobId = requireNotNull(job.id) { "저장되지 않은 job은 confirm할 수 없습니다." }
+        val jobId = job.persistedId
         val updated = jobRepository.completeIfAttemptMatches(jobId, resultUrl, job.attemptNo, Instant.now())
         if (updated == 0) {
             log.info("이미 무효화된 시도, confirm 무시: jobId={}, attemptNo={}", jobId, job.attemptNo)
@@ -47,7 +47,7 @@ class JobLifecycleService(
 
     @Transactional
     fun retry(job: Job) {
-        val jobId = requireNotNull(job.id) { "저장되지 않은 job은 재시도할 수 없습니다." }
+        val jobId = job.persistedId
         val updated = jobRepository.incrementAttemptForRetry(jobId, job.attemptNo, Instant.now())
         if (updated == 0) {
             log.info("재시도 투입 경쟁에서 밀림 또는 이미 처리됨: jobId={}, attemptNo={}", jobId, job.attemptNo)
@@ -59,7 +59,7 @@ class JobLifecycleService(
 
     @Transactional
     fun finalRefund(job: Job) {
-        val jobId = requireNotNull(job.id) { "저장되지 않은 job은 환불할 수 없습니다." }
+        val jobId = job.persistedId
         val updated = jobRepository.transitionIfStatusAndAttemptMatch(
             jobId, JobStatus.REFUNDED, JobStatus.FAILED, job.attemptNo, Instant.now()
         )

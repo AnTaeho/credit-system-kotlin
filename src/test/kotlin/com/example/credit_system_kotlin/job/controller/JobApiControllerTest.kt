@@ -5,7 +5,6 @@ import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.dto.JobResponse
 import com.example.credit_system_kotlin.organization.domain.Organization
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
-import com.example.credit_system_kotlin.support.persistedId
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach

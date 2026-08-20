@@ -3,7 +3,6 @@ package com.example.credit_system_kotlin.scheduler
 import com.example.credit_system_kotlin.global.config.IdempotencyProperties
 import com.example.credit_system_kotlin.job.domain.IdempotencyKey
 import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
-import com.example.credit_system_kotlin.support.persistedId
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

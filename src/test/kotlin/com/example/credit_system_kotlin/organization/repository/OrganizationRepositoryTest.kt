@@ -1,7 +1,6 @@
 package com.example.credit_system_kotlin.organization.repository
 
 import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.support.persistedId
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

@@ -45,7 +45,7 @@ class HoldService(
 
         deductBalance(organizationId, cost)
         val job = jobRepository.save(Job.hold(organizationId, cost, prompt))
-        val jobId = requireNotNull(job.id) { "저장된 job에 id가 없습니다: organizationId=$organizationId" }
+        val jobId = job.persistedId
 
         attachIdemKeyToJob(organizationId, idemKey, jobId)
 

@@ -24,6 +24,13 @@ class Job private constructor(
     var id: Long? = null
         protected set
 
+    /**
+     * persist 이후에만 유효한 id. 저장된 엔티티를 다루는 자리에서는 이쪽을 쓴다.
+     * `id` 는 JPA가 persist 전 상태를 표현해야 해서 nullable로 남아 있을 뿐이다.
+     */
+    val persistedId: Long
+        get() = requireNotNull(id) { "아직 저장되지 않은 Job입니다." }
+
     @Column(nullable = false)
     var organizationId: Long = organizationId
         protected set

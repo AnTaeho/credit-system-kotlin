@@ -62,7 +62,7 @@ class GenerationWorker(
     private fun claim(job: Job): Boolean {
         return try {
             val updated = jobRepository.startProcessingIfAttemptMatches(
-                requireNotNull(job.id), job.attemptNo, Instant.now()
+                job.persistedId, job.attemptNo, Instant.now()
             )
             if (updated == 0) {
                 log.info("다른 워커가 선점했거나 무효한 작업 무시: jobId={}, attemptNo={}", job.id, job.attemptNo)
@@ -93,7 +93,7 @@ class GenerationWorker(
     private fun rollbackToHolding(job: Job) {
         try {
             jobRepository.transitionIfStatusAndAttemptMatch(
-                requireNotNull(job.id), JobStatus.HOLDING, JobStatus.PROCESSING, job.attemptNo, Instant.now()
+                job.persistedId, JobStatus.HOLDING, JobStatus.PROCESSING, job.attemptNo, Instant.now()
             )
         } catch (e: RuntimeException) {
             log.error("선점 롤백 실패, timeout 회수 대기: jobId={}, attemptNo={}", job.id, job.attemptNo, e)

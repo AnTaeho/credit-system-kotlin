@@ -65,7 +65,7 @@ class DeadJobSchedulerTask(
         )
         for (job in stalled) {
             try {
-                val jobId = requireNotNull(job.id) { "저장되지 않은 job이 조회되었습니다." }
+                val jobId = job.persistedId
                 if (heartbeatRegistry.hasLiveHeartbeat(jobId, job.attemptNo)) {
                     continue
                 }
