@@ -56,25 +56,5 @@ allOpen {
 }
 
 tasks.named<Test>("test") {
-	useJUnitPlatform {
-		excludeTags("benchmark")
-	}
-}
-
-tasks.register<Test>("benchmark") {
-	useJUnitPlatform {
-		includeTags("benchmark")
-	}
-	testClassesDirs = sourceSets["test"].output.classesDirs
-	classpath = sourceSets["test"].runtimeClasspath
-	outputs.upToDateWhen { false }
-	System.getProperties().forEach { key, value ->
-		if (key.toString().startsWith("bench.")) {
-			systemProperty(key.toString(), value)
-		}
-	}
-	testLogging {
-		showStandardStreams = true
-		events("passed", "failed")
-	}
+	useJUnitPlatform()
 }

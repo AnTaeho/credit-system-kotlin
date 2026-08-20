@@ -4,7 +4,7 @@
 대상: `credit_system` (Java) → `credit-system-kotlin` (Kotlin)
 
 현재 상태: **이식 완료.** `src/main` 과 테스트 4개 계층을 모두 옮겼다.
-`test` 태스크 28개 클래스 / 137 테스트 통과 + `benchmark` 태스크 2개 실행 확인.
+`./gradlew test` 27개 클래스 / 133 테스트 통과.
 
 > 2026-08-20 갱신: 이 시점부터 git 저장소로 관리한다 (`5d39be6` 이 이식 작업본 첫 커밋).
 
@@ -319,8 +319,8 @@ testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")   // 필수에 가
 
 **→ 현행 유지로 확정** (2026-08-20). 직접 래퍼를 만들 수도 있지만,
 Mockito 매처의 null 반환을 Kotlin 타입 시스템에 맞추는 코드를 손으로 관리하는 쪽이
-의존성 한 줄보다 비싸다. 이식 이후 `DeadJobSchedulerTaskTest`(11개),
-`WorkerBatchSizeBenchmark` 도 전부 이 라이브러리를 쓰고 있어 실사용 근거도 늘었다.
+의존성 한 줄보다 비싸다. `GenerationWorkerUnitTest`, `GenerationJobProcessorTest`,
+`HeartbeatRegistryTest`, `DeadJobSchedulerTaskTest` 4개 파일이 쓰고 있다.
 
 #### 부기: 실제로 Java에 없는 의존성은 6개다
 
@@ -423,25 +423,33 @@ fun appProperties(
 | 순수 단위 | 9 | ✅ 56 테스트 통과 |
 | Spring/JPA 통합 | 13 | ✅ 72 테스트 통과 (+ 컨트롤러 1개 신규 = 73) |
 | 동시성(Testcontainers) | 6 | ✅ 5 테스트 통과 (실제 MySQL 8.4 / Redis 7) |
-| 벤치마크 | 10 | ✅ 이식 완료. `benchmark` 태스크로 실측 확인 |
+| ~~벤치마크~~ | ~~10~~ | **이식했다가 삭제** (아래) |
 
-`test` 태스크 합계 28개 클래스 / 137 테스트 통과. **남은 이식 대상 없음.**
+합계 27개 클래스 / 133 테스트 통과. **남은 이식 대상 없음.**
 
-### 벤치마크 실행 방법
+### 벤치마크는 삭제했다 (2026-08-20)
 
-```bash
-./gradlew benchmark                       # 기본값
-./gradlew benchmark -Dbench.requests=300 -Dbench.concurrency=1,8 \
-                    -Dbench.window-seconds=2 -Dbench.durations=200 -Dbench.batch-sizes=1,4
-```
+Java 원본의 벤치마크 10파일(`BalanceStrategyBenchmark`, `WorkerBatchSizeBenchmark`,
+`BenchmarkHarness` 와 잔액 차감 전략 3종 등)을 이식해 실제 MySQL에서 한 번 돌려 본 뒤,
+**이 프로젝트에 필요하지 않다고 판단해 지웠다.**
 
-`build.gradle.kts` 의 `benchmark` 태스크가 `bench.` 로 시작하는 시스템 프로퍼티를
-테스트 JVM으로 넘겨준다. Docker 데몬이 필요하다.
+같이 없앤 것: `build.gradle.kts` 의 `benchmark` 태스크,
+`test` 태스크의 `excludeTags("benchmark")`.
+의존성은 하나도 지우지 않았다 — awaitility·mockito-kotlin·testcontainers는
+모두 다른 테스트가 쓰고 있다.
 
-`@Tag("benchmark")` 가 붙은 `BalanceStrategyBenchmark` / `WorkerBatchSizeBenchmark` 만
-이 태스크에서 돌고 `test` 에서는 제외된다. **`BenchmarkHarnessTest` 는 태그가 없어**
-평소 `test` 에 포함된다 — 하네스 자체를 in-memory 가짜 전략으로 검증하는 순수 단위 테스트라
-Java 원본에서도 그렇게 되어 있다.
+되살리려면 커밋 `10932b4` (`test: 벤치마크를 이식한다`)에서 꺼내면 된다.
+그 커밋 시점에는 두 벤치마크 모두 실제 MySQL 8.4에서 정상 동작했다.
+
+측정으로 확인했던 것 (기록용):
+
+- 잔액 차감 3전략 중 `optimistic-lock` 은 동시성이 오르면 무너진다.
+  동시성 100에서 5,000건 중 2,190건만 성공, 재시도 140,749회, p99 1.07초.
+  `conditional-update` / `pessimistic-lock` 은 100까지 유지된다.
+  **셋 다 최종 잔액은 한 번도 어긋나지 않았다.**
+- 워커는 `min(batch-size, concurrency)` 가 한 주기 처리량 상한이라
+  batch-size를 concurrency 이상으로 키워도 소용이 없다.
+  Java 원본의 `perf: size the worker batch to what one poll can dispatch` 와 같은 결론.
 
 ### 동시성 계층 실행 조건
 
@@ -470,24 +478,22 @@ Java 원본처럼 `@AfterEach` 정리가 없어도 간섭하지 않는다.
 
 ---
 
-## 부록 4: 벤치마크에서 Java와 다르게 한 것
+## 부록 4: 벤치마크 이식에서 배운 것 (코드는 삭제됨)
 
-**1. `OptimisticLockStrategy` 의 3갈래 결과를 enum으로 바꿨다.**
-Java는 한 번의 시도 결과를 `Boolean` 의 `true`(성공) / `false`(버전 충돌, 재시도) /
-`null`(잔액 부족, 즉시 포기)로 구분했다. Kotlin에서 `Boolean?` 를 트랜잭션 콜백 밖으로
-흘리면 세 갈래가 전혀 읽히지 않아 `AttemptResult { SUCCESS, CONFLICT, INSUFFICIENT }` 로
-바꿨다. **분기 조건과 재시도 횟수 계산은 원본과 동일하다.**
+벤치마크 코드 자체는 지웠지만, 이식하며 밟은 함정 중 **Kotlin 일반에 해당하는 것**만 남긴다.
 
-**2. `seedBacklog` 의 INSERT에서 `result_url` 컬럼을 뺐다.**
-Java는 그 자리에 `null` 을 넘겼는데, Kotlin에서 `jdbcTemplate.batchUpdate` 는
-`List<Array<Any>>` (원소 non-null)를 요구한다. `result_url` 은 nullable 컬럼이라
-INSERT 목록에서 빼면 그대로 NULL 이 들어가므로 결과가 같고, 언체크 캐스트도 피할 수 있다.
+**`queryForObject` 에는 `Long::class.javaObjectType` 을 써야 한다.**
+Kotlin에서 `Long::class.java` 는 **primitive `long.class`** 라
+Spring JDBC가 기대하는 박싱 타입이 아니다. 지금 이 저장소에 `JdbcTemplate` 사용처는
+없지만, 나중에 쓰게 되면 반드시 걸리는 자리다.
 
-**3. `queryForObject` 에 `Long::class.javaObjectType` 를 쓴다.**
-Kotlin에서 `Long::class.java` 는 **primitive `long.class`** 로, Spring JDBC가 기대하는
-박싱 타입이 아니다. 이건 벤치마크만의 문제가 아니라 Kotlin + Spring JDBC 전반의 함정이다.
+**`jdbcTemplate.batchUpdate` 는 `List<Array<Any>>` (원소 non-null)를 요구한다.**
+Java처럼 `null` 을 섞으려면 언체크 캐스트가 필요하다.
+nullable 컬럼이면 INSERT 목록에서 빼는 편이 깨끗하다.
 
-**4. `DeductStrategy.name()` 을 `val name` 으로 바꿨다.** Kotlin 프로퍼티 관례를 따랐다.
+나머지(전략 인터페이스를 `val name` 으로 바꾼 것, 3갈래 결과를 `Boolean?` 대신
+enum으로 바꾼 것)는 삭제된 코드에만 해당하므로 함께 지웠다.
+필요하면 커밋 `10932b4` 에 그대로 있다.
 
 ---
 
