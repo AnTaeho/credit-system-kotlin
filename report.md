@@ -326,21 +326,30 @@ Mockito 매처의 null 반환을 Kotlin 타입 시스템에 맞추는 코드를 
 
 제목이 "2개"였지만 대조해 보니 다음 6개다.
 
-| 의존성 | 성격 |
-|---|---|
-| `mockito-kotlin` | **의도한 추가.** 위 사유 |
-| `kotlin-reflect` | Kotlin + Spring 필수. 선택의 여지 없음 |
-| `kotlin-test-junit5` | Kotlin 프로젝트 생성 시 기본 |
-| `spring-boot-starter-validation` (+ `-test`) | **현재 미사용** |
-| `spring-boot-h2console` | **현재 미사용** |
+제목이 "2개"였지만 대조해 보니 6개였고, 그중 3줄은 **미사용이라 지웠다** (2026-08-20).
 
-뒤의 둘은 Spring Initializr가 붙여 준 것이지 이식 과정에서 고른 게 아니다.
-Bean Validation은 A-4에서 **의도적으로 쓰지 않기로** 했으므로
-(`jakarta.validation` / `@Valid` / `@field:NotBlank` 사용처 0곳) `starter-validation` 은
-앞으로도 쓸 계획이 없고, `h2console` 도 설정이 없다(`application.yml` 에 항목 0곳).
+| 의존성 | 성격 | 현재 |
+|---|---|---|
+| `mockito-kotlin` | **의도한 추가.** 위 사유 | 유지 |
+| `kotlin-reflect` | Kotlin + Spring 필수. 선택의 여지 없음 | 유지 |
+| `kotlin-test-junit5` | Kotlin 프로젝트 생성 시 기본 | 유지 |
+| `spring-boot-starter-validation` (+ `-test`) | Initializr 기본값, 미사용 | **삭제** |
+| `spring-boot-h2console` | Initializr 기본값, 미사용 | **삭제** |
 
-**정리해도 되지만 이번 결정 범위 밖이라 손대지 않았다.** 지우려면 3줄 삭제 후
-`./gradlew test` 로 확인하면 된다. Java 원본에도 없는 것들이라 이식 충실도와도 무관하다.
+삭제한 둘은 Spring Initializr가 붙여 준 것이지 이식 과정에서 고른 게 아니다.
+Bean Validation은 A-4에서 **의도적으로 쓰지 않기로** 했고
+(`jakarta.validation` / `@Valid` / `@field:NotBlank` 사용처 0곳),
+`h2console` 도 `application.yml` 에 설정 항목이 0곳이었다.
+
+삭제 후 확인한 것:
+
+- `./gradlew clean test` 137개 통과 (컨텍스트 로딩·웹 컨트롤러·동시성 포함)
+- `hibernate-validator` / `jakarta.validation` 이 **전이 의존으로도 들어오지 않는다** —
+  즉 선언만 지운 게 아니라 실제로 클래스패스에서 빠졌다
+- H2 드라이버(`com.h2database:h2`)는 그대로다. 테스트 DB라 필요하고,
+  지운 것은 콘솔 UI 오토컨피그(`spring-boot-h2console`)일 뿐이다
+
+Java 원본에도 없던 것들이라 이식 충실도와는 무관하다.
 
 ---
 
