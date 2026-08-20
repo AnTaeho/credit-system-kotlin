@@ -140,6 +140,55 @@ val Organization.persistedId: Long get() = requireNotNull(id) { "저장되지 �
 
 ---
 
+### B-1 선택지별 실제 변경 범위 (2026-08-20 측정)
+
+(b)와 (c)는 스파이크 브랜치에서 **실제로 적용해 전체 테스트를 돌려 본** 수치다.
+둘 다 137개 테스트가 모두 통과했다. (d)는 시그니처 추적으로만 판단했다.
+
+| | main 변경 | test 변경 | 전체 테스트 | 숨은 비용 |
+|---|---|---|---|---|
+| (a) 현행 | 0 | 0 | 137 ✅ | `requireNotNull` 8곳 + 테스트 헬퍼 유지 |
+| **(b) 엔티티 접근자** | 9파일 +20 −8 | 17파일 **−38 (삭제만)** | 137 ✅ | `id` / `persistedId` 공존 |
+| **(c) 백킹 필드 은닉** | 9파일 +24 −16 | 20파일 +159 −197 | 137 ✅ | 아래 함정 3개 |
+| (d) 리포지토리 개방 | — | — | 미측정 | 8곳 중 3곳은 **해결 불가** |
+
+**(b)의 핵심**: 테스트 173개 호출부가 **한 글자도 바뀌지 않는다.** 이름을 미리 맞춰 둔 덕에
+test 쪽 변경은 `import` 16줄과 `PersistedId.kt` 삭제뿐이다.
+
+**(c)에서 실제로 밟은 함정 3개**
+
+1. **`@Column(name = "id")` 가 필수다.** 빼면 컬럼명이 `_id` 로 생성된다
+   (H2 DDL로 확인). 테스트는 `ddl-auto: create-drop` 이라 그래도 통과하지만
+   **기존 MySQL 스키마와 어긋난다.** 조용히 통과하는 게 더 위험하다.
+2. **`ReflectionTestUtils.setField(job, "id", ...)` 가 깨진다.** 7곳/3파일.
+   컴파일은 통과하고 **실행 시점에** `Could not find field 'id'` 로 19개가 무더기로 실패했다.
+3. **`job.id` 를 읽는 것 자체가 예외를 던질 수 있게 된다.** catch 블록 안의
+   `log.warn(..., job.id, ...)` 5곳이 여기 해당한다. 지금은 전부 DB에서 읽은 job이라
+   안전하지만, **에러 핸들러가 원래 예외를 가리며 터질 수 있는 자리**가 5곳 생긴다.
+   (a)/(b)에서는 nullable이라 `null` 로 찍히고 끝난다.
+
+반면 JPQL은 손댈 필요가 없었다. 필드가 `_id` 여도 Hibernate가 선행 언더스코어를 떼고
+속성명을 `id` 로 잡아 `WHERE j.id = :jobId` 가 그대로 동작한다.
+
+**(d)가 안 되는 이유**: jobId가 리포지토리로만 흘러가는 자리는 8곳 중 5곳뿐이다.
+나머지 3곳은 non-null을 요구하는 곳으로 이어져 `requireNotNull` 이 그대로 남는다.
+
+| 자리 | 막는 대상 |
+|---|---|
+| `HoldService` | `HoldResult(jobId: Long)` — API 응답 DTO |
+| `GenerationJobProcessor` | `HeartbeatRegistry.startHeartbeat(jobId: Long)` → `JobAttempt` (Redis 멤버 문자열) |
+| `DeadJobSchedulerTask` | `hasLiveHeartbeat(jobId: Long)` / `removeHeartbeat(jobId: Long)` |
+
+게다가 `WHERE j.id = :jobId` 에 null이 들어가면 예외가 아니라 **0행 매칭으로 조용히 지나간다.**
+
+**참고**: `id` 가 null인지 묻는 코드는 main·test 통틀어 **0곳**이다.
+(c)가 잃는 "저장 여부를 밖에서 묻는" 기능을 지금 쓰는 데는 없다.
+
+**B-2 연동**: (b)와 (c) 모두 `JobResponse.from` / `LedgerResponse.from` 이 non-null id를
+넘길 수 있게 되므로 B-2를 함께 닫을 수 있다.
+
+---
+
 ### B-2. 응답 DTO의 nullable `id` — JSON 계약 문제
 
 ```kotlin
