@@ -1,0 +1,53 @@
+spring:
+  application:
+    name: credit_system
+  datasource:
+    url: jdbc:mysql://localhost:3306/credit_system_k
+    username: root
+    password: an902318
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2s
+      connect-timeout: 2s
+  task:
+    scheduling:
+      pool:
+        size: 4
+
+app:
+  scheduling:
+    enabled: true
+    reconciliation-interval-millis: 60000
+    idempotency-cleanup-interval-millis: 3600000
+  idempotency:
+    retention-days: 7
+  worker:
+    enabled: true
+    batch-size: 3
+    concurrency: 3
+  generation:
+    cost: 100
+    max-attempts: 3
+  stub:
+    failure-rate: 0.3
+    min-delay-millis: 3000
+    max-delay-millis: 7000
+  heartbeat:
+    timeout-seconds: 10
+    refresh-interval-seconds: 5
+    suppression-alert-seconds: 60
+  processing:
+    timeout-seconds: 60
+
+logging:
+  level:
+    com.example.credit_system_kotlin: info

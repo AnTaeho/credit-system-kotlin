@@ -1,0 +1,35 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:credit_test;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+    hikari:
+      connection-timeout: 5000
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+
+app:
+  scheduling:
+    enabled: false
+  idempotency:
+    retention-days: 7
+  worker:
+    enabled: false
+    batch-size: 3
+    concurrency: 3
+  generation:
+    cost: 100
+    max-attempts: 3
+  stub:
+    failure-rate: 0.0
+    min-delay-millis: 0
+    max-delay-millis: 0
+  heartbeat:
+    timeout-seconds: 10
+    refresh-interval-seconds: 5
+    suppression-alert-seconds: 60
+  processing:
+    timeout-seconds: 60
