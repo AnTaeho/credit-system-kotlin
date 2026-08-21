@@ -27,7 +27,9 @@ import java.time.Instant
 class DeadJobSchedulerTaskTest {
 
     @Mock lateinit var heartbeatRegistry: HeartbeatRegistry
+
     @Mock lateinit var jobRepository: JobRepository
+
     @Mock lateinit var jobLifecycleService: JobLifecycleService
 
     private lateinit var task: DeadJobSchedulerTask

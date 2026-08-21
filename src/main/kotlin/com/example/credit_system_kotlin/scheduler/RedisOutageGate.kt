@@ -52,7 +52,7 @@ class RedisOutageGate internal constructor(
         }
         log.error(
             "Redis 장애가 {}초째 지속 중입니다. PROCESSING job 회수가 그동안 계속 억제되고 있습니다. " +
-                    "Redis가 복구될 때까지 만료 job은 FAILED로 전이되지 않고 재시도·환불도 지연됩니다.",
+                "Redis가 복구될 때까지 만료 job은 FAILED로 전이되지 않고 재시도·환불도 지연됩니다.",
             Duration.between(startedAt, now).seconds
         )
     }

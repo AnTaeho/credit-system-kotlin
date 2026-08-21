@@ -14,6 +14,14 @@ data class JobResponse(
 ) {
     companion object {
         fun from(job: Job): JobResponse =
-            JobResponse(job.persistedId, job.status.name, job.attemptNo, job.holdAmount, job.prompt, job.resultUrl, job.updatedAt)
+            JobResponse(
+                job.persistedId,
+                job.status.name,
+                job.attemptNo,
+                job.holdAmount,
+                job.prompt,
+                job.resultUrl,
+                job.updatedAt
+            )
     }
 }

@@ -33,6 +33,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor
 class HeartbeatRegistryTest {
 
     @Mock lateinit var redisTemplate: StringRedisTemplate
+
     @Mock lateinit var zSetOperations: ZSetOperations<String, String>
 
     private lateinit var registry: HeartbeatRegistry

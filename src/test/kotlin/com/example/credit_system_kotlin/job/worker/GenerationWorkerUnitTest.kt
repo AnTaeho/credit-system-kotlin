@@ -28,6 +28,7 @@ import java.time.Instant
 class GenerationWorkerUnitTest {
 
     @Mock lateinit var jobRepository: JobRepository
+
     @Mock lateinit var jobProcessor: GenerationJobProcessor
 
     private lateinit var worker: GenerationWorker

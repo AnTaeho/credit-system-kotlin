@@ -23,8 +23,11 @@ import java.util.concurrent.ScheduledFuture
 class GenerationJobProcessorTest {
 
     @Mock lateinit var heartbeatRegistry: HeartbeatRegistry
+
     @Mock lateinit var stubClient: GenerationStubClient
+
     @Mock lateinit var jobLifecycleService: JobLifecycleService
+
     @Mock lateinit var heartbeatFuture: ScheduledFuture<*>
 
     private lateinit var processor: GenerationJobProcessor

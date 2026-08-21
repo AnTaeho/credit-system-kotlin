@@ -39,8 +39,8 @@ class GenerationWorker(
         if (batchSize < concurrency) {
             log.warn(
                 "worker batch-size({})가 concurrency({})보다 작아 한 폴링 주기에 executor 슬롯을 " +
-                        "전부 채우지 못합니다. job 처리 시간이 폴링 주기({}ms)보다 충분히 길면 문제되지 않지만, " +
-                        "짧아지면 남는 슬롯만큼 스레드가 놀게 됩니다.",
+                    "전부 채우지 못합니다. job 처리 시간이 폴링 주기({}ms)보다 충분히 길면 문제되지 않지만, " +
+                    "짧아지면 남는 슬롯만큼 스레드가 놀게 됩니다.",
                 batchSize, concurrency, pollIntervalMillis
             )
         }

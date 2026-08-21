@@ -13,7 +13,9 @@ import java.time.Instant
 @Entity
 @Table(
     name = "idempotency_keys",
-    uniqueConstraints = [UniqueConstraint(name = "uk_idempotency_org_key", columnNames = ["organizationId", "idemKey"])],
+    uniqueConstraints = [
+        UniqueConstraint(name = "uk_idempotency_org_key", columnNames = ["organizationId", "idemKey"])
+    ],
     indexes = [Index(name = "idx_idem_created_at", columnList = "createdAt")]
 )
 class IdempotencyKey(

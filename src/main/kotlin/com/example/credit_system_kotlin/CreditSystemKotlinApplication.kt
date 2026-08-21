@@ -13,5 +13,5 @@ import org.springframework.scheduling.annotation.EnableScheduling
 class CreditSystemKotlinApplication
 
 fun main(args: Array<String>) {
-	runApplication<CreditSystemKotlinApplication>(*args)
+    runApplication<CreditSystemKotlinApplication>(*args)
 }

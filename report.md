@@ -748,6 +748,121 @@ e: WorkerExecutorConfig.kt:18:13 'val' cannot be reassigned.
 
 ---
 
+## I. ktlint 도입 (2026-08-21)
+
+H-6에서 "120자 넘는 줄 20개인데 강제 규칙이 없다"고 남긴 걸 처리했다.
+**그 20개라는 숫자부터 틀렸다는 걸 이번에 알았다 — I-6 참고.**
+
+- 플러그인: `org.jlleitschuh.gradle.ktlint` 14.2.0
+- ktlint 본체: 1.8.0
+- `check` 태스크가 `ktlintCheck` 에 의존한다(플러그인 기본값). 즉 `./gradlew check` 로 잡힌다.
+- 검사 범위는 `src/main`, `src/test`, 그리고 **빌드 스크립트까지** 3개다.
+
+### I-1. 규칙 범위를 "위생 검사"로 좁혔다 — 실측으로 정했다
+
+붙이기 전에 코드 스타일 3안의 위반 건수를 실제로 재 봤다.
+
+| 안 | 위반 | 성격 |
+|---|---:|---|
+| `ktlint_official` (max 140) | **355** | 코드베이스 전반을 다시 짜야 함 |
+| `intellij_idea` 기본값 (max 120) | **185** | 자동수정이 59파일 +441/−267 을 바꾸고도 수렴 안 함 |
+| **위생 규칙만 (채택)** | **17** | 전부 진짜 문제, 30줄 안팎으로 해소 |
+
+> 처음엔 위생 규칙안의 위반을 10건으로 셌는데 실제로는 17건이었다.
+> `ktlintCheck` 는 `ktlintMainSourceSetCheck` 가 실패하면 거기서 빌드를 멈춘다.
+> `--continue` 를 안 붙여 **`src/test` 소스셋이 아예 검사되지 않은 채로 집계**한 것이다.
+> 소스셋별 위반을 셀 때는 `--continue` 를 붙여라.
+
+`intellij_idea` 기본값으로 `ktlintFormat` 을 실제로 돌려봤더니 이런 변형이 나왔다:
+
+```kotlin
+- class LedgerReconciliationTask(
+-     private val ledgerRepository: LedgerRepository
+- ) {
++ class LedgerReconciliationTask(private val ledgerRepository: LedgerRepository) {
+```
+
+**린터의 값어치는 여기서 대량 리포맷이 아니라 앞으로의 드리프트를 막는 데 있다.**
+이미 A~H를 거치며 의도적으로 다듬어 둔 코드를 도구 취향으로 다시 흔들 이유가 없다.
+그래서 "사람이 정하는 것"과 "기계가 지켜야 하는 것"을 갈라, 전자를 껐다.
+
+### I-2. 끈 규칙과 그 이유
+
+| 규칙 | 이유 |
+|---|---|
+| `package-name` | 패키지가 `credit_system_kotlin` 이다. **자동 수정 불가**이고, JPQL 문자열에 FQ 패키지명이 박혀 있어(`com.example.credit_system_kotlin.job.domain.JobStatus.PROCESSING`) 개명은 위험하다. 47건 |
+| `class-signature`, `function-signature` | 선언을 몇 줄로 쪼갤지는 사람이 정한다. B-3에서 확정한 엔티티 스타일과도 충돌한다 |
+| `argument-list-wrapping` | 한국어 로그 인자를 의미 단위로 묶어 둔 걸 인자마다 한 줄로 흩뜨린다 |
+| `trailing-comma-on-call-site`, `trailing-comma-on-declaration-site` | 이 코드베이스는 후행 콤마를 쓰지 않는다 |
+| `enum-wrapping`, `function-expression-body` | 취향 |
+
+**켜 둔 것**: `indent`, `max-line-length`(120), `no-wildcard-imports`, `import-ordering`,
+`final-newline`, `spacing-between-declarations-with-annotations`, 그 밖의 공백·줄바꿈 위생 규칙.
+
+실제로 무엇이 잡히는지는 **일부러 위반을 넣어 확인했다**(확인 후 복구):
+
+| 넣은 것 | 결과 |
+|---|---|
+| 탭 들여쓰기 | 잡힘 (`indent`) |
+| ASCII 123자 줄 | 잡힘 (`max-line-length`) |
+| `import java.time.*` | 잡힘 (`no-wildcard-imports`) |
+| `import java.util.*` | **안 잡힘** — ktlint 기본 허용 목록(`packages_to_use_import_on_demand`)에 들어 있다 |
+| 임포트 순서 뒤바꿈 | 잡힘 (`import-ordering`) |
+| 미사용 임포트 2개 | **안 잡힘** — `NoUnusedImportsRule` 이 룰셋 jar 에는 있지만 발동하지 않는다 |
+
+> **미사용 임포트는 이 설정으로 안 잡힌다.** 코틀린 컴파일러도 경고하지 않으므로
+> 여전히 IDE나 사람 눈에 의존한다. F-4에서 미사용 import 를 손으로 찾아낸 상황이 반복될 수 있다.
+
+### I-3. 해소한 위반 17건
+
+| 자리 | 내용 |
+|---|---|
+| `CreditSystemKotlinApplication.kt:16` | **G-4에서 "1줄이라 그냥 뒀다"고 넘긴 Initializr 탭.** 린터가 바로 잡아냈다 |
+| `AppProperties.kt:31,32` / `GenerationWorker.kt:42,43` / `RedisOutageGate.kt:55` | 문자열을 `+` 로 이어붙일 때 이어지는 줄을 4칸 더 들여쓴 자리 (24 → 20, 20 → 16) |
+| `IdempotencyKey.kt:16` | `@Table` 의 `uniqueConstraints` 121자 |
+| `JobResponse.kt:17` | `JobResponse(...)` 생성자 호출 130자 |
+| `IdempotencyKeyRepository.kt:17` | `@Query` JPQL 124자. **다른 리포지토리 3개가 이미 쓰는 삼중따옴표 여러 줄 형태로 맞췄다** |
+
+추가로 **`src/test` 에서 7건** — `@Mock lateinit var` 선언들이 빈 줄 없이 붙어 있던 자리다
+(`spacing-between-declarations-with-annotations`). 테스트 4개 파일에 빈 줄 7개가 들어갔다.
+
+들여쓰기 7건과 테스트 7건은 `ktlintFormat` 이 자동 수정했고,
+120자 초과 3건은 자동 수정이 안 돼 손으로 줄바꿈했다.
+
+### I-4. 빌드 스크립트도 검사 대상에 넣었다
+
+`build.gradle.kts` 는 Initializr 가 만든 탭 들여쓰기였다. `.kts` 를 검사에서 빼는 대신
+**4칸 공백으로 변환해 검사 대상에 그대로 뒀다.** 이제 프로젝트에 탭이 한 곳도 없다.
+
+### I-5. `.editorconfig` 가 새로 생겼다
+
+ktlint 설정은 전부 `.editorconfig` 에 있다(플러그인이 아니라 ktlint 본체가 읽는다).
+`[*]` 섹션에 `charset`/`end_of_line`/`insert_final_newline`/`trim_trailing_whitespace` 도 함께 뒀다 —
+IDE 와 린터가 같은 파일을 보게 하려는 것이다. `.gitattributes` 의 `eol=lf` 와도 어긋나지 않는다.
+
+> 주의: 규칙을 더 끄고 싶어질 때 `.editorconfig` 를 손대는 것으로 위반을 없애지 마라.
+> I-1의 판단(위생 규칙은 기계가 지킨다)이 무너진다.
+
+### I-6. `awk length` 로 줄 길이를 세면 안 된다 — H-6이 틀렸다
+
+H-6에 "120자 넘는 줄 20개"라고 적었다. **틀렸다. 실제로는 3줄이다.**
+
+`awk 'length>120'` 이 로케일에 따라 **바이트**를 센다. 한글은 UTF-8 에서 글자당 3바이트라
+한국어 로그 메시지가 3배로 부풀려진다. ktlint 는 **문자**를 센다.
+
+같은 커밋(`a8c1368`)의 `src/main` 을 두 방식으로 세어 보면:
+
+| 기준 | 결과 |
+|---|---|
+| 120 **바이트** 초과 (`awk length`) | 20줄 |
+| 120 **문자** 초과 (ktlint) | **3줄** |
+
+한국어가 섞인 코드베이스에서 줄 길이를 잴 때는 문자 단위로 세야 한다.
+`python3` 의 `len(line)` 이나 ktlint 자체를 쓰는 게 맞다.
+"터미널에서 넓어 보이는 것"과도 다르다 — 한글은 표시 폭이 2칸이라 눈으로도 과대평가된다.
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.

@@ -1,0 +1,35 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{kt,kts}]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+# 이 저장소는 ktlint 를 "위생 검사"로만 쓴다. 포매팅 취향 규칙은 끈다.
+# 근거는 report.md I 절 참고.
+ktlint_code_style = intellij_idea
+
+# 패키지명이 credit_system_kotlin 이다. 자동 수정이 불가능하고,
+# JPQL 문자열에 FQ 패키지명이 박혀 있어 개명은 위험하다.
+ktlint_standard_package-name = disabled
+
+# 선언·호출을 몇 줄로 쪼갤지는 사람이 정한다.
+ktlint_standard_class-signature = disabled
+ktlint_standard_function-signature = disabled
+ktlint_standard_function-expression-body = disabled
+ktlint_standard_argument-list-wrapping = disabled
+ktlint_standard_enum-wrapping = disabled
+
+# 후행 콤마는 이 코드베이스가 쓰지 않는다.
+ktlint_standard_trailing-comma-on-call-site = disabled
+ktlint_standard_trailing-comma-on-declaration-site = disabled
+
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
