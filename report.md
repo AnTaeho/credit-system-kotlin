@@ -1059,6 +1059,64 @@ PROCESSING을 유지한다` 는 `QueryTimeoutException("lock wait timeout")`
 
 ---
 
+## L. 예외 처리가 본 흐름을 덮던 것을 걷어냈다 (2026-08-21)
+
+`runGeneration` 안에 try가 3겹으로 중첩돼 있었다. "heartbeat 켜고 → 생성하고 →
+확정하고 → heartbeat 끈다"는 본 흐름이 눈에 보이질 않았다. 문제는 예외 처리량
+자체가 아니었다 — try/catch 다섯 개가 파일 전체에 퍼져 있는 건 이 작업 이후에도
+크게 다르지 않다. 문제는 **본 흐름이 예외 처리 안에 파묻혀 있었다**는 것이다.
+`runGeneration` 을 읽으려면 바깥 try, 그 안의 생성 try, 그 안의 confirm try를
+동시에 눈에 담아야 본문이 뭘 하는지 알 수 있었다.
+
+해법의 핵심은 `confirmWithRetry` 가 예외를 던지지 않고 최종 실패까지 스스로
+처리하게 바꾼 것이다. 지금까지는 재시도를 다 써도 마지막 예외를 던졌고,
+`runGeneration` 이 그걸 받아 `log.error` 를 남기는 구조였다. 그런데 최종 실패를
+어떻게 로그로 남길지 판단하는 데 필요한 정보 — 몇 번째 시도였는지, 재시도
+가능한 예외였는지 — 는 전부 `confirmWithRetry` 안에 이미 있다. 그 정보를
+예외 하나에 실어 호출부로 올려보낸 뒤 호출부가 다시 로그를 남기는 건 우회였다.
+**실패를 처리할 정보를 다 가진 쪽이 처리하면 호출부가 깨끗해진다.** `confirmWithRetry`
+가 최종 실패 시점에 바로 `log.error` 를 남기고 조용히 반환하니, `runGeneration`
+쪽의 try/catch가 통째로 사라졌다. 재시도 가능 여부(`isRetryable`)와 재시도
+횟수(3회)·간격(200ms)은 전혀 손대지 않았다 — 이번 리팩터링은 그 판정 로직을
+감싸는 껍데기 구조만 바꿨다.
+
+생성 단계도 같은 원리로 `generateOrMarkFailed(job): String?` 로 뽑았다. 기존
+두 catch 절 — `StubGenerationException`(로그 없이 조용히) 과 그 밖의
+`RuntimeException`(`log.error` 후) — 은 하나로 합치지 않고 그대로 옮겼다.
+예상된 실패와 이상 신호를 타입으로 구분하는 게 이 코드의 의도이기 때문이다.
+`markFailed` 를 부르고 `null` 을 돌리는 이 함수의 계약은 "생성에 성공하면
+resultUrl, 실패하면 FAILED로 기록하고 null" 이라는 KDoc 한 줄로 밝혔다. 그
+계약 덕분에 `runGeneration` 본문에서는 `generateOrMarkFailed(job) ?: return`
+한 줄로 "실패했고 기록도 끝났다"는 상태 전체가 사라진다.
+
+이 구조 변경으로 `confirmWithRetry` 의 `var lastFailure: RuntimeException?` 와
+루프 끝의 `throw lastFailure ?: IllegalStateException(...)` 이 통째로 없어졌다.
+F-5에서 "elvis 오른쪽은 실제로 도달 불가한데 `lastFailure` 가 nullable이라
+컴파일러가 요구해서 남겨 둔다"고 적어 둔 바로 그 코드다. F-5의 그 판단은
+당시로선 맞았다 — 예외를 던지는 구조를 유지하는 한 nullable 변수와 도달 불가한
+분기는 불가피했다. 하지만 이번에 함수가 예외를 던지지 않는 구조로 바뀌면서
+`lastFailure` 를 들고 있을 이유 자체가 사라졌고, 그 자리에 남아 있던 어색한
+elvis 분기도 문제째로 없어졌다. F-5 항목은 지우지 않고 그대로 둔다 — 그 시점
+판단의 기록으로 남긴다.
+
+최종 실패 로그는 한 줄로 합치면서 사유를 파라미터로 넘기게 했다. K에서 재시도
+대상이 아닌 예외에 `log.error("...재시도 대상이 아니어서 즉시 포기...")` 를 따로
+남긴 이유는 "로그만 보고 왜 3번 안 돌았는지 헤매지 않게" 하려던 것이었는데,
+이번에 종료 판정이 `!retryable || attempt == CONFIRM_MAX_ATTEMPTS` 한 자리로
+합쳐지면서 그 구분이 로그에서 사라질 뻔했다. `시도=1/3` 만 봐도 일찍 멈춘 건
+알 수 있지만 왜 멈췄는지는 알 수 없다. 그래서 `실패(재시도 소진)` /
+`실패(재시도 대상 아닌 예외)` 로 사유를 찍는다. K의 의도는 그대로 살리고
+로그 줄 수만 둘에서 하나로 줄인 셈이다.
+
+동작은 하나도 바뀌지 않았다. 재시도 최대 3회, 간격 200ms, 재시도 대상 예외
+판정, 최종 실패해도 `markFailed` 를 부르지 않고 job을 PROCESSING 으로 남겨
+정체 회수에 맡기는 것, `heartbeatRegistry.stopHeartbeat` 가 반드시 불리는 것,
+실패 시 예외 객체를 `log.error` 마지막 인자로 넘겨 스택트레이스를 보존하는
+것까지 전부 그대로다. 그 증거로 `GenerationJobProcessorTest.kt` 를 한 줄도
+고치지 않고 기존 6건이 그대로 통과한다.
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.
