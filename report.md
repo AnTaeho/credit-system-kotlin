@@ -1117,6 +1117,72 @@ elvis 분기도 문제째로 없어졌다. F-5 항목은 지우지 않고 그대
 
 ---
 
+## M. confirmWithRetry 의 제어 흐름과 로그를 갈라냈다 (2026-08-21)
+
+L에서 `runGeneration` 의 본 흐름은 드러냈지만 `confirmWithRetry` 자체는 손대지
+않고 그대로 두었다. 남은 문제가 그 안에 있었다. `for` → `try` → `catch` → `if`
+→ 로그 인자까지 들여쓰기가 5겹이었고, 종료 지점이 3개인데 각각 4~6줄짜리 로그
+블록을 달고 있어서 26줄 중 13줄이 로그였다. 제어 흐름과 로그가 뒤엉켜 "언제
+멈추는가"라는 규칙 자체가 코드에서 안 읽혔다.
+
+해법은 두 가지였다. 첫째, **예외를 경계에서 값으로 바꿨다.** `confirmOnce` 가
+try/catch를 통째로 삼키고 "성공이면 null, 실패면 그 예외"를 돌려주게 하니
+재시도 루프에서 try/catch가 사라지고 평범한 제어 흐름만 남았다. 예외를 제어
+흐름으로 쓰던 자리를 nullable 반환값으로 옮긴 것이다. 둘째, 종료 사유를
+문자열 인자로 받는 `giveUp(job, attempt, reason, failure)` 하나로 3개 종료
+지점의 로그를 모았다. 지점마다 자기 로그 블록을 들고 있을 이유가 없었다.
+
+루프 본문은 이렇게 됐다.
+
+```kotlin
+for (attempt in 1..CONFIRM_MAX_ATTEMPTS) {
+    val failure = confirmOnce(job, resultUrl) ?: return
+    if (!isRetryable(failure)) {
+        return giveUp(job, attempt, "재시도 대상 아닌 예외", failure)
+    }
+    if (attempt == CONFIRM_MAX_ATTEMPTS) {
+        return giveUp(job, attempt, "재시도 소진", failure)
+    }
+    logRetrying(job, attempt, failure)
+    if (!awaitBeforeRetry()) {
+        return giveUp(job, attempt, "재시도 대기 중 인터럽트", failure)
+    }
+}
+```
+
+세 종료 지점을 처음에는 `if (조건) return giveUp(...)` 한 줄씩으로 썼다가
+중괄호를 넣어 풀었다. 한 줄로 붙이면 들여쓰기 깊이는 2겹으로 유지되지만
+조건·`return`·호출·인자 네 가지가 한 줄에 몰려 줄 자체가 빽빽해진다.
+depth를 줄이자고 시작한 일인데 줄 안에서 같은 밀도 문제를 다시 만드는 셈이다.
+깊이 한 겹을 내주고 각 줄을 단순하게 두는 쪽이 낫다 — 여기서 줄이려던 건
+들여쓰기 숫자 자체가 아니라 한 번에 눈에 담아야 하는 양이었다.
+
+L 시점에 `!retryable || attempt == CONFIRM_MAX_ATTEMPTS` 로 합쳐 뒀던 복합
+조건은 여기서 다시 두 줄로 쪼갰다. 되돌린 게 아니라 의도적인 재설계다 —
+조건마다 종료 사유가 다르므로 각 줄이 자기 사유를 직접 들고 있는 편이 읽힌다.
+"재시도 대상이 아니라서 멈췄다"와 "횟수를 다 써서 멈췄다"를 한 줄의 불리언
+연산 뒤에 감추는 대신, 줄 수를 하나 늘리는 대가로 그 둘을 눈에 보이는 별개의
+문장으로 만들었다. 줄 수는 늘었지만 읽는 비용은 줄었다. `return giveUp(...)`
+는 Unit 반환 함수를 `return` 에 실어 종료와 사유 기록을 한 문장으로 묶는
+코틀린 관용구라 `giveUp(...); return` 두 줄로 풀지 않았다.
+
+인터럽트로 멈추는 세 번째 종료 지점도 이제 `failure`(직전 confirm 시도의
+실패 예외)를 로그에 함께 넘긴다. 기존에는 인터럽트 자체에는 예외가 없으니
+메시지만 남기고 스택트레이스가 없었는데, 세 종료 지점이 같은 `giveUp` 을
+쓰면서 자연히 직전 실패의 스택트레이스가 항상 붙게 됐다. 정보가 느는 방향의
+변화라 그대로 받아들였다.
+
+결과로 `confirmWithRetry` 의 최대 들여쓰기는 5겹에서 3겹(`for` → `if` → 문장)
+으로 줄었고, 26줄이던 본문이 반으로 줄었다. 파일 안에 try는 여전히 3개 있지만
+(`confirmOnce`, `generateOrMarkFailed`, `awaitBeforeRetry`) 셋 다 5줄 안팎의
+독립된 함수 안에 하나씩만 있어 서로 중첩되지 않는다. 재시도 횟수·간격
+·`isRetryable` 판정은 전혀 손대지 않았고, 최종 실패해도 `markFailed` 를 부르지
+않고 job을 PROCESSING 으로 남겨 정체 회수에 맡기는 동작도 그대로다. 그 증거로
+`GenerationJobProcessorTest.kt` 를 한 줄도 고치지 않고 기존 6건이 그대로
+통과한다.
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.

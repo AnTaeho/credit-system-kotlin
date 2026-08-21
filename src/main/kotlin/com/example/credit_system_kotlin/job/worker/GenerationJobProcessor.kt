@@ -47,32 +47,42 @@ class GenerationJobProcessor(
 
     private fun confirmWithRetry(job: Job, resultUrl: String) {
         for (attempt in 1..CONFIRM_MAX_ATTEMPTS) {
-            try {
-                jobLifecycleService.confirm(job, resultUrl)
-                return
-            } catch (e: RuntimeException) {
-                val retryable = isRetryable(e)
-                if (!retryable || attempt == CONFIRM_MAX_ATTEMPTS) {
-                    log.error(
-                        "생성 결과 반영 실패({}), timeout 회수 대기: jobId={}, attemptNo={}, 시도={}/{}",
-                        if (retryable) "재시도 소진" else "재시도 대상 아닌 예외",
-                        job.persistedId, job.attemptNo, attempt, CONFIRM_MAX_ATTEMPTS, e
-                    )
-                    return
-                }
-                log.warn(
-                    "생성 결과 반영 실패, 재시도: jobId={}, attemptNo={}, 시도={}/{}",
-                    job.persistedId, job.attemptNo, attempt, CONFIRM_MAX_ATTEMPTS, e
-                )
+            val failure = confirmOnce(job, resultUrl) ?: return
+            if (!isRetryable(failure)) {
+                return giveUp(job, attempt, "재시도 대상 아닌 예외", failure)
             }
+            if (attempt == CONFIRM_MAX_ATTEMPTS) {
+                return giveUp(job, attempt, "재시도 소진", failure)
+            }
+            logRetrying(job, attempt, failure)
             if (!awaitBeforeRetry()) {
-                log.error(
-                    "생성 결과 반영 재시도 대기 중 인터럽트, timeout 회수 대기: jobId={}, attemptNo={}",
-                    job.persistedId, job.attemptNo
-                )
-                return
+                return giveUp(job, attempt, "재시도 대기 중 인터럽트", failure)
             }
         }
+    }
+
+    /** confirm 을 1회 시도한다. 성공하면 null, 실패하면 그 예외를 돌려준다. */
+    private fun confirmOnce(job: Job, resultUrl: String): RuntimeException? =
+        try {
+            jobLifecycleService.confirm(job, resultUrl)
+            null
+        } catch (e: RuntimeException) {
+            e
+        }
+
+    /** 결과 반영을 포기한다. job 은 PROCESSING 으로 남아 정체 회수 대상이 된다. */
+    private fun giveUp(job: Job, attempt: Int, reason: String, failure: RuntimeException) {
+        log.error(
+            "생성 결과 반영 실패({}), timeout 회수 대기: jobId={}, attemptNo={}, 시도={}/{}",
+            reason, job.persistedId, job.attemptNo, attempt, CONFIRM_MAX_ATTEMPTS, failure
+        )
+    }
+
+    private fun logRetrying(job: Job, attempt: Int, failure: RuntimeException) {
+        log.warn(
+            "생성 결과 반영 실패, 재시도: jobId={}, attemptNo={}, 시도={}/{}",
+            job.persistedId, job.attemptNo, attempt, CONFIRM_MAX_ATTEMPTS, failure
+        )
     }
 
     /** 재시도 전 대기. 인터럽트되면 플래그를 복원하고 false를 돌려 재시도를 멈춘다. */
