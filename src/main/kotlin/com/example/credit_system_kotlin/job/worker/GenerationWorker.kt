@@ -65,7 +65,7 @@ class GenerationWorker(
                 job.persistedId, job.attemptNo, Instant.now()
             )
             if (updated == 0) {
-                log.info("다른 워커가 선점했거나 무효한 작업 무시: jobId={}, attemptNo={}", job.id, job.attemptNo)
+                log.info("다른 워커가 선점했거나 무효한 작업 무시: jobId={}, attemptNo={}", job.persistedId, job.attemptNo)
                 false
             } else {
                 true

@@ -559,6 +559,71 @@ D-1과 같은 일이 또 일어났다: **`charge에 idemKey가 null이면 예외
 
 ---
 
+## G. 가벼운 재점검 (2026-08-21)
+
+F 점검 다음 날 `src/main` 을 다시 훑었다. **새로 나온 건 F가 흘린 잔재 3건뿐**이고,
+죽은 코드·미사용 import·파일 끝 개행 누락은 0건이었다.
+`--rerun-tasks` 로 강제 재컴파일해도 경고 0건, `cleanTest test` 132개 전부 통과.
+
+### G-1. `ChargeService` 의 맨 `orElseThrow()` — 예외 계층을 닫았다
+
+충전 성공 직후 잔액을 다시 읽는 자리만 `orElseThrow()` 였다.
+같은 함수 14줄 위(중복 감지 분기)는 `OrganizationNotFoundException` 인데 여기만 갈렸다.
+
+```
+- val balance = organizationRepository.findById(organizationId).orElseThrow().balance
++ val balance = organizationRepository.findById(organizationId)
++     .orElseThrow { OrganizationNotFoundException(organizationId) }
++     .balance
+```
+
+**도달 불가능한 자리다** — 바로 위 `addBalance` 가 1을 반환했으니 organization 은 반드시 있다.
+그래도 고친 이유는, 도달했을 때 `NoSuchElementException` 이 나고
+`GlobalExceptionHandler` 에 핸들러가 없어 500으로 나가기 때문이다.
+A-1·A-3에서 예외 계층을 닫은 것과 짝을 맞췄다.
+
+Java 원본 `ChargeService.java:48` 도 맨 `orElseThrow()` 라, 이식 충실성 자체는 원래 맞았다.
+
+### G-2. `job.id` 6곳 중 **1곳만** 고쳤다 — 나머지 5곳은 현행이 옳다
+
+F-4가 `GenerationJobProcessor` 의 `job.id` 만 `persistedId` 로 바꾸고
+`GenerationWorker`·`DeadJobSchedulerTask` 는 지나쳤다. 6곳이 남아 있었다.
+
+따라가 보니 **6곳 중 5곳이 `catch` 블록 안**이었다
+(`GenerationWorker:74,86,99`, `DeadJobSchedulerTask:80,97`).
+`persistedId` 는 `requireNotNull` 이라 던질 수 있고,
+하필 `GenerationWorker.claim` 은 `job.persistedId` 호출(65행) 자체가
+그 catch 로 잡혀 오는 경로다. **catch 안에서 다시 `persistedId` 를 부르면
+로그를 찍으려다 스케줄러 루프를 깨뜨린다.** nullable `job.id` 가 여기서는 옳은 선택이다.
+
+정상 경로에 있던 건 `GenerationWorker:68`(`updated == 0` 분기) 하나뿐이고,
+그 자리는 65행의 `persistedId` 가 이미 성공한 뒤라 던질 수 없다. 여기만 바꿨다.
+
+**B-1 (b)의 "nullable id 를 쓰지 않는다"는 무조건이 아니다.
+예외 경로의 로깅에는 던지지 않는 `job.id` 를 쓴다** — 이 예외를 여기 명시해 둔다.
+
+### G-3. `catch (e: StubGenerationException)` 의 `e` 미사용
+
+F가 "`catch (e:)` 22곳 모두 `e` 를 실제로 쓴다"고 적었는데 **여기 한 곳은 틀렸다.**
+stub 실패는 예상된 실패라 로깅 없이 `markFailed` 만 하고 빠지는 자리다.
+
+`catch (_: StubGenerationException)` 으로 바꿔 "일부러 안 쓴다"를 문법으로 드러냈다.
+Java 에는 `_` 가 없어 원본이 어쩔 수 없이 `e` 를 남겨 둔 자리다.
+
+### G-4. 그대로 두기로 한 것
+
+- **`application.yml` 의 `spring.application.name: credit_system`** — 사용자 판단으로 유지.
+  부록에서 `logging.level...credit_system` → `_kotlin` 으로 고친 것과 짝이 안 맞는 잔재지만,
+  죽은 설정은 아니라 실제로 로그에 `[credit_system]` 으로 찍힌다(테스트 로그로 확인).
+  Java 원본과 이름이 같아 **두 앱을 나란히 띄우면 로그에서 구분되지 않는다**는 점은 알고 있어야 한다.
+  배포 환경 이름에 영향이 갈 수 있어 건드리지 않았다.
+- **`CreditSystemKotlinApplication.kt:16` 의 탭 들여쓰기** — 코드베이스에 남은 유일한 탭이고,
+  F-1이 Initializr 흔적의 표식으로 지목했던 바로 그것이다. 1줄이라 그냥 뒀다.
+  (`build.gradle.kts` 도 탭이지만 파일 전체가 일관되어 별개다.)
+- **`application.yml` 의 DB 비밀번호** — F-5 기록대로 여전하다. 상태 변화 없음.
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.

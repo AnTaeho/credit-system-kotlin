@@ -40,7 +40,9 @@ class ChargeService(
         ledgerRepository.save(LedgerEntry.charge(organizationId, idemKey, amount))
         log.info("충전 완료: organizationId={}, amount={}", organizationId, amount)
 
-        val balance = organizationRepository.findById(organizationId).orElseThrow().balance
+        val balance = organizationRepository.findById(organizationId)
+            .orElseThrow { OrganizationNotFoundException(organizationId) }
+            .balance
         return ChargeResponse(balance, false)
     }
 

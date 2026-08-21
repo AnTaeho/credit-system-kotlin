@@ -24,7 +24,7 @@ class GenerationJobProcessor(
         try {
             val resultUrl = try {
                 stubClient.generate(job.prompt)
-            } catch (e: StubGenerationException) {
+            } catch (_: StubGenerationException) {
                 jobLifecycleService.markFailed(jobId, job.attemptNo)
                 return
             } catch (e: RuntimeException) {
