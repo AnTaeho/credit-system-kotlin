@@ -10,13 +10,12 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor
 class WorkerExecutorConfig {
 
     @Bean("generationWorkerExecutor")
-    fun generationWorkerExecutor(workerProperties: WorkerProperties): ThreadPoolTaskExecutor {
-        val executor = ThreadPoolTaskExecutor()
-        executor.corePoolSize = workerProperties.concurrency
-        executor.maxPoolSize = workerProperties.concurrency
-        executor.queueCapacity = 0
-        executor.setThreadNamePrefix("generation-worker-")
-        executor.initialize()
-        return executor
-    }
+    fun generationWorkerExecutor(workerProperties: WorkerProperties): ThreadPoolTaskExecutor =
+        ThreadPoolTaskExecutor().apply {
+            corePoolSize = workerProperties.concurrency
+            maxPoolSize = workerProperties.concurrency
+            queueCapacity = 0
+            setThreadNamePrefix("generation-worker-")
+            initialize()
+        }
 }

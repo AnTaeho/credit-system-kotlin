@@ -6,6 +6,7 @@ import com.example.credit_system_kotlin.organization.dto.ChargeRequest
 import com.example.credit_system_kotlin.organization.dto.ChargeResponse
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import com.example.credit_system_kotlin.organization.service.ChargeService
+import org.springframework.data.repository.findByIdOrNull
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -22,8 +23,8 @@ class OrganizationApiController(
 
     @GetMapping("/me/balance")
     fun myBalance(@RequestHeader("X-Organization-Id") organizationId: Long): BalanceResponse {
-        val organization = organizationRepository.findById(organizationId)
-            .orElseThrow { OrganizationNotFoundException(organizationId) }
+        val organization = organizationRepository.findByIdOrNull(organizationId)
+            ?: throw OrganizationNotFoundException(organizationId)
         return BalanceResponse(organization.balance)
     }
 

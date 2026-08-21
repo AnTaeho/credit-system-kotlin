@@ -63,7 +63,7 @@ class HeartbeatRegistry internal constructor(
         if (expired.isNullOrEmpty()) {
             return emptySet()
         }
-        val attempts = HashSet<JobAttempt>()
+        val attempts = mutableSetOf<JobAttempt>()
         for (member in expired) {
             val attempt = JobAttempt.parse(member)
             if (attempt != null) {

@@ -7,6 +7,7 @@ import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.dto.ChargeResponse
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import org.slf4j.LoggerFactory
+import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -25,9 +26,8 @@ class ChargeService(
 
         val existing = ledgerRepository.findByOrganizationIdAndIdemKey(organizationId, idemKey)
         if (existing != null) {
-            val balance = organizationRepository.findById(organizationId)
-                .orElseThrow { OrganizationNotFoundException(organizationId) }
-                .balance
+            val balance = organizationRepository.findByIdOrNull(organizationId)?.balance
+                ?: throw OrganizationNotFoundException(organizationId)
             log.info("중복 충전 요청 감지: organizationId={}, idemKey={}", organizationId, idemKey)
             return ChargeResponse(balance, true)
         }
@@ -40,9 +40,8 @@ class ChargeService(
         ledgerRepository.save(LedgerEntry.charge(organizationId, idemKey, amount))
         log.info("충전 완료: organizationId={}, amount={}", organizationId, amount)
 
-        val balance = organizationRepository.findById(organizationId)
-            .orElseThrow { OrganizationNotFoundException(organizationId) }
-            .balance
+        val balance = organizationRepository.findByIdOrNull(organizationId)?.balance
+            ?: throw OrganizationNotFoundException(organizationId)
         return ChargeResponse(balance, false)
     }
 

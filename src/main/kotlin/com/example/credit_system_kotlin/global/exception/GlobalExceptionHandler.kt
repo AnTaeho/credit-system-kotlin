@@ -43,16 +43,11 @@ class GlobalExceptionHandler {
             .body(ErrorResponse("DATA_INTEGRITY_VIOLATION", "요청을 처리할 수 없습니다."))
     }
 
-    private fun isUniqueConstraintViolation(e: Throwable): Boolean {
-        var cause: Throwable? = e
-        while (cause != null) {
-            if (cause is ConstraintViolationException) {
-                return cause.kind == ConstraintViolationException.ConstraintKind.UNIQUE
-            }
-            cause = cause.cause
-        }
-        return false
-    }
+    private fun isUniqueConstraintViolation(e: Throwable): Boolean =
+        generateSequence(e) { it.cause }
+            .filterIsInstance<ConstraintViolationException>()
+            .firstOrNull()
+            ?.kind == ConstraintViolationException.ConstraintKind.UNIQUE
 
     @ExceptionHandler(OrganizationNotFoundException::class)
     fun handleOrganizationNotFound(e: OrganizationNotFoundException): ResponseEntity<ErrorResponse> {

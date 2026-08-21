@@ -624,6 +624,130 @@ Java 에는 `_` 가 없어 원본이 어쩔 수 없이 `e` 를 남겨 둔 자리
 
 ---
 
+## H. 코틀린 관용성 점검 (2026-08-21)
+
+G까지는 "이식이 정확한가"를 봤다. H는 렌즈를 바꿔 **"Java를 그대로 옮겨서
+코틀린이 주는 걸 안 쓰고 있는 자리"** 를 찾았다. `src/main` 1,722줄 전부 + 기계적 스윕.
+
+### 이미 잘 되어 있던 것 (근거)
+
+- **`!!` 0건, `lateinit` 0건.** B-1·B-2에서 nullable을 타입으로 닫기로 한 게
+  말로만 남지 않았다. `persistedId` 접근자가 그 자리를 메우고 있다.
+- **로거 24곳 전부 파일 최상위 `private val log`.** `companion object` 안에 넣는
+  Java 흉내가 아니다.
+- `return try { } catch { }` 를 식으로 쓰는 것(`GenerationWorker.claim`),
+  단일식 함수 `=`, `isNullOrEmpty()`, `toLongOrNull()`, elvis + early return — 관용적이다.
+- 엔티티의 `protected set` 스타일은 **B-3 확정 사항이라 건드리지 않았다.**
+
+### H-1. `Optional` 을 코드베이스에서 몰아냈다
+
+A-2에서 `Optional<T>` → `T?` 로 정했는데, 고친 건 커스텀 쿼리 메서드뿐이고
+`JpaRepository` 에서 상속받는 `findById` 는 `Optional` 그대로였다. 4곳.
+
+```kotlin
+- organizationRepository.findById(organizationId)
+-     .orElseThrow { OrganizationNotFoundException(organizationId) }
++ organizationRepository.findByIdOrNull(organizationId)
++     ?: throw OrganizationNotFoundException(organizationId)
+```
+
+`org.springframework.data.repository.findByIdOrNull` — spring-data-commons 4.1.0 에
+들어 있는 코틀린 확장이다(`javap` 로 확인).
+
+`HoldService:84`, `ChargeService:28,43`, `OrganizationApiController:25`.
+
+값 하나만 꺼내 쓰는 `ChargeService` 두 곳은 전체를 괄호로 감싸는 대신
+안전 호출을 앞세우는 쪽이 읽기 낫다. `balance: Long` 이 non-null 이라 의미는 같다.
+
+```kotlin
+val balance = organizationRepository.findByIdOrNull(organizationId)?.balance
+    ?: throw OrganizationNotFoundException(organizationId)
+```
+
+이제 `grep -rn "orElseThrow\|Optional" src/main` 이 **0건**이다. A-2가 비로소 끝났다.
+
+### H-2. do-while 의 `var` 호이스팅 2곳 — 코틀린은 이게 필요 없다
+
+```kotlin
+var checks: List<LedgerBalanceCheck>   // ← 조건절에서 보려고 밖으로 끌어올림
+do {
+    checks = ledgerRepository.findBalanceChecksAfter(...)
+} while (checks.size == RECONCILE_BATCH_SIZE)
+```
+
+Java 는 do-while 조건절이 본문 스코프를 못 봐서 변수를 밖으로 빼야 한다.
+**코틀린은 본문에서 선언한 `val` 을 조건절에서 볼 수 있다.**
+(이 프로젝트에 스크래치 파일을 넣어 실제로 컴파일해 확인했고, 확인 후 삭제했다.)
+
+선언줄을 없애고 루프 안에서 `val` 로 선언했다. `var` → `val` 이 되고 스코프도 좁아진다.
+`LedgerReconciliationTask`(`checks`), `IdempotencyKeyCleanupTask`(`ids`).
+`lastId`·`deletedCount` 같은 누적 변수는 `var` 그대로다.
+
+### H-3. cause 체인 순회 → `generateSequence`
+
+`GlobalExceptionHandler.isUniqueConstraintViolation` 이 `var cause` + `while` 로
+예외 cause 체인을 훑고 있었다. cause 체인은 `generateSequence` 의 교과서적 사례다.
+
+```kotlin
+generateSequence(e) { it.cause }
+    .filterIsInstance<ConstraintViolationException>()
+    .firstOrNull()
+    ?.kind == ConstraintViolationException.ConstraintKind.UNIQUE
+```
+
+의미는 그대로다 — **처음 만난** `ConstraintViolationException` 의 `kind` 만 보고,
+UNIQUE 가 아니면 뒤를 더 뒤지지 않는다. 하나도 없으면 `false`.
+
+### H-4. `WorkerExecutorConfig` → `apply {}`
+
+`executor.` 가 6번 반복되던 걸 `ThreadPoolTaskExecutor().apply { }` 한 덩어리 +
+단일식 함수로 바꿨다. `initialize()` 는 반드시 마지막이다.
+
+### H-5. `setThreadNamePrefix` 는 프로퍼티로 못 바꾼다 — 헛짚었다
+
+H-4를 하면서 "`setThreadNamePrefix(...)` 만 자바식 호출이라 스타일이 섞였으니
+`threadNamePrefix = ...` 로 바꾸자"고 판단했다. **틀렸다. 컴파일 에러다.**
+
+```
+e: WorkerExecutorConfig.kt:18:13 'val' cannot be reassigned.
+```
+
+이유를 파고 보니:
+
+| 클래스 | getter | setter |
+|---|---|---|
+| `CustomizableThreadCreator` | `getThreadNamePrefix()` | `setThreadNamePrefix(String)` |
+| `ExecutorConfigurationSupport` | — | `setThreadNamePrefix(String)` **override** |
+
+`ExecutorConfigurationSupport` 가 `threadNamePrefixSet` 플래그를 세우려고
+**setter 만 오버라이드**한다. 그래서 getter/setter 가 서로 다른 클래스에 흩어지고,
+**코틀린은 둘이 같은 클래스에 있을 때만 가변 프로퍼티로 합성한다.**
+결과적으로 `threadNamePrefix` 는 읽기 전용 `val` 로 노출되고, 쓰려면
+`setThreadNamePrefix(...)` 를 직접 불러야 한다.
+
+처음에 `CustomizableThreadCreator` 만 `javap` 로 보고 "쌍이 멀쩡하다"고 단정한 게 화근이었다.
+**자바 상속 계층에서 getter/setter 합성 여부를 판단할 때는 상속 사슬 전체를 봐야 한다.**
+`apply {}` 블록 안에 프로퍼티 대입 3개와 setter 호출 1개가 섞여 있는 건 지금이 최선이다.
+
+> 부기: `grep -rn '\.set[A-Z]' src/main` 은 이제 0건으로 나오지만 착시다.
+> `apply {}` 안이라 수신자 점이 없을 뿐, `setThreadNamePrefix(...)` 호출은 그대로 있다.
+
+### H-6. 그 밖에 보고 안 고친 것
+
+- **`HeartbeatRegistry:66` 의 `HashSet<JobAttempt>()` → `mutableSetOf()`** 는 고쳤다.
+  main 에 남아 있던 유일한 java.util 컬렉션 직접 생성이었다.
+  다만 **주변 for 루프는 그대로 뒀다** — `else` 분기에 부수효과(`removeUnparseableMember`)가
+  있어서 `mapNotNull` 로 바꾸면 오히려 나빠진다.
+- **`JobAttempt.parse` 의 `indexOf`/`substring`** — `split` 로 바꿀 수 있지만 지금이 더 명확하다.
+- **`DeadJobSchedulerTask.scan()` 의 try/catch 3연속** — 헬퍼로 묶을 수 있으나
+  세 메시지가 각각 달라 이득이 작다.
+- **`validateRequest` 의 if/throw 사슬** — `require` 는 `IllegalArgumentException` 을 던진다.
+  여기는 `InvalidRequestException` 이 나가야 하므로 if/throw 가 맞다.
+- **120자 넘는 줄 20개** — ktlint·detekt 가 안 붙어 있어 강제 규칙 자체가 없다.
+  붙일지는 별도 판단거리로 남긴다.
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.

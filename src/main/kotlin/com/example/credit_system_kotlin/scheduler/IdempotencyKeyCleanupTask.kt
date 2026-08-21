@@ -23,9 +23,8 @@ class IdempotencyKeyCleanupTask(
     fun cleanup() {
         val cutoff = Instant.now().minus(idempotencyProperties.retentionDays, ChronoUnit.DAYS)
         var deletedCount = 0
-        var ids: List<Long>
         do {
-            ids = idempotencyKeyRepository.findIdsCreatedBefore(cutoff, PageRequest.of(0, CLEANUP_BATCH_SIZE))
+            val ids = idempotencyKeyRepository.findIdsCreatedBefore(cutoff, PageRequest.of(0, CLEANUP_BATCH_SIZE))
             if (ids.isEmpty()) {
                 break
             }

@@ -15,6 +15,7 @@ import com.example.credit_system_kotlin.ledger.domain.LedgerType
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import org.slf4j.LoggerFactory
+import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -81,8 +82,8 @@ class HoldService(
             return
         }
 
-        val organization = organizationRepository.findById(organizationId)
-            .orElseThrow { OrganizationNotFoundException(organizationId) }
+        val organization = organizationRepository.findByIdOrNull(organizationId)
+            ?: throw OrganizationNotFoundException(organizationId)
         throw InsufficientBalanceException(organization.balance, cost)
     }
 

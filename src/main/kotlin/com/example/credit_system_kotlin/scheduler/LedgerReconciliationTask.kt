@@ -21,9 +21,8 @@ class LedgerReconciliationTask(
         var checkedCount = 0
         var mismatchCount = 0
         var lastId = 0L
-        var checks: List<LedgerBalanceCheck>
         do {
-            checks = ledgerRepository.findBalanceChecksAfter(lastId, PageRequest.of(0, RECONCILE_BATCH_SIZE))
+            val checks = ledgerRepository.findBalanceChecksAfter(lastId, PageRequest.of(0, RECONCILE_BATCH_SIZE))
             for (balanceCheck in checks) {
                 try {
                     if (!isBalanceConsistent(balanceCheck)) {
