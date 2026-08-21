@@ -1,0 +1,55 @@
+# 이 저장소의 detekt 는 "미사용 코드 탐지" 한 가지 목적으로만 쓴다.
+# ktlint 가 잡지 못하는 미사용 임포트를 잡으려고 붙였다. 근거는 report.md J 절.
+#
+# 기본 설정을 그대로 켜면 115건이 나오는데, 확인해 보니 전부 A~I 에서 이미
+# 근거를 남기고 확정한 것들이었다(스케줄러의 의도적인 RuntimeException 포착,
+# JobAttempt.parse 의 이른 return, validateRequest 의 검증 사슬 등).
+# 도구가 그 결정들을 매번 다시 따지게 만들 이유가 없어 룰셋 단위로 껐다.
+#
+# 나중에 범위를 넓히고 싶으면 여기서 룰셋을 하나씩 켜면 된다.
+
+comments:
+  active: false
+complexity:
+  active: false
+coroutines:
+  active: false
+empty-blocks:
+  active: false
+exceptions:
+  active: false
+naming:
+  active: false
+performance:
+  active: false
+potential-bugs:
+  active: false
+
+style:
+  active: true
+
+  # 켜는 것 — 미사용 코드
+  UnusedImports:
+    active: true      # detekt 기본값은 false 다. 이걸 켜려고 detekt 를 붙였다
+  UnusedParameter:
+    active: true
+  UnusedPrivateClass:
+    active: true
+  UnusedPrivateMember:
+    active: true
+  UnusedPrivateProperty:
+    active: true
+
+  # 끄는 것 — 이미 확정한 결정과 충돌한다
+  MagicNumber:
+    active: false     # 검증 상한값(100자, 1000자)은 쓰이는 자리에 두는 편이 읽기 낫다
+  LoopWithTooManyJumpStatements:
+    active: false     # IdempotencyKeyCleanupTask 의 break 2개는 의도적이다
+  UseCheckOrError:
+    active: false     # F-5 에서 확정: lastFailure ?: IllegalStateException 유지
+  ReturnCount:
+    active: false     # JobAttempt.parse 의 이른 return 5개는 H-6 에서 현행 유지로 확정.
+                      # HeartbeatRegistry 의 이른 return 은 Redis 장애 유예 가드다
+  ThrowsCount:
+    active: false     # validateRequest 의 검증 사슬. require 는 IllegalArgumentException
+                      # 을 던져서 못 쓴다(H-6)

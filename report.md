@@ -812,6 +812,7 @@ H-6에서 "120자 넘는 줄 20개인데 강제 규칙이 없다"고 남긴 걸 
 
 > **미사용 임포트는 이 설정으로 안 잡힌다.** 코틀린 컴파일러도 경고하지 않으므로
 > 여전히 IDE나 사람 눈에 의존한다. F-4에서 미사용 import 를 손으로 찾아낸 상황이 반복될 수 있다.
+> → **J 절에서 detekt 로 해결했다.**
 
 ### I-3. 해소한 위반 17건
 
@@ -860,6 +861,120 @@ H-6에 "120자 넘는 줄 20개"라고 적었다. **틀렸다. 실제로는 3줄
 한국어가 섞인 코드베이스에서 줄 길이를 잴 때는 문자 단위로 세야 한다.
 `python3` 의 `len(line)` 이나 ktlint 자체를 쓰는 게 맞다.
 "터미널에서 넓어 보이는 것"과도 다르다 — 한글은 표시 폭이 2칸이라 눈으로도 과대평가된다.
+
+---
+
+## J. detekt 도입 (2026-08-21)
+
+I-2에 "미사용 임포트는 ktlint 로 안 잡힌다"고 남긴 걸 처리했다. **detekt 는 그 한 가지를
+메우려고 붙였다.**
+
+### J-1. 먼저 ktlint 로 되는지부터 확인했다 — 안 된다
+
+`NoUnusedImportsRule` 이 ktlint 룰셋 jar 에 분명히 들어 있어서,
+`.editorconfig` 에 `ktlint_standard_no-unused-imports = enabled` 로 명시해 강제해 봤다.
+미사용 임포트 2개를 넣고 돌렸더니 **0건**. 룰이 발동하지 않는다.
+ktlint 로는 길이 없다는 걸 확인하고 detekt 로 넘어갔다.
+
+### J-2. detekt Gradle 플러그인은 이 환경에서 못 쓴다 — 3겹으로 막힌다
+
+`io.gitlab.arturbosch.detekt` 1.23.8(최신 안정판)을 붙였더니 순서대로 이렇게 막혔다.
+
+**(1) Kotlin 버전 불일치**
+
+```
+detekt was compiled with Kotlin 2.0.21 but is currently running with 2.3.21.
+```
+
+detekt 자신의 컨피규레이션에서만 Kotlin 을 2.0.21 로 되돌려 해소했다(공식 회피책).
+
+**(2) JVM 타깃 26**
+
+```
+java.lang.IllegalArgumentException: 26
+    at KotlinEnvironmentUtilsKt.createKotlinCoreEnvironment(KotlinEnvironmentUtils.kt:61)
+```
+
+이 머신의 실행 JDK 가 **26** 이다(Gradle 데몬도 26). 61행은
+`KotlinCoreEnvironment.createForProduction(...)` 이고, **detekt 가 물고 있는
+Kotlin 2.0.21 컴파일러가 JDK 26 런타임을 모른다.**
+
+`jvmTarget = "17"`, `jdkHome` 을 JDK 17 로 지정 — **둘 다 소용없었다.**
+태스크 속성은 제대로 `17` 로 들어가는데도 같은 예외가 난다.
+문제는 detekt 가 분석 대상에 쓰는 타깃이 아니라 **detekt 자신이 돌고 있는 JVM** 이기 때문이다.
+플러그인의 `Detekt` 태스크는 Gradle 데몬 안에서 인프로세스로 돌고,
+1.23.8 의 그 태스크에는 `javaLauncher` 속성이 없다.
+
+실제로 `-Dorg.gradle.java.home=<JDK 21>` 로 **데몬 전체를 내리면 즉시 동작한다.**
+원인은 확정됐지만, 린터 하나 붙이자고 프로젝트의 모든 빌드·테스트가 도는 JVM 을
+통째로 내리는 건 대가가 너무 크다.
+
+**(3) 그래서 플러그인을 버리고 `detekt-cli` 를 `JavaExec` 로 분리했다**
+
+```kotlin
+val detekt by tasks.registering(JavaExec::class) {
+    classpath = detektCli
+    mainClass.set("io.gitlab.arturbosch.detekt.cli.Main")
+    javaLauncher.set(detektLauncher)   // JDK 17
+    ...
+}
+```
+
+`JavaExec` 는 `javaLauncher` 를 받는다. **데몬은 26 그대로 두고 detekt 만 17 에서 돈다.**
+JDK 17 툴체인은 이 프로젝트가 이미 컴파일에 쓰고 있어서(`java { toolchain { 17 } }`)
+새로 요구되는 게 없다.
+
+여기서도 Kotlin 이 2.3.21 로 올라와 `ClassNotFoundException:
+KotlinExpressionParsing$Precedence` 가 났고, `detektCli` 컨피규레이션에만
+`useVersion("2.0.21")` 을 걸어 해소했다.
+
+`tasks.named("check") { dependsOn(detekt) }` 로 물려서 `./gradlew check` 하나로 잡힌다.
+
+### J-3. 규칙 범위 — I-1과 같은 원칙
+
+기본 설정 그대로면 **115건**이 나온다. 내용을 보니 **전부 A~I 에서 이미 근거를 남기고
+확정한 것들이었다.**
+
+| 규칙 | 건수 | 이미 내린 결정 |
+|---|---:|---|
+| `PackageNaming` | 78 | 패키지 언더스코어. I-2와 같은 이유로 개명 불가 |
+| `TooGenericExceptionCaught` | 19 | 스케줄러·워커의 `catch (e: RuntimeException)` 는 F-5에서 의도적이라고 확인 |
+| `MagicNumber` | 4 | 검증 상한(100자·1000자)은 쓰이는 자리에 두는 편이 낫다 |
+| `ReturnCount` | 3 | `JobAttempt.parse` 의 이른 return 은 H-6에서 현행 유지로 확정 |
+| `ThrowsCount` | 3 | `validateRequest` 의 검증 사슬. `require` 는 `IllegalArgumentException` 이라 못 쓴다(H-6) |
+| `UseCheckOrError` | 1 | `lastFailure ?: IllegalStateException` 은 F-5에서 확정 |
+| `LoopWithTooManyJumpStatements` | 1 | `IdempotencyKeyCleanupTask` 의 `break` 2개는 의도적 |
+| 그 밖 | 6 | `SwallowedException`, `NestedBlockDepth`, `EmptyFunctionBlock`, `SpreadOperator` |
+
+**도구가 이미 끝난 논의를 매번 다시 열게 둘 이유가 없다.** 룰셋 단위로 끄고
+미사용 코드 계열만 켜서 **115 → 0** 으로 맞췄다. 설정은 `detekt.yml` 에 있고
+규칙마다 왜 껐는지 주석으로 적어 뒀다. 범위를 넓히고 싶으면 룰셋을 하나씩 켜면 된다.
+
+> 함정: `ReturnCount` 와 `ThrowsCount` 는 이름만 보고 `complexity` 룰셋으로 착각했는데
+> 실제로는 **`style` 소속**이다. 엉뚱한 룰셋에 적으면 detekt 가
+> `Property 'complexity>ReturnCount' is misspelled or does not exist` 로 거절한다.
+> 그리고 룰셋 단위 `active: false` 는 `style` 처럼 개별 규칙을 켜야 하는 룰셋에는
+> 쓸 수 없어서, 그 안의 불필요한 규칙은 개별로 꺼야 한다.
+
+### J-4. 무엇이 잡히는지 확인했다
+
+일부러 죽은 코드를 넣고 돌려 봤다(확인 후 복구):
+
+| 넣은 것 | 결과 |
+|---|---|
+| 미사용 임포트 2개 | **잡힘** `[UnusedImports]` ← 이걸 하려고 붙였다 |
+| 안 읽는 private 프로퍼티 | 잡힘 `[UnusedPrivateProperty]` |
+| 안 부르는 private 함수 | 잡힘 `[UnusedPrivateMember]` |
+| 안 쓰는 함수 파라미터 | 잡힘 `[UnusedParameter]` |
+
+### J-5. 알고 있어야 할 것
+
+- **detekt 1.23.8 은 Kotlin 2.0.21 프런트엔드로 소스를 파싱한다.** 이 프로젝트는 2.3.21 이다.
+  지금 코드에는 2.1+ 전용 문법이 없어 문제가 없지만, 새 문법을 쓰기 시작하면 깨질 수 있다.
+- detekt 2.x 가 나오면 이 회피책 3개(Kotlin 핀 고정 2곳 + JavaExec 분리)를 걷어내고
+  플러그인으로 돌아갈 수 있는지 다시 보라.
+- 타입 해석은 쓰지 않는다(`--classpath` 미지정). 타입 해석이 필요한 규칙은 동작하지 않는다.
+  미사용 임포트·미사용 private 코드에는 필요 없다.
 
 ---
 
