@@ -16,7 +16,10 @@ import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.dao.QueryTimeoutException
 import org.springframework.test.util.ReflectionTestUtils
+import org.springframework.transaction.CannotCreateTransactionException
 import java.util.concurrent.ScheduledFuture
 
 @ExtendWith(MockitoExtension::class)
@@ -76,7 +79,7 @@ class GenerationJobProcessorTest {
     @Test
     fun `결과 반영이 실패해도 재시도가 성공하면 결과를 살린다`() {
         whenever(stubClient.generate("cat")).thenReturn("https://example.test/cat.png")
-        doThrow(IllegalStateException("database unavailable"))
+        doThrow(CannotCreateTransactionException("connection pool exhausted"))
             .doNothing()
             .whenever(jobLifecycleService).confirm(job, "https://example.test/cat.png")
 
@@ -90,12 +93,25 @@ class GenerationJobProcessorTest {
     @Test
     fun `결과 반영 재시도를 모두 소진하면 FAILED로 바꾸지 않고 PROCESSING을 유지한다`() {
         whenever(stubClient.generate("cat")).thenReturn("https://example.test/cat.png")
-        doThrow(IllegalStateException("database unavailable"))
+        doThrow(QueryTimeoutException("lock wait timeout"))
             .whenever(jobLifecycleService).confirm(job, "https://example.test/cat.png")
 
         processor.runGeneration(job)
 
         verify(jobLifecycleService, times(3)).confirm(job, "https://example.test/cat.png")
+        verify(jobLifecycleService, never()).markFailed(1L, 0)
+        verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
+    }
+
+    @Test
+    fun `결과 반영 실패가 재시도 대상이 아니면 즉시 포기하고 PROCESSING을 유지한다`() {
+        whenever(stubClient.generate("cat")).thenReturn("https://example.test/cat.png")
+        doThrow(DataIntegrityViolationException("constraint violation"))
+            .whenever(jobLifecycleService).confirm(job, "https://example.test/cat.png")
+
+        processor.runGeneration(job)
+
+        verify(jobLifecycleService, times(1)).confirm(job, "https://example.test/cat.png")
         verify(jobLifecycleService, never()).markFailed(1L, 0)
         verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
     }

@@ -978,6 +978,87 @@ KotlinExpressionParsing$Precedence` 가 났고, `detektCli` 컨피규레이션�
 
 ---
 
+## K. confirm 재시도 예외 범위를 좁혔다 (2026-08-21)
+
+`GenerationJobProcessor.confirmWithRetry` 는 `catch (e: RuntimeException)` 으로
+모든 런타임 예외를 재시도 대상으로 삼고 있었다. 재시도가 있는 이유부터 다시 짚어야 한다.
+`generate()` 는 비싸고 `confirm()` 은 싸다. confirm 한 번 삐끗했다고 바로 포기하면
+job이 FAILED 로 떨어지고, 스케줄러가 attemptNo+1 로 재시도할 때 **생성을 처음부터 다시 한다.**
+이미 손에 쥔 `resultUrl` 은 버려지고 외부 호출 비용을 다시 문다. confirm 실패 빈도가 낮아도
+잃는 게 비대칭으로 크기 때문에, 몇 번 더 찔러보는 쪽이 기대값이 맞는다.
+
+문제는 "몇 번 더 찔러본다"의 대상을 `RuntimeException` 전체로 잡아 버리면,
+재시도해도 결과가 똑같은 예외 — 예를 들어 `DataIntegrityViolationException` 같은
+제약 위반이나 그 밖의 프로그래밍 오류 — 까지 3회를 꽉 채워 돈다는 점이다.
+`CONFIRM_RETRY_DELAY_MILLIS` 200ms 를 두 번 자니 400ms 를 날린 뒤에야 포기하는데,
+그 400ms 는 아무것도 바꾸지 않는다. 재시도는 "다시 하면 성공할 수도 있는" 예외에만 값어치가 있다.
+
+### 고른 세 예외
+
+- `org.springframework.dao.TransientDataAccessException` — 락 경합, 데드락, 쿼리 타임아웃
+  계열의 상위 타입이다. Spring 이 리포지토리 경계에서 번역해 던지는 예외라
+  하위 타입 이름은 몰라도 이 상위 타입으로 잡으면 그 계열을 전부 커버한다.
+- `org.springframework.dao.RecoverableDataAccessException` — 이름 그대로
+  커넥션을 복구하면 재시도할 수 있는 경우를 가리키는 타입이다.
+- `org.springframework.transaction.CannotCreateTransactionException` — 커넥션 풀 고갈.
+  이 프로젝트에서 가장 현실적으로 일어날 법한 재시도 케이스라고 판단해 넣었다.
+
+세 타입 모두 Spring Framework 7.0.8 에 그대로 존재함을 확인했다.
+
+`org.springframework.transaction.TransactionSystemException` 은 의도적으로 뺐다.
+커밋 자체가 실패했다는 뜻인데, 커밋 실패는 대개 제약 위반이나 트리거 오류처럼
+데이터 상태에서 비롯된 문제라 다시 커밋한다고 통과하지 않는다. 일시적 예외가 아니다.
+
+판정은 `isRetryable` private 함수로 뽑았다. cause 체인은 순회하지 않는다 —
+Spring 이 이미 리포지토리 경계에서 예외를 번역해 던지므로, 여기서 잡히는 타입 자체가
+번역된 타입이고 cause 를 파고들 이유가 없다.
+
+### 재시도 대상이 아니면 즉시 던진다
+
+Kotlin 은 multi-catch 가 없어서 `catch (e: RuntimeException)` 은 그대로 두고,
+잡은 직후 `isRetryable(e)` 가 false 면 sleep 없이 바로 `throw e` 한다.
+이때 `log.error` 로 재시도하지 않는다는 사실을 남긴다 — 안 그러면 나중에 로그만 보고
+"왜 3번 안 돌았지" 하고 헤매게 된다. 재시도 대상이면 기존 그대로 `lastFailure` 에 담고
+`log.warn` 을 남긴 뒤 다음 시도로 넘어간다.
+
+바깥쪽 `runGeneration` 의 로그 문구도 손댔다. "생성 결과 반영 재시도 소진, timeout 회수 대기"는
+재시도를 다 썼다는 것을 전제로 하는데, 이제 재시도 없이 1회 만에 즉시 실패하는 경로도
+같은 자리로 들어온다. "생성 결과 반영 실패, timeout 회수 대기"로 바꿔 재시도 여부를
+단정하지 않게 했다. 바깥 `catch (e: RuntimeException)` 자체는 최후 방어선이라 넓은 채로 뒀다 —
+여기서 더 좁히면 `confirmWithRetry` 가 재던진 어떤 예외를 취급 못 하고 새어나갈 위험이 생긴다.
+
+### 이번 변경이 얹히는 기존 설계
+
+재시도 중에도 heartbeat 는 살아 있다. `stopHeartbeat` 는 `runGeneration` 의 `finally` 에 있어
+`confirmWithRetry` 가 몇 번을 돌든 끝나야 불린다. 재시도 최대 대기 시간(200ms × 최대 2회 =
+400ms)은 heartbeat timeout 보다 훨씬 짧아 재시도 중에 heartbeat 가 끊길 걱정은 없다.
+
+3회를 다 소진해도(또는 이번처럼 즉시 포기해도) `markFailed` 는 부르지 않는다.
+DB 접근이 흔들리는 상황에서 그 결과를 DB 에 다시 쓰겠다는 것 자체가 모순이라, job 은
+PROCESSING 상태로 남겨 두고 `DeadJobSchedulerTask.markStalledJobsAsFailed` 의 정체 회수에
+맡긴다. 이건 기존 설계지 이번에 바꾼 게 아니지만, 재시도 대상을 좁히는 이유를 이해하려면
+같이 봐야 해서 맥락으로 남겨 둔다.
+
+고정 200ms 백오프는 그대로 뒀다. 지수 백오프 같은 걸 넣을까 고민했지만, 어차피 최대 3회
+한정이라 실질적인 부하 영향이 없다. 백오프 전략을 바꿀 값어치가 없는 곳이다.
+
+### 테스트
+
+기존 테스트 2건이 `IllegalStateException("database unavailable")` 로 재시도를 검증하고
+있었는데, 이제 이 타입은 재시도 대상이 아니라서 그대로 두면 깨진다.
+`결과 반영이 실패해도 재시도가 성공하면 결과를 살린다` 는
+`CannotCreateTransactionException("connection pool exhausted")` 로 바꿔 커넥션 풀 고갈
+시나리오를 그대로 표현했고, `결과 반영 재시도를 모두 소진하면 FAILED로 바꾸지 않고
+PROCESSING을 유지한다` 는 `QueryTimeoutException("lock wait timeout")`
+(`TransientDataAccessException` 의 구체 하위 타입)으로 바꿨다.
+
+새로 `결과 반영 실패가 재시도 대상이 아니면 즉시 포기하고 PROCESSING을 유지한다` 를
+추가해 `DataIntegrityViolationException` 을 던지면 `confirm` 이 정확히 1회만 불리고,
+`markFailed` 는 불리지 않으며, `heartbeatRegistry.stopHeartbeat` 는 정상적으로 불리는지
+확인했다.
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.
