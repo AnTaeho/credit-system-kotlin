@@ -1324,6 +1324,140 @@ grep -rn "credit_system_kotlin.scheduler" src/   → 0건
 
 ---
 
+## O. 계층·중복 정리 세 건 (2026-08-24)
+
+N-5 에 남겨둔 셋을 한꺼번에 처리했다. 패키지 이동이 아니라 **계층**과 **중복** 문제다.
+
+### O-1. 조회 경로에도 서비스 계층을 세웠다
+
+쓰기 경로에는 서비스가 있는데(`HoldService`, `ChargeService`, `JobLifecycleService`)
+**조회 경로에만 없었다.** 컨트롤러 셋이 전부 리포지토리를 직접 찌르고 DTO 매핑까지
+떠맡았다.
+
+```kotlin
+// 변경 전 — JobApiController
+jobRepository.findByOrganizationIdOrderByIdDesc(organizationId).map(JobResponse::from)
+
+// 변경 후
+jobQueryService.findByOrganization(organizationId)
+```
+
+`JobQueryService`, `LedgerQueryService`, `OrganizationQueryService` 를 세우고
+컨트롤러에서 리포지토리 의존을 걷어냈다.
+
+**조회 서비스가 엔티티가 아니라 DTO 를 돌려준다.** 그래야 읽기 모델의 주인이
+서비스가 되고 컨트롤러는 얇은 HTTP 어댑터로 남는다. `HoldService` 가 이미
+`HoldResult` 를 돌려주던 것과 같은 결이다.
+
+덤으로 `@Transactional(readOnly = true)` 가 붙었다. 그전에는 컨트롤러가 리포지토리를
+직접 불러 호출마다 별도 트랜잭션이 열렸다.
+
+**`ChargeService` 는 건드리지 않았다.** 그 안에도 `findByIdOrNull ?: throw
+OrganizationNotFoundException` 이 두 번 나와 `OrganizationQueryService` 로 바꾸고
+싶어지지만, 쓰기 트랜잭션 안이라 결이 다르다.
+
+### O-2. `global` 서랍에서 한 곳에서만 쓰는 것들을 내렸다
+
+| 옮긴 것 | 어디로 | 왜 |
+|---|---|---|
+| `StubGenerationException` | `job/stub/` | job/stub 에서 나 job/worker 에서 잡혀 죽는 내부 예외 |
+| `WorkerExecutorConfig` | `job/worker/` | `GenerationWorker` 만 쓰는 executor 빈 |
+| `IdempotencyProperties` | `job/scheduling/` | `IdempotencyKeyCleanupTask` 만 쓴다 |
+| `AppProperties.Heartbeat` | `heartbeat/HeartbeatProperties` | heartbeat 패키지만 쓴다 |
+
+**`HeartbeatProperties` 독립이 이 중 제일 값어치 있다.** 그전에는 `HeartbeatRegistry`
+와 `RedisOutageGate` 가 앱 전역 설정 덩어리 전체를 생성자로 받아 `appProperties.heartbeat.xxx`
+로 파고들었다. 이제 자기 설정만 받고 **`AppProperties` 를 아예 모른다.**
+prefix 가 `app.heartbeat` 로 같아 YAML 은 한 줄도 안 바뀌었다.
+
+`AppPropertiesTest` 는 6개가 전부 Heartbeat 검증이었다. 이름만 `AppProperties` 였을
+뿐이라 `HeartbeatPropertiesTest` 로 함께 옮겼다.
+
+#### 옮기지 않은 것과 그 이유 — 이쪽이 더 중요하다
+
+**`WorkerProperties` 는 `global/config` 에 남겼다.** `job/worker` 로 내리는 게
+자연스러워 보인다. 그런데 `heartbeat/HeartbeatRegistry` 가 스레드풀 크기로
+`workerProperties.concurrency` 를 읽는다. 옮기면 `heartbeat → job.worker` 의존이
+새로 생겨 **N 절에서 없앤 순환이 되살아난다.** 두 패키지가 읽으므로 공용이 맞다.
+
+**`BusinessException` 계열은 전부 `global/exception` 에 남겼다.**
+`InsufficientBalanceException` 은 organization 으로, `DuplicateRequestInProgressException`
+은 job 으로 가야 할 것처럼 보인다. 하지만 이것들은 `GlobalExceptionHandler` 가
+소비하는 **HTTP 오류 계약**이다. 도메인으로 흩으면 `global` 이 모든 도메인을
+import 하게 되어 의존 방향이 뒤집힌다. A-1 에서 세운 "BusinessException = 핸들러가
+소비하는 예외" 경계가 여기서 그대로 판단 기준이 됐다 — `StubGenerationException`
+하나만 그 경계 밖이라 내려간 것이다.
+
+### O-3. `idemKey` 검증 중복을 없앴다
+
+`HoldService` 와 `ChargeService` 가 공백 검사와 100자 상한을 각각 한 벌씩 들고
+있었다. 문구가 두 곳에 있으니 한쪽만 고쳐도 티가 나지 않는다.
+
+```kotlin
+// global/validation/IdemKeys.kt
+const val IDEM_KEY_MAX_LENGTH = 100
+
+fun validateIdemKey(idemKey: String) {
+    if (idemKey.isBlank()) {
+        throw InvalidRequestException("idemKey는 필수입니다.")
+    }
+    if (idemKey.length > IDEM_KEY_MAX_LENGTH) {
+        throw InvalidRequestException("idemKey는 ${IDEM_KEY_MAX_LENGTH}자를 초과할 수 없습니다.")
+    }
+}
+```
+
+상한을 이름 붙이되 메시지에 그대로 끼워 넣어 **기존 문구와 한 글자도 다르지 않다.**
+두 서비스의 테스트가 이 문구를 문자열로 검증하므로 이게 조건이었다.
+
+`prompt`(1000자)와 `amount` 검증은 공유되지 않으므로 각자 자리에 뒀다.
+
+**엔티티의 `@Column(length = 100)` 은 `IDEM_KEY_MAX_LENGTH` 로 바꾸지 않았다.**
+컴파일은 되지만 도메인 엔티티가 `global/validation` 을 import 하게 된다.
+스키마 길이와 검증 상한은 따로 둔다.
+
+### O-4. 병렬 위임에서 걸린 것 — worktree 기준 커밋 ⚠️
+
+셋이 파일 수준에서 겹치지 않아 서브에이전트 3개에 worktree 격리로 동시에 맡겼다.
+그런데 **worktree 세 개가 전부 5커밋 낡은 기준에서 갈라져 나왔다.** N 절의 재배치
+이전 시점이라 그 안에는 `heartbeat/` 패키지가 없고 `scheduler/` 가 살아 있었다.
+
+증상은 이렇게 나타났다:
+
+- 워커가 "테스트 132개 통과"라고 보고했다. 현재 기준은 **133개**다
+- 워커가 이미 개명한 `DeadJobSchedulerTask.kt` 를 "수정된 파일"로 봤다
+
+O-1 과 O-3 은 건드린 파일(컨트롤러, `HoldService`, `ChargeService`)이 그 5커밋에
+없어서 cherry-pick 이 깨끗했다. O-2 는 하필 **패키지째 이동한 파일들**을 건드려
+낡은 기준에선 작업 자체가 성립하지 않았다. 중단하고 현재 기준에서 다시 돌렸다.
+
+→ **완료 보고의 테스트 개수를 기준선과 대조하는 게 실제로 잡아냈다.** 초록이라는
+보고만 믿었으면 낡은 기준의 초록을 현재의 초록으로 착각했을 것이다.
+
+### O-5. 검증
+
+```
+./gradlew cleanTest test ktlintCheck detekt
+→ 27개 클래스 / 133 테스트, 실패 0, 에러 0
+```
+
+세 변경 모두 API 동작(경로·응답 JSON·상태코드)과 예외 문구를 바꾸지 않았다.
+
+### O-6. 최종 패키지 배치
+
+```
+job/          controller/ domain/ dto/ repository/ scheduling/ service/ stub/ worker/
+ledger/       controller/ domain/ dto/ repository/ scheduling/ service/
+organization/ controller/ domain/ dto/ repository/ service/
+heartbeat/    HeartbeatRegistry, JobAttempt, RedisOutageGate, HeartbeatProperties
+global/       config/(AppProperties, WorkerProperties)
+              domain/(BaseEntity)
+              exception/(BusinessException 계열 + ErrorResponse + GlobalExceptionHandler)
+              validation/(IdemKeys)
+```
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.
