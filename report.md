@@ -4,7 +4,7 @@
 대상: `credit_system` (Java) → `credit-system-kotlin` (Kotlin)
 
 현재 상태: **이식 완료.** `src/main` 과 테스트 4개 계층을 모두 옮겼다.
-`./gradlew test` 27개 클래스 / 133 테스트 통과.
+`./gradlew test` 26개 클래스 / 126 테스트 통과.
 
 > 2026-08-20 갱신: 이 시점부터 git 저장소로 관리한다 (`5d39be6` 이 이식 작업본 첫 커밋).
 
@@ -980,6 +980,10 @@ KotlinExpressionParsing$Precedence` 가 났고, `detektCli` 컨피규레이션�
 
 ## K. confirm 재시도 예외 범위를 좁혔다 (2026-08-21)
 
+> **2026-08-24 갱신: 이 절의 결정은 P-3 에서 되돌렸다.** confirm 재시도 자체를
+> 걷어냈으므로 아래 논의는 이력으로 남는다. 다만 여기 적힌 비용 논증은 여전히 유효하고,
+> P-3 은 그 논증을 반박한 게 아니라 단순함과 맞바꾼 것이다.
+
 `GenerationJobProcessor.confirmWithRetry` 는 `catch (e: RuntimeException)` 으로
 모든 런타임 예외를 재시도 대상으로 삼고 있었다. 재시도가 있는 이유부터 다시 짚어야 한다.
 `generate()` 는 비싸고 `confirm()` 은 싸다. confirm 한 번 삐끗했다고 바로 포기하면
@@ -1061,6 +1065,9 @@ PROCESSING을 유지한다` 는 `QueryTimeoutException("lock wait timeout")`
 
 ## L. 예외 처리가 본 흐름을 덮던 것을 걷어냈다 (2026-08-21)
 
+> **2026-08-24 갱신: 이 절이 다룬 `confirmWithRetry` 는 P-3 에서 사라졌다.**
+> 다만 "본 흐름이 예외 처리에 파묻히지 않는다"는 목표 자체는 지금 코드에도 남아 있다.
+
 `runGeneration` 안에 try가 3겹으로 중첩돼 있었다. "heartbeat 켜고 → 생성하고 →
 확정하고 → heartbeat 끈다"는 본 흐름이 눈에 보이질 않았다. 문제는 예외 처리량
 자체가 아니었다 — try/catch 다섯 개가 파일 전체에 퍼져 있는 건 이 작업 이후에도
@@ -1118,6 +1125,8 @@ elvis 분기도 문제째로 없어졌다. F-5 항목은 지우지 않고 그대
 ---
 
 ## M. confirmWithRetry 의 제어 흐름과 로그를 갈라냈다 (2026-08-21)
+
+> **2026-08-24 갱신: 이 절의 대상인 `confirmWithRetry` 는 P-3 에서 통째로 사라졌다.**
 
 L에서 `runGeneration` 의 본 흐름은 드러냈지만 `confirmWithRetry` 자체는 손대지
 않고 그대로 두었다. 남은 문제가 그 안에 있었다. `for` → `try` → `catch` → `if`
@@ -1455,6 +1464,152 @@ global/       config/(AppProperties, WorkerProperties)
               exception/(BusinessException 계열 + ErrorResponse + GlobalExceptionHandler)
               validation/(IdemKeys)
 ```
+
+---
+
+## P. 안정성에 기여하지 않는 곁가지를 걷어냈다 (2026-08-24)
+
+"동작이 너무 복잡해졌다"는 진단에서 출발했다. 이번엔 배치가 아니라 **코드의 양**을 줄였다.
+main+test 합쳐 196줄이 사라지고 29줄이 들어왔다.
+
+### P-0. 판단 기준 — 무엇이 안전을 떠받치는가
+
+먼저 이 시스템의 핵심 불변식을 적고, 각 코드가 그중 무엇을 지키는지 물었다.
+
+1. 잔액이 음수가 되지 않는다 (hold 의 조건부 UPDATE)
+2. 같은 멱등키로 두 번 청구되지 않는다
+3. PROCESSING job 이 영원히 갇히지 않는다 (heartbeat 만료 + 정체 스캔)
+4. FAILED job 은 재시도되거나 환불된다 — 돈이 사라지지 않는다
+5. 늦은 워커가 새 시도를 덮어쓰지 않는다 (attemptNo 가드)
+6. Redis 장애 중에 살아있는 job 을 회수하지 않는다 (중복 처리 방지)
+
+**이 여섯을 지키는 건 전부 조건부 UPDATE 와 회수 스캔이다.** 그 바깥에 붙은 것들을
+따로 떼어 봤다. 참고로 죽은 코드는 없었다 — 리포지토리 메서드도 `persistedId` 도
+전부 실사용이다. 줄일 것은 동작의 복잡도였다.
+
+### P-1. `RedisOutageGate` 의 억제 경보 기계 — 이번 정리의 가장 큰 덩어리
+
+75줄 중 안전에 필요한 건 위 6번, **"마지막 Redis 실패로부터 timeout 이 지나기 전에는
+회수를 보류한다"** 하나뿐이었다. 나머지는 "Redis 장애가 N초째 지속 중"이라는 ERROR 를
+주기적으로 **한 번만** 찍기 위한 장치였다 — `AtomicReference` 2개, `compareAndSet`,
+`suppressionStartedAt`/`lastSuppressionAlertAt` 생명주기 관리.
+
+```kotlin
+// 75줄 → 20줄
+class RedisOutageGate internal constructor(
+    private val heartbeatProperties: HeartbeatProperties,
+    private val clock: Clock
+) {
+    private val lastRedisFailureAt = AtomicReference(NONE)
+
+    fun recordFailure() {
+        lastRedisFailureAt.set(clock.instant())
+    }
+
+    /** 마지막 Redis 실패로부터 timeout 이 지나기 전에는 살아있는 job 을 회수하지 않는다. */
+    fun isInRecoveryGrace(): Boolean =
+        clock.instant().isBefore(lastRedisFailureAt.get().plusSeconds(heartbeatProperties.timeoutSeconds))
+
+    companion object {
+        private val NONE: Instant = Instant.EPOCH
+    }
+}
+```
+
+**`RedisOutageGateTest` 는 파일째 사라졌다.** 4개 테스트가 전부 경보 기계 전용이었기
+때문이다. 이게 "이 클래스에서 테스트할 가치가 있다고 여겨진 것이 사실상 경보뿐이었다"는
+사실을 드러낸다 — 정작 안전 핵심인 유예 판정은 `HeartbeatRegistryTest` 쪽에서 검증되고
+있었다.
+
+딸려서 `HeartbeatProperties.suppressionAlertSeconds` 와 그 `require`, 검증 테스트 1개,
+양쪽 YAML 의 `suppression-alert-seconds` 가 사라졌다.
+
+**남는 보장**: 유예 게이트는 그대로다. `HeartbeatRegistryTest` 의 4개가 계속 지킨다 —
+`Redis 복구 직후 유예 구간에는 findExpiredAttempts가 빈 집합을 반환한다`,
+`유예 구간에는 hasLiveHeartbeat가 true를 반환한다`,
+`refreshHeartbeat 실패가 findExpiredAttempts 회수를 보류시킨다`,
+`실패 이력이 없으면 유예가 걸리지 않는다`.
+
+**잃는 것**: 장애가 길어질 때 "회수가 억제되고 있다"는 집계 경보. 다만 `HeartbeatRegistry`
+의 실패 지점 4곳이 각각 `log.warn` 을 남기므로 장애 자체는 여전히 보인다.
+
+### P-2. `GenerationWorker` 의 시작 시점 진단 로그
+
+`init` 블록 22줄. 처리량 상한(`maxDispatchPerCycle`, `throughputCapPerSecond`)을 계산해
+찍고 `batchSize < concurrency` 를 경고했다. **테스트가 하나도 참조하지 않았다.**
+
+지우고 나니 생성자 파라미터 `@Value("...worker-interval-millis") pollIntervalMillis` 가
+아무 데서도 안 쓰이게 되어 함께 빠졌다. `@Scheduled` 의 같은 프로퍼티 참조는 별개라 그대로다.
+
+### P-3. confirm 재시도를 걷어냈다 — 대가를 알고 고른 것 ⚠️
+
+`confirmWithRetry`, `confirmOnce`, `giveUp`, `logRetrying`, `awaitBeforeRetry`,
+`isRetryable`, 상수 2개까지 약 60줄.
+
+**정합성은 재시도가 아니라 회수가 지킨다.** confirm 이 실패하면 job 은 PROCESSING 으로
+남고 정체 스캔이 걷어가 재시도로 이어진다. 그래서 재시도를 걷어내도 위 불변식 3·4는
+그대로다.
+
+```kotlin
+/** 결과 반영에 실패하면 job 은 PROCESSING 으로 남아 정체 회수 대상이 된다. */
+private fun confirm(job: Job, resultUrl: String) {
+    try {
+        jobLifecycleService.confirm(job, resultUrl)
+    } catch (e: RuntimeException) {
+        log.error("생성 결과 반영 실패, timeout 회수 대기: jobId={}, attemptNo={}",
+            job.persistedId, job.attemptNo, e)
+    }
+}
+```
+
+**대가는 K 절이 이미 정확히 적어둔 그것이다:**
+
+> `generate()` 는 비싸고 `confirm()` 은 싸다. confirm 한 번 삐끗했다고 바로 포기하면
+> (…) **생성을 처음부터 다시 한다.** 이미 손에 쥔 `resultUrl` 은 버려지고 외부 호출
+> 비용을 다시 문다.
+
+즉 이 제거는 **기대값이 아니라 단순함을 고른 것이다.** K 절의 논증이 틀려서 되돌린 게
+아니다. confirm 실패가 드물다면 잃는 총량이 작고, 그 대가로 60줄과 재시도 상태 기계가
+사라진다는 쪽을 택했다. **confirm 실패가 잦아지거나 생성 비용이 커지면 K 절의 계산이
+다시 맞아지고, 그때는 되살리는 게 옳다.**
+
+테스트는 재시도 전용 3개가 `결과 반영이 실패해도 FAILED로 바꾸지 않고 PROCESSING을
+유지한다` 1개로 합쳐졌다. 남은 검증은 ① 예외가 밖으로 새지 않는다 ② `markFailed` 를
+부르지 않는다 ③ heartbeat 를 정리한다.
+
+### P-4. `JobAttempt.parse` 단순화
+
+수동 `indexOf` + `substring` 2회 + 이른 return 5개를 `split` 으로 줄였다.
+계약(구분자가 없거나 토막이 2개가 아니거나 숫자가 아니면 null)은 그대로다.
+`"1:2:3"`, `":"`, `""`, `"12"` 모두 기존과 같이 null 을 돌려준다.
+
+H-6 에서 `ReturnCount` 를 끈 근거가 이 함수였는데, 이제 이른 return 이 5개에서 3개로
+줄었다. 룰을 다시 켤 만한지는 별도 판단.
+
+### P-5. 걷어내지 않은 것과 그 이유
+
+| 남긴 것 | 없으면 |
+|---|---|
+| 유예 게이트 (`isInRecoveryGrace`) | Redis 장애 중 살아있는 job 을 회수해 **중복 처리** |
+| `DeadJobRecoveryTask` 2중 격리 | job 한 건이 그 주기의 배치 전체를 막는다 (N-0 에서 되살린 것) |
+| `GenerationWorker.rollbackToHolding` | executor 거부 시 timeout 회수까지 60초 대기 |
+| `HeartbeatRegistry.removeUnparseableMember` | 멤버 형식을 바꾸는 배포에서 깨진 멤버가 영원히 잔류 |
+| `LedgerReconciliationTask` | 잔액과 원장의 어긋남을 아무도 알아채지 못한다 |
+| `persistedId` (엔티티 3개) | `id!!` 가 코드 전역에 흩어진다 |
+
+### P-6. 검증
+
+```
+./gradlew cleanTest test ktlintCheck detekt
+→ 126 테스트, 실패 0, 에러 0
+```
+
+**133 → 126, 줄어든 7개는 전부 위에서 지운 장치 전용이다** (경보 4 + suppression 검증 1 +
+재시도 3→1 로 2). 이 작업은 테스트를 의도적으로 줄이므로 "133개 통과"를 완료 기준으로
+쓸 수 없었다. 대신 사라져야 할 테스트를 이름으로 미리 못 박고, 그 밖의 것이 사라지거나
+깨지면 실수로 판정했다.
+
+API 동작(경로·응답 JSON·상태코드), 예외 문구, DB 스키마는 바뀌지 않았다.
 
 ---
 
