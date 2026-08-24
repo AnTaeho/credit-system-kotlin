@@ -2,6 +2,7 @@ package com.example.credit_system_kotlin.organization.service
 
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
+import com.example.credit_system_kotlin.global.validation.validateIdemKey
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.dto.ChargeResponse
@@ -46,12 +47,7 @@ class ChargeService(
     }
 
     private fun validateRequest(idemKey: String, amount: Long) {
-        if (idemKey.isBlank()) {
-            throw InvalidRequestException("idemKey는 필수입니다.")
-        }
-        if (idemKey.length > 100) {
-            throw InvalidRequestException("idemKey는 100자를 초과할 수 없습니다.")
-        }
+        validateIdemKey(idemKey)
         if (amount <= 0) {
             throw InvalidRequestException("amount는 0보다 커야 합니다.")
         }

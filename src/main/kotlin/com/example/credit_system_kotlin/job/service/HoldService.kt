@@ -5,6 +5,7 @@ import com.example.credit_system_kotlin.global.exception.DuplicateRequestInProgr
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
+import com.example.credit_system_kotlin.global.validation.validateIdemKey
 import com.example.credit_system_kotlin.job.domain.IdempotencyKey
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.dto.HoldResult
@@ -56,12 +57,7 @@ class HoldService(
     }
 
     private fun validateRequest(idemKey: String, prompt: String) {
-        if (idemKey.isBlank()) {
-            throw InvalidRequestException("idemKey는 필수입니다.")
-        }
-        if (idemKey.length > 100) {
-            throw InvalidRequestException("idemKey는 100자를 초과할 수 없습니다.")
-        }
+        validateIdemKey(idemKey)
         if (prompt.isBlank()) {
             throw InvalidRequestException("prompt는 필수입니다.")
         }
