@@ -4,7 +4,7 @@
 대상: `credit_system` (Java) → `credit-system-kotlin` (Kotlin)
 
 현재 상태: **이식 완료.** `src/main` 과 테스트 4개 계층을 모두 옮겼다.
-`./gradlew test` 27개 클래스 / 132 테스트 통과.
+`./gradlew test` 27개 클래스 / 133 테스트 통과.
 
 > 2026-08-20 갱신: 이 시점부터 git 저장소로 관리한다 (`5d39be6` 이 이식 작업본 첫 커밋).
 
