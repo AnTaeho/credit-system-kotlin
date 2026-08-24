@@ -8,15 +8,12 @@ data class JobAttempt(val jobId: Long, val attemptNo: Int) {
         private const val SEPARATOR = ":"
 
         internal fun parse(member: String?): JobAttempt? {
-            if (member == null) {
+            val parts = member?.split(SEPARATOR) ?: return null
+            if (parts.size != 2) {
                 return null
             }
-            val separatorIndex = member.indexOf(SEPARATOR)
-            if (separatorIndex < 0) {
-                return null
-            }
-            val jobId = member.take(separatorIndex).toLongOrNull() ?: return null
-            val attemptNo = member.substring(separatorIndex + 1).toIntOrNull() ?: return null
+            val jobId = parts[0].toLongOrNull() ?: return null
+            val attemptNo = parts[1].toIntOrNull() ?: return null
             return JobAttempt(jobId, attemptNo)
         }
     }

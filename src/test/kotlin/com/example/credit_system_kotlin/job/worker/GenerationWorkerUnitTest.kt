@@ -38,7 +38,7 @@ class GenerationWorkerUnitTest {
     fun setUp() {
         worker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(),
-            WorkerProperties(true, 20, CONCURRENCY), POLL_INTERVAL_MILLIS
+            WorkerProperties(true, 20, CONCURRENCY)
         )
         job = Job.hold(10L, 100L, "cat")
         ReflectionTestUtils.setField(job, "id", 1L)
@@ -88,7 +88,7 @@ class GenerationWorkerUnitTest {
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
             TaskExecutor { throw IllegalStateException("executor shutdown") },
-            WorkerProperties(true, 20, CONCURRENCY), POLL_INTERVAL_MILLIS
+            WorkerProperties(true, 20, CONCURRENCY)
         )
         doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
@@ -123,7 +123,7 @@ class GenerationWorkerUnitTest {
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
             TaskExecutor { throw TaskRejectedException("pool exhausted") },
-            WorkerProperties(true, 20, CONCURRENCY), POLL_INTERVAL_MILLIS
+            WorkerProperties(true, 20, CONCURRENCY)
         )
         doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
@@ -152,6 +152,5 @@ class GenerationWorkerUnitTest {
 
     companion object {
         private const val CONCURRENCY = 3
-        private const val POLL_INTERVAL_MILLIS = 500L
     }
 }

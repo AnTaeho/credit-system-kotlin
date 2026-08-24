@@ -40,7 +40,7 @@ class HeartbeatRegistryTest {
     @BeforeEach
     fun setUp() {
         val properties = HeartbeatProperties(
-            timeoutSeconds = 10, refreshIntervalSeconds = 1, suppressionAlertSeconds = 60
+            timeoutSeconds = 10, refreshIntervalSeconds = 1
         )
         clock = MutableClock(Instant.now())
         registry = HeartbeatRegistry(redisTemplate, properties, WorkerProperties(true, 20, 3), clock)

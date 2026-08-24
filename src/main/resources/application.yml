@@ -44,7 +44,6 @@ app:
   heartbeat:
     timeout-seconds: 10
     refresh-interval-seconds: 5
-    suppression-alert-seconds: 60
   processing:
     timeout-seconds: 60
 

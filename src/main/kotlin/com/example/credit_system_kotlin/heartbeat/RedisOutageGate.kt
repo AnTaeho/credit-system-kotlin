@@ -1,12 +1,8 @@
 package com.example.credit_system_kotlin.heartbeat
 
-import org.slf4j.LoggerFactory
 import java.time.Clock
-import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
-
-private val log = LoggerFactory.getLogger(RedisOutageGate::class.java)
 
 class RedisOutageGate internal constructor(
     private val heartbeatProperties: HeartbeatProperties,
@@ -14,59 +10,14 @@ class RedisOutageGate internal constructor(
 ) {
 
     private val lastRedisFailureAt = AtomicReference(NONE)
-    private val suppressionStartedAt = AtomicReference(NONE)
-    private val lastSuppressionAlertAt = AtomicReference(NONE)
 
     fun recordFailure() {
-        val now = clock.instant()
-        if (!isInGraceAt(now)) {
-            suppressionStartedAt.set(now)
-            lastSuppressionAlertAt.set(now)
-        }
-        lastRedisFailureAt.set(now)
+        lastRedisFailureAt.set(clock.instant())
     }
 
-    fun isInRecoveryGrace(): Boolean {
-        val now = clock.instant()
-        if (isInGraceAt(now)) {
-            alertIfSuppressionProlonged(now)
-            return true
-        }
-        clearSuppression(now)
-        return false
-    }
-
-    private fun isInGraceAt(now: Instant): Boolean =
-        now.isBefore(lastRedisFailureAt.get().plusSeconds(heartbeatProperties.timeoutSeconds))
-
-    private fun alertIfSuppressionProlonged(now: Instant) {
-        val alertSeconds = heartbeatProperties.suppressionAlertSeconds
-        val startedAt = suppressionStartedAt.get()
-        val lastAlertAt = lastSuppressionAlertAt.get()
-        if (startedAt == NONE || now.isBefore(lastAlertAt.plusSeconds(alertSeconds))) {
-            return
-        }
-        if (!lastSuppressionAlertAt.compareAndSet(lastAlertAt, now)) {
-            return
-        }
-        log.error(
-            "Redis 장애가 {}초째 지속 중입니다. PROCESSING job 회수가 그동안 계속 억제되고 있습니다. " +
-                "Redis가 복구될 때까지 만료 job은 FAILED로 전이되지 않고 재시도·환불도 지연됩니다.",
-            Duration.between(startedAt, now).seconds
-        )
-    }
-
-    private fun clearSuppression(now: Instant) {
-        val startedAt = suppressionStartedAt.getAndSet(NONE)
-        if (startedAt == NONE) {
-            return
-        }
-        lastSuppressionAlertAt.set(NONE)
-        log.info(
-            "Redis 복구 유예 종료, PROCESSING job 회수를 재개합니다: 억제 지속 {}초",
-            Duration.between(startedAt, now).seconds
-        )
-    }
+    /** 마지막 Redis 실패로부터 timeout 이 지나기 전에는 살아있는 job 을 회수하지 않는다. */
+    fun isInRecoveryGrace(): Boolean =
+        clock.instant().isBefore(lastRedisFailureAt.get().plusSeconds(heartbeatProperties.timeoutSeconds))
 
     companion object {
         private val NONE: Instant = Instant.EPOCH
