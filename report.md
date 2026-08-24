@@ -1613,6 +1613,140 @@ API 동작(경로·응답 JSON·상태코드), 예외 문구, DB 스키마는 �
 
 ---
 
+## Q. 구조를 평탄화했다 — 코드가 아니라 비계를 줄였다 (2026-08-24)
+
+P 에서 코드의 양을 줄였는데도 "흐름에서 뭘 읽어야 할지 한눈에 안 보인다"는 문제가 남았다.
+세어 보니 원인이 로직이 아니었다.
+
+### Q-0. 진단 — 1700줄 / 52파일 / 24패키지
+
+```
+패키지당 평균 2.2 파일
+패키지 11개가 파일을 딱 하나씩만 담고 있었다
+파일 15개가 10줄 이하였다 (다 합쳐 68줄)
+```
+
+`HoldResult` 3줄, `ChargeRequest` 3줄, 예외 5개가 3~4줄씩 각자 파일을 차지했다.
+자바에서 온 "한 파일 한 클래스" 습관이 그대로 남은 것인데, **코틀린은 한 파일에 여러
+최상위 선언을 둘 수 있다.** 흐름이 안 보인 건 코드가 복잡해서가 아니라 1700줄을 52개로
+쪼개 24개 서랍에 나눠 넣었기 때문이었다.
+
+### Q-1. `RedisOutageGate` 를 `HeartbeatRegistry` 안으로 흡수했다
+
+P-1 에서 경보 기계를 걷어내고 나니 필드 1개 + 메서드 2개가 남았고, **전용 테스트 파일도
+그때 함께 사라졌다.** `HeartbeatRegistry` 가 인라인으로 만들어 혼자 쓰던 터라 클래스로
+설 이유가 없어졌다. private 헬퍼가 클래스 행세를 하고 있던 셈이다.
+
+이름은 `recordFailure` → `recordRedisFailure` 로 바꿨다. 클래스 이름(`RedisOutageGate`)이
+사라지면 "무엇의 실패인지"를 메서드 이름이 대신 말해야 하기 때문이다.
+
+**`HeartbeatRegistryTest` 를 한 줄도 고치지 않았다.** 18개가 그대로 통과하는 것이 동작이
+안 바뀐 증거다 — 공개 API 로만 검증하는 테스트의 값어치가 여기서 드러났다.
+
+### Q-2. 평탄화 규칙 — 도메인 크기로 갈랐다
+
+**파일이 6개 안팎인 도메인은 하위 패키지를 없애고, 파일이 많은 도메인만 유지한다.**
+
+| 도메인 | 결정 | 결과 |
+|---|---|---|
+| `job` | 하위 패키지 유지 | `domain` `api` `service` `worker` `scheduling` (15파일) |
+| `ledger` | 평탄화 | 6파일 |
+| `organization` | 평탄화 | 6파일 |
+| `global` | 평탄화 | 6파일 |
+| `heartbeat` | 이미 평탄 | 3파일 |
+
+`job/controller` 를 `job/api` 로 바꾸면서 DTO 도 같이 넣었다. 컨트롤러와 그 요청·응답
+타입은 함께 읽히는 것이라 한 서랍에 있는 편이 낫다.
+
+### Q-3. 합친 파일
+
+| 합쳐진 것 | 어디로 |
+|---|---|
+| 예외 5개 (`BusinessException` + 4) | `global/Exceptions.kt` |
+| `ErrorResponse` | `global/GlobalExceptionHandler.kt` |
+| `HoldResult`, `JobCreateRequest`, `JobResponse` | `job/api/JobDtos.kt` |
+| `LedgerResponse`, `LedgerBalanceCheck` | `ledger/LedgerDtos.kt` |
+| `BalanceResponse`, `ChargeRequest`, `ChargeResponse` | `organization/OrganizationDtos.kt` |
+| `JobStatus` | `job/domain/Job.kt` |
+| `LedgerType` | `ledger/LedgerEntry.kt` |
+| `StubGenerationException` | `job/worker/GenerationStubClient.kt` |
+| `IdempotencyProperties` | `job/scheduling/IdempotencyKeyCleanupTask.kt` |
+
+**선언의 개수는 하나도 안 줄었다.** 파일 개수만 줄었다. 이건 코드를 지운 게 아니라
+같이 읽히는 것을 같은 자리에 모은 것이다.
+
+### Q-4. N-4 의 경고가 실제로 발동했다 ⚠️
+
+N-4 에 이렇게 적어뒀었다:
+
+> 리포지토리 쿼리에 FQ 패키지명이 **문자열로** 들어 있다. 컴파일러가 안 잡아준다.
+> 이번엔 `job.domain` 과 `ledger.dto` 가 이동 대상이 아니라 무사했다.
+> **앞으로 이 두 패키지를 옮기면 런타임에야 터진다.**
+
+이번에 `ledger.dto` 를 옮겼다. 그래서 실제로 고쳐야 했다:
+
+```kotlin
+// LedgerRepository 의 JPQL — 컴파일러도 ktlint 도 못 잡는 자리
+- SELECT new com.example.credit_system_kotlin.ledger.dto.LedgerBalanceCheck(
++ SELECT new com.example.credit_system_kotlin.ledger.LedgerBalanceCheck(
+```
+
+반대로 `JobStatus` 는 `Job.kt` **파일 안으로** 들어가지만 패키지는 `job.domain` 그대로라
+FQ 이름이 안 바뀐다. `JobRepository` 의 FQ 참조 6곳은 손대지 않았다 — 파일 위치와
+패키지가 별개라는 점이 여기서 갈렸다.
+
+**이걸 검증한 것은 `LedgerReconciliationTaskTest` 다.** 그 테스트가 이 JPQL 을 런타임에
+실제로 실행하므로, 5개가 통과하는 것이 문자열을 제대로 고쳤다는 증거가 된다.
+컴파일 통과만으로는 아무것도 보장되지 않는 자리였다.
+
+→ 남는 교훈: **JPQL 안의 FQ 이름은 여전히 `job.domain` 을 가리키고 있다.** 그 패키지를
+옮기면 같은 일이 반복된다.
+
+### Q-5. 최종 구조 — 37파일 / 10패키지
+
+```
+CreditSystemKotlinApplication.kt
+
+job/domain/      Job(+JobStatus), IdempotencyKey, JobRepository, IdempotencyKeyRepository
+job/api/         JobApiController, JobDtos
+job/service/     HoldService, JobLifecycleService, JobQueryService
+job/worker/      GenerationWorker, GenerationJobProcessor,
+                 GenerationStubClient(+StubGenerationException), WorkerExecutorConfig
+job/scheduling/  DeadJobRecoveryTask, IdempotencyKeyCleanupTask(+IdempotencyProperties)
+
+ledger/          LedgerEntry(+LedgerType), LedgerRepository, LedgerDtos,
+                 LedgerApiController, LedgerQueryService, LedgerReconciliationTask
+
+organization/    Organization, OrganizationRepository, OrganizationDtos,
+                 OrganizationApiController, ChargeService, OrganizationQueryService
+
+heartbeat/       HeartbeatRegistry, JobAttempt, HeartbeatProperties
+
+global/          Exceptions, GlobalExceptionHandler(+ErrorResponse),
+                 BaseEntity, AppProperties, WorkerProperties, IdemKeys
+```
+
+52파일 24패키지 → **37파일 10패키지.** 총 줄수는 거의 그대로다(비계만 줄었다).
+
+### Q-6. 검증
+
+```
+./gradlew cleanTest test ktlintCheck detekt
+→ 126 테스트, 실패 0, 에러 0
+```
+
+**테스트 개수가 126 에서 안 바뀐 것이 이번 작업의 완료 기준이었다.** P 와 달리 Q 는
+선언을 하나도 없애지 않았으므로 개수가 변하면 그게 실수다.
+
+옮긴 뒤 다음 grep 이 0건인지도 확인했다 — 사라진 패키지를 가리키는 잔존 참조가 없다는 뜻이다:
+```
+credit_system_kotlin.{ledger,job,organization}.dto
+credit_system_kotlin.global.{exception,config,domain,validation}
+credit_system_kotlin.{job,ledger,organization}.{repository,controller,service,domain,stub,scheduling}
+```
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.
