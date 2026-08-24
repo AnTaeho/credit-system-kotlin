@@ -1,9 +1,9 @@
 package com.example.credit_system_kotlin.job.worker
 
-import com.example.credit_system_kotlin.global.config.WorkerProperties
+import com.example.credit_system_kotlin.global.WorkerProperties
 import com.example.credit_system_kotlin.job.domain.Job
+import com.example.credit_system_kotlin.job.domain.JobRepository
 import com.example.credit_system_kotlin.job.domain.JobStatus
-import com.example.credit_system_kotlin.job.repository.JobRepository
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression

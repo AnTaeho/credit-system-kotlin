@@ -1,7 +1,7 @@
 package com.example.credit_system_kotlin.job.scheduling
 
 import com.example.credit_system_kotlin.job.domain.IdempotencyKey
-import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
+import com.example.credit_system_kotlin.job.domain.IdempotencyKeyRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

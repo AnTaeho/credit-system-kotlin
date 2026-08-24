@@ -1,9 +1,9 @@
 package com.example.credit_system_kotlin.job.concurrency
 
-import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
+import com.example.credit_system_kotlin.global.InsufficientBalanceException
 import com.example.credit_system_kotlin.job.service.HoldService
-import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.organization.Organization
+import com.example.credit_system_kotlin.organization.OrganizationRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

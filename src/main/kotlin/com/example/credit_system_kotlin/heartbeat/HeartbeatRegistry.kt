@@ -1,6 +1,6 @@
 package com.example.credit_system_kotlin.heartbeat
 
-import com.example.credit_system_kotlin.global.config.WorkerProperties
+import com.example.credit_system_kotlin.global.WorkerProperties
 import jakarta.annotation.PreDestroy
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired

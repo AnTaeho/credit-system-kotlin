@@ -1,6 +1,6 @@
 package com.example.credit_system_kotlin.job.domain
 
-import com.example.credit_system_kotlin.global.domain.BaseEntity
+import com.example.credit_system_kotlin.global.BaseEntity
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -59,4 +59,12 @@ class Job private constructor(
         fun hold(organizationId: Long, holdAmount: Long, prompt: String): Job =
             Job(organizationId, holdAmount, prompt)
     }
+}
+
+enum class JobStatus {
+    HOLDING,
+    PROCESSING,
+    COMPLETED,
+    FAILED,
+    REFUNDED
 }

@@ -1,8 +1,9 @@
 package com.example.credit_system_kotlin.job.scheduling
 
-import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
+import com.example.credit_system_kotlin.job.domain.IdempotencyKeyRepository
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
@@ -44,5 +45,14 @@ class IdempotencyKeyCleanupTask(
 
     companion object {
         private const val CLEANUP_BATCH_SIZE = 500
+    }
+}
+
+@ConfigurationProperties(prefix = "app.idempotency")
+data class IdempotencyProperties(
+    val retentionDays: Long
+) {
+    init {
+        require(retentionDays >= 1) { "idempotency retention-days는 1 이상이어야 합니다." }
     }
 }
