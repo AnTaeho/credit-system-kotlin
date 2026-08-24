@@ -1183,6 +1183,147 @@ L 시점에 `!retryable || attempt == CONFIRM_MAX_ATTEMPTS` 로 합쳐 뒀던 �
 
 ---
 
+## N. scheduler 봉지를 해체했다 (2026-08-24)
+
+"코드가 전체적으로 복잡해졌다"는 진단에서 출발해 **패키지 배치**부터 손봤다.
+로직은 건드리지 않았다.
+
+### N-0. 먼저: 워킹 트리에 회귀 2건이 잠들어 있었다 ⚠️
+
+재배치를 시작하기 전에 커밋되지 않은 변경을 확인했더니, "미사용 코드 정리"로
+보이는 두 변경이 실은 하중을 받는 코드를 걷어낸 것이었다.
+
+**(1) `DeadJobSchedulerTask` 반복문 안의 `try/catch` 제거**
+
+세 반복문에서 항목 단위 `catch (e: RuntimeException)` 이 사라져 있었다.
+`scan()` 의 단계별 catch 는 남아 있었지만 그건 층위가 다르다 —
+**job 한 건이 터지면 같은 주기의 나머지 job 전체가 처리되지 않는다.**
+
+이 회귀는 조용하지 않았다. 이미 그 동작을 못 박은 테스트 2개가 깨져 있었다:
+
+- `한 job의 환불 실패가 같은 주기의 나머지 job을 막지 않는다`
+- `heartbeat 만료 회수 실패가 나머지 만료 job을 막지 않는다`
+
+**(2) `HeartbeatRegistry` 의 `@Autowired` 보조 생성자 제거** — 이쪽이 위험했다
+
+```kotlin
+@Component
+class HeartbeatRegistry internal constructor(
+    private val redisTemplate: StringRedisTemplate,
+    private val appProperties: AppProperties,
+    workerProperties: WorkerProperties,
+    private val clock: Clock              // ← 테스트가 MutableClock 을 밀어넣는 자리
+) {
+    @Autowired                            // ← 이게 지워져 있었다
+    constructor(
+        redisTemplate: StringRedisTemplate,
+        appProperties: AppProperties,
+        workerProperties: WorkerProperties
+    ) : this(redisTemplate, appProperties, workerProperties, Clock.systemUTC())
+```
+
+호출부가 없으니 미사용으로 보인다. 그런데 이건 **Spring 이 쓰는 진입점**이다.
+지우면 Spring 은 남은 주 생성자를 골라 `Clock` 빈을 찾다가 실패한다:
+
+```
+No qualifying bean of type 'java.time.Clock' available
+  → heartbeatRegistry 생성 실패
+  → generationJobProcessor 생성 실패
+  → ApplicationContext 전체 실패
+```
+
+`@SpringBootTest` 16개가 통째로 죽었다. **컴파일은 통과한다** — 컨텍스트를 띄워야
+드러나는 종류의 회귀다. 정적 분석과 컴파일러가 둘 다 놓치는 자리라는 걸 남겨둔다.
+
+→ 둘 다 되돌렸다(`9d5ec6d`). 단 (1)은 `try/catch` 를 반복문 안에 그대로 넣지 않고
+반복문 본문을 항목 1건짜리 함수(`recoverExpired`, `recoverStalled`, `retryOrRefund`)로
+빼낸 뒤 그 안에 뒀다. 격리는 되살리고 중첩은 얕게 남긴다.
+
+### N-1. `scheduler` 는 역할이 아니라 실행 방식으로 묶인 봉지였다
+
+| 파일 | 실제 관심사 |
+|---|---|
+| `HeartbeatRegistry`, `JobAttempt`, `RedisOutageGate` | 스케줄러가 아니다. Redis 기반 생존신호 **인프라** |
+| `DeadJobSchedulerTask` | job 회수·재시도 |
+| `IdempotencyKeyCleanupTask` | 멱등키(job) 정리 |
+| `LedgerReconciliationTask` | 원장 대사 |
+
+공통점은 "스케줄로 돈다"뿐이다. 그건 실행 방식이지 역할이 아니다.
+`HeartbeatRegistry` 는 아예 스케줄로 돌지도 않는다 — 워커가 직접 부른다.
+
+**대가는 패키지 순환이었다:**
+
+```
+job.worker.GenerationJobProcessor  →  scheduler.HeartbeatRegistry
+scheduler.DeadJobSchedulerTask     →  job.service.JobLifecycleService
+                                      job.repository.JobRepository
+```
+
+job 과 scheduler 가 서로를 문다.
+
+### N-2. 재배치
+
+```
+heartbeat/            ← HeartbeatRegistry, JobAttempt, RedisOutageGate
+job/scheduling/       ← DeadJobRecoveryTask, IdempotencyKeyCleanupTask
+ledger/scheduling/    ← LedgerReconciliationTask
+scheduler/            삭제
+```
+
+`heartbeat` 는 어느 도메인도 모르는 인프라라 최상위에 독립시켰다.
+배치 작업은 각자 자기 도메인 밑으로 내려보냈다.
+
+**결과: 의존이 한 방향이 됐다.** `heartbeat` 는 아무도 참조하지 않고,
+`job` 과 `ledger` 가 각각 `heartbeat` 를 참조한다.
+
+테스트 헬퍼 `MutableClock` 은 `HeartbeatRegistryTest`·`RedisOutageGateTest`
+둘만 쓰므로 `heartbeat` 로 같이 갔다. Kotlin `internal` 은 모듈 단위라
+패키지가 갈려도 가시성 수정자를 손댈 일이 없었다.
+
+### N-3. `DeadJobSchedulerTask` → `DeadJobRecoveryTask`
+
+`job.scheduling` 에 놓이면 이름의 "Scheduler" 가 패키지와 겹쳐 아무것도
+말해주지 않는다. 이 클래스가 실제로 하는 일은 죽은 job 회수다.
+
+### N-4. 함정: JPQL 문자열에 박힌 FQ 패키지명
+
+리포지토리 쿼리에 FQ 패키지명이 **문자열로** 들어 있다. 컴파일러가 안 잡아준다.
+
+```kotlin
+SET j.status = com.example.credit_system_kotlin.job.domain.JobStatus.PROCESSING   // JobRepository, 6곳
+SELECT new com.example.credit_system_kotlin.ledger.dto.LedgerBalanceCheck(        // LedgerRepository, 1곳
+```
+
+이번엔 `job.domain` 과 `ledger.dto` 가 이동 대상이 아니라 무사했다.
+**앞으로 이 두 패키지를 옮기면 런타임에야 터진다.** `.editorconfig` 의
+`ktlint_standard_package-name = disabled` 주석에도 같은 경고가 있다.
+
+### N-5. 남겨둔 것 — 이번 범위 밖
+
+패키지 배치와 별개인 **계층·중복** 문제라 이번에 손대지 않았다.
+
+1. **컨트롤러 3개가 전부 리포지토리를 직접 찌른다.**
+   `JobApiController → JobRepository`, `OrganizationApiController → OrganizationRepository`,
+   `LedgerApiController → LedgerRepository`. 쓰기 경로에는 서비스가 있는데 조회 경로에만 없다.
+2. **`global` 이 잡동사니 서랍이다.** 세 도메인의 예외와 모든 설정이 한자리에.
+   `StubGenerationException` 은 `job.stub` 에서 나 `job.worker` 에서 잡혀 죽는
+   내부 예외인데 전역에 앉아 있다.
+3. **`idemKey` 검증이 `HoldService`·`ChargeService` 에 복붙돼 있다.**
+   공백 검사와 100자 상한이 두 벌이다.
+
+### N-6. 검증
+
+```
+./gradlew cleanTest test ktlintCheck detekt
+→ 133 tests, 실패 0, 에러 0
+grep -rn "credit_system_kotlin.scheduler" src/   → 0건
+```
+
+이동 커밋의 diff 는 `package`·`import`·클래스명 세 종류뿐이다(23삽입/19삭제).
+`git mv` 로 옮겨 히스토리도 이어진다.
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.
