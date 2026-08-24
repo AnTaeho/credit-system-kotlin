@@ -1747,6 +1747,104 @@ credit_system_kotlin.{job,ledger,organization}.{repository,controller,service,do
 
 ---
 
+## R. JPQL 의 FQ 이름을 걷어냈다 — QueryDSL 은 쓰지 않기로 했다 (2026-08-24)
+
+N-4 와 Q-4 에서 두 번 문제가 된 "JPQL 문자열 안의 FQ 패키지명"을 없앴다.
+QueryDSL 도입도 검토했으나 이 코드베이스에는 맞지 않는다고 판단했다.
+
+### R-0. 스파이크로 확인한 것 — 추측하지 않고 돌려봤다
+
+**(1) Hibernate 7 은 HQL 에서 enum 을 단순 이름으로 받는다.** ✅
+```kotlin
+- SET j.status = com.example.credit_system_kotlin.job.domain.JobStatus.PROCESSING
++ SET j.status = JobStatus.PROCESSING
+```
+바꿔서 126개 전부 통과. `JobStatus` 가 같은 패키지에 있어 import 도 필요 없다.
+
+**(2) 생성자 인스턴스화는 FQ 를 요구한다.** ❌
+```kotlin
+SELECT new LedgerBalanceCheck(...)
+```
+→ `SemanticException: Could not resolve class 'LedgerBalanceCheck' named for instantiation`
+→ 컨텍스트 로딩 실패로 **67개 테스트가 깨졌다.**
+
+둘을 한꺼번에 바꿨다가 실패를 보고, `LedgerRepository` 만 되돌려 다시 돌려서 (1)이 문제가
+아님을 갈라냈다. **두 변경을 한 번에 시험했으면 enum 쪽도 안 되는 줄 알았을 것이다.**
+
+→ 그래서 `LedgerRepository` 의 FQ 이름 1곳은 남는다. 다음에 누가 "정리"하려다 같은 곳을
+밟지 않도록 한 줄 주석을 달았다.
+
+### R-1. 중복 쿼리를 default 메서드로 바꿨다
+
+`startProcessingIfAttemptMatches` 의 JPQL 은 `transitionIfStatusAndAttemptMatch` 와
+**글자만 다른 같은 쿼리**였다.
+
+```
+startProcessingIfAttemptMatches  : SET status=PROCESSING  WHERE status=HOLDING          AND ...
+transitionIfStatusAndAttemptMatch: SET status=:newStatus  WHERE status=:expectedStatus  AND ...
+```
+
+**지우지 않고 `@Query` 만 걷어냈다:**
+```kotlin
+fun startProcessingIfAttemptMatches(jobId: Long, attemptNo: Int, now: Instant): Int =
+    transitionIfStatusAndAttemptMatch(jobId, JobStatus.PROCESSING, JobStatus.HOLDING, attemptNo, now)
+```
+
+지우는 쪽도 검토했는데 **호출부가 24곳(프로덕션 1 + 테스트 23)이었다.** 전부
+`transitionIfStatusAndAttemptMatch(jobId, JobStatus.PROCESSING, JobStatus.HOLDING, ...)` 이 되면
+"HOLDING 에서 PROCESSING 으로"라는 의도를 인자 2개를 읽어야 알게 된다. 중복 JPQL 은 없애되
+이름이 주는 의도는 남기는 쪽을 골랐다.
+
+**검증의 핵심은 프록시였다.** Spring Data 인터페이스의 default 메서드 안에서 다른 리포지토리
+메서드를 부를 때 프록시를 거쳐야 `@Modifying(flushAutomatically, clearAutomatically)` 가
+적용된다. 안 거치면 UPDATE 가 안 나가거나 영속성 컨텍스트가 안 비워져 **조용히 깨진다.**
+실제 DB 로 이 메서드를 구동하는 `JobRepositoryTest` 9개와 전체 파이프라인 테스트
+(`GenerationPipelineEndToEndTest`, `RetryRefundTest`, `ConcurrentHoldTest`)가 통과하는 것이
+근거다 — 프록시를 안 거쳤다면 `updated == 1` 단언이 깨졌을 것이다.
+
+### R-2. QueryDSL 을 쓰지 않기로 한 이유
+
+의존성 자체는 해석된다(`com.querydsl:querydsl-jpa:5.1.0:jakarta`, OpenFeign 포크 `6.11`).
+그런데도 도입하지 않았다.
+
+**(1) `@Modifying(clearAutomatically = true)` 를 잃는다 — 이게 결정적이다.**
+이 벌크 UPDATE 들은 영속성 컨텍스트를 우회한다. `clearAutomatically` 가 낡은 엔티티를 막아준다.
+이 시스템의 안전 모델(잔액이 음수가 안 되는 것, 늦은 워커가 새 시도를 못 덮는 것)이 전부
+이 조건부 UPDATE 위에 서 있다. QueryDSL 로 옮기면 `flush()`/`clear()` 를 손으로 짜서
+지금 Spring Data 가 보장하는 것을 직접 떠맡게 된다. **컴파일 체크를 얻으려고 런타임 안전을
+흔드는 거래다.**
+
+**(2) 동적 쿼리가 하나도 없다.** `@Query` 7개가 전부 정적이다. QueryDSL 의 최대 강점인
+조건 조합이 쓰일 자리가 없다.
+
+**(3) 빌드가 이미 JDK 26 에서 아슬아슬하다.** J 절에서 detekt 를 별도 JVM 으로 분리해야 했던
+게 그 증거다. kapt(유지보수 모드) 또는 KSP codegen 을 얹는 건 같은 종류의 위험이고,
+Hibernate 7.4 / Jakarta Persistence 3.2 조합에서 QueryDSL 이 도는지도 미검증이다.
+
+**(4) 얻는 순이익이 작다.** enum FQ 6곳은 의존성 없이 이미 사라졌다. QueryDSL 이 추가로 주는
+것은 "마지막 FQ 문자열 1곳 + 필드 이름 컴파일 체크"뿐인데, 필드 이름은 IDE 리팩터링으로
+따라오고 이 쿼리들은 전부 테스트가 실제로 실행한다.
+
+**언제 다시 볼 만한가**: 조건이 런타임에 조합되는 조회가 생기면(검색 필터 같은 것) 그때는
+QueryDSL 의 강점이 실제로 쓰인다. 그때도 벌크 UPDATE 는 Spring Data 에 남기고 조회만 옮기는
+쪽이 맞다.
+
+### R-3. 결과
+
+```
+JPQL 안의 FQ 패키지명   7곳 → 1곳 (생성자 인스턴스화, 불가피)
+@Query                  7개 → 6개
+새 의존성               0개
+호출부 변경             0곳
+```
+`./gradlew cleanTest test ktlintCheck detekt` → 126 테스트, 실패 0, 에러 0.
+
+**남는 위험**: `LedgerBalanceCheck` 의 FQ 이름은 `ledger` 패키지를 가리킨다. 그 패키지를 옮기면
+또 런타임에야 터진다. 주석으로 표시해뒀고, `LedgerReconciliationTaskTest` 가 그 쿼리를 실제로
+실행하므로 CI 가 잡아준다.
+
+---
+
 ## 부록: 기타 수정한 것
 
 - `application.yml` 의 `logging.level.com.example.credit_system` → `..._kotlin`.
