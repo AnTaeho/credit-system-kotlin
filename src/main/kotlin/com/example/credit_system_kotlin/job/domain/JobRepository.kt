@@ -10,33 +10,18 @@ import java.time.Instant
 
 interface JobRepository : JpaRepository<Job, Long> {
 
-    @Transactional
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(
-        """
-        UPDATE Job j
-        SET j.status = com.example.credit_system_kotlin.job.domain.JobStatus.PROCESSING,
-            j.updatedAt = :now
-        WHERE j.id = :jobId
-          AND j.status = com.example.credit_system_kotlin.job.domain.JobStatus.HOLDING
-          AND j.attemptNo = :attemptNo
-        """
-    )
-    fun startProcessingIfAttemptMatches(
-        @Param("jobId") jobId: Long,
-        @Param("attemptNo") attemptNo: Int,
-        @Param("now") now: Instant
-    ): Int
+    fun startProcessingIfAttemptMatches(jobId: Long, attemptNo: Int, now: Instant): Int =
+        transitionIfStatusAndAttemptMatch(jobId, JobStatus.PROCESSING, JobStatus.HOLDING, attemptNo, now)
 
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
         """
         UPDATE Job j
-        SET j.status = com.example.credit_system_kotlin.job.domain.JobStatus.COMPLETED,
+        SET j.status = JobStatus.COMPLETED,
             j.resultUrl = :resultUrl, j.updatedAt = :now
         WHERE j.id = :jobId
-          AND j.status = com.example.credit_system_kotlin.job.domain.JobStatus.PROCESSING
+          AND j.status = JobStatus.PROCESSING
           AND j.attemptNo = :attemptNo
         """
     )
@@ -70,10 +55,10 @@ interface JobRepository : JpaRepository<Job, Long> {
         """
         UPDATE Job j
         SET j.attemptNo = j.attemptNo + 1,
-            j.status = com.example.credit_system_kotlin.job.domain.JobStatus.HOLDING,
+            j.status = JobStatus.HOLDING,
             j.updatedAt = :now
         WHERE j.id = :jobId
-          AND j.status = com.example.credit_system_kotlin.job.domain.JobStatus.FAILED
+          AND j.status = JobStatus.FAILED
           AND j.attemptNo = :expectedAttemptNo
         """
     )

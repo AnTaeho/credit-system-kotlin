@@ -11,6 +11,7 @@ interface LedgerRepository : JpaRepository<LedgerEntry, Long> {
 
     fun findByOrganizationIdAndIdemKey(organizationId: Long, idemKey: String): LedgerEntry?
 
+    // 생성자 인스턴스화는 Hibernate 가 FQ 이름을 요구한다. 단순 이름으로 줄이면 부팅 시 SemanticException.
     @Query(
         """
         SELECT new com.example.credit_system_kotlin.ledger.LedgerBalanceCheck(
