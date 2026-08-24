@@ -19,7 +19,7 @@ class IdempotencyKeyCleanupTask(
     private val idempotencyProperties: IdempotencyProperties
 ) {
 
-    @Scheduled(fixedDelayString = "\${app.scheduling.idempotency-cleanup-interval-millis:3600000}")
+    @Scheduled(fixedDelayString = $$"${app.scheduling.idempotency-cleanup-interval-millis:3600000}")
     fun cleanup() {
         val cutoff = Instant.now().minus(idempotencyProperties.retentionDays, ChronoUnit.DAYS)
         var deletedCount = 0

@@ -16,7 +16,7 @@ class LedgerReconciliationTask(
     private val ledgerRepository: LedgerRepository
 ) {
 
-    @Scheduled(fixedDelayString = "\${app.scheduling.reconciliation-interval-millis:60000}")
+    @Scheduled(fixedDelayString = $$"${app.scheduling.reconciliation-interval-millis:60000}")
     fun reconcile() {
         var checkedCount = 0
         var mismatchCount = 0

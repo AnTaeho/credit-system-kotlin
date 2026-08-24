@@ -53,8 +53,7 @@ class JobLifecycleService(
             log.info("재시도 투입 경쟁에서 밀림 또는 이미 처리됨: jobId={}, attemptNo={}", jobId, job.attemptNo)
             return
         }
-        val newAttemptNo = job.attemptNo + 1
-        log.info("재시도 투입: jobId={}, newAttemptNo={}", jobId, newAttemptNo)
+        log.info("재시도 투입: jobId={}, newAttemptNo={}", jobId, job.attemptNo + 1)
     }
 
     @Transactional

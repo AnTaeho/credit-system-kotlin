@@ -15,7 +15,7 @@ data class JobAttempt(val jobId: Long, val attemptNo: Int) {
             if (separatorIndex < 0) {
                 return null
             }
-            val jobId = member.substring(0, separatorIndex).toLongOrNull() ?: return null
+            val jobId = member.take(separatorIndex).toLongOrNull() ?: return null
             val attemptNo = member.substring(separatorIndex + 1).toIntOrNull() ?: return null
             return JobAttempt(jobId, attemptNo)
         }
