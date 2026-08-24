@@ -7,10 +7,12 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Component
 import java.time.Clock
+import java.time.Instant
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 private val log = LoggerFactory.getLogger(HeartbeatRegistry::class.java)
 
@@ -32,7 +34,15 @@ class HeartbeatRegistry internal constructor(
     private val executor: ScheduledExecutorService =
         Executors.newScheduledThreadPool(workerProperties.concurrency)
 
-    private val outageGate = RedisOutageGate(heartbeatProperties, clock)
+    private val lastRedisFailureAt = AtomicReference(NO_FAILURE)
+
+    private fun recordRedisFailure() {
+        lastRedisFailureAt.set(clock.instant())
+    }
+
+    /** 마지막 Redis 실패로부터 timeout 이 지나기 전에는 살아있는 job 을 회수하지 않는다. */
+    private fun isInRecoveryGrace(): Boolean =
+        clock.instant().isBefore(lastRedisFailureAt.get().plusSeconds(heartbeatProperties.timeoutSeconds))
 
     fun startHeartbeat(jobId: Long, attemptNo: Int): ScheduledFuture<*> {
         val attempt = JobAttempt(jobId, attemptNo)
@@ -47,7 +57,7 @@ class HeartbeatRegistry internal constructor(
     }
 
     fun findExpiredAttempts(): Set<JobAttempt> {
-        if (outageGate.isInRecoveryGrace()) {
+        if (isInRecoveryGrace()) {
             log.debug("Redis 복구 유예 구간, heartbeat 만료 판정 보류")
             return emptySet()
         }
@@ -55,7 +65,7 @@ class HeartbeatRegistry internal constructor(
         val expired = try {
             redisTemplate.opsForZSet().rangeByScore(KEY, Double.NEGATIVE_INFINITY, now)
         } catch (e: RuntimeException) {
-            outageGate.recordFailure()
+            recordRedisFailure()
             log.warn("heartbeat 만료 조회 실패, 이번 주기는 건너뜀", e)
             return emptySet()
         }
@@ -79,7 +89,7 @@ class HeartbeatRegistry internal constructor(
             redisTemplate.opsForZSet().remove(KEY, member)
             log.warn("해석할 수 없는 heartbeat 멤버 제거: {}", member)
         } catch (e: RuntimeException) {
-            outageGate.recordFailure()
+            recordRedisFailure()
             log.warn("해석할 수 없는 heartbeat 멤버 제거 실패: {}", member, e)
         }
     }
@@ -89,13 +99,13 @@ class HeartbeatRegistry internal constructor(
         try {
             redisTemplate.opsForZSet().add(KEY, attempt.toMember(), expireAt.toDouble())
         } catch (e: RuntimeException) {
-            outageGate.recordFailure()
+            recordRedisFailure()
             log.warn("heartbeat 갱신 실패: jobId={}, attemptNo={}", attempt.jobId, attempt.attemptNo, e)
         }
     }
 
     fun hasLiveHeartbeat(jobId: Long, attemptNo: Int): Boolean {
-        if (outageGate.isInRecoveryGrace()) {
+        if (isInRecoveryGrace()) {
             log.debug("Redis 복구 유예 구간, 회수 보류: jobId={}, attemptNo={}", jobId, attemptNo)
             return true
         }
@@ -103,7 +113,7 @@ class HeartbeatRegistry internal constructor(
         val score = try {
             redisTemplate.opsForZSet().score(KEY, member)
         } catch (e: RuntimeException) {
-            outageGate.recordFailure()
+            recordRedisFailure()
             log.warn("heartbeat 조회 실패, 회수 보류: jobId={}, attemptNo={}", jobId, attemptNo, e)
             return true
         }
@@ -115,7 +125,7 @@ class HeartbeatRegistry internal constructor(
         try {
             redisTemplate.opsForZSet().remove(KEY, member)
         } catch (e: RuntimeException) {
-            outageGate.recordFailure()
+            recordRedisFailure()
             log.warn("heartbeat 제거 실패: jobId={}, attemptNo={}", jobId, attemptNo, e)
         }
     }
@@ -127,5 +137,6 @@ class HeartbeatRegistry internal constructor(
 
     companion object {
         private const val KEY = "heartbeats"
+        private val NO_FAILURE: Instant = Instant.EPOCH
     }
 }
