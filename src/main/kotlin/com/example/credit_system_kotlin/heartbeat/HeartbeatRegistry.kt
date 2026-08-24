@@ -1,6 +1,5 @@
 package com.example.credit_system_kotlin.heartbeat
 
-import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.global.config.WorkerProperties
 import jakarta.annotation.PreDestroy
 import org.slf4j.LoggerFactory
@@ -18,7 +17,7 @@ private val log = LoggerFactory.getLogger(HeartbeatRegistry::class.java)
 @Component
 class HeartbeatRegistry internal constructor(
     private val redisTemplate: StringRedisTemplate,
-    private val appProperties: AppProperties,
+    private val heartbeatProperties: HeartbeatProperties,
     workerProperties: WorkerProperties,
     private val clock: Clock
 ) {
@@ -26,19 +25,19 @@ class HeartbeatRegistry internal constructor(
     @Autowired
     constructor(
         redisTemplate: StringRedisTemplate,
-        appProperties: AppProperties,
+        heartbeatProperties: HeartbeatProperties,
         workerProperties: WorkerProperties
-    ) : this(redisTemplate, appProperties, workerProperties, Clock.systemUTC())
+    ) : this(redisTemplate, heartbeatProperties, workerProperties, Clock.systemUTC())
 
     private val executor: ScheduledExecutorService =
         Executors.newScheduledThreadPool(workerProperties.concurrency)
 
-    private val outageGate = RedisOutageGate(appProperties, clock)
+    private val outageGate = RedisOutageGate(heartbeatProperties, clock)
 
     fun startHeartbeat(jobId: Long, attemptNo: Int): ScheduledFuture<*> {
         val attempt = JobAttempt(jobId, attemptNo)
         refreshHeartbeat(attempt)
-        val interval = appProperties.heartbeat.refreshIntervalSeconds
+        val interval = heartbeatProperties.refreshIntervalSeconds
         return executor.scheduleAtFixedRate({ refreshHeartbeat(attempt) }, interval, interval, TimeUnit.SECONDS)
     }
 
@@ -86,7 +85,7 @@ class HeartbeatRegistry internal constructor(
     }
 
     private fun refreshHeartbeat(attempt: JobAttempt) {
-        val expireAt = clock.instant().epochSecond + appProperties.heartbeat.timeoutSeconds
+        val expireAt = clock.instant().epochSecond + heartbeatProperties.timeoutSeconds
         try {
             redisTemplate.opsForZSet().add(KEY, attempt.toMember(), expireAt.toDouble())
         } catch (e: RuntimeException) {

@@ -2,7 +2,6 @@ package com.example.credit_system_kotlin.job.stub
 
 import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.global.config.appProperties
-import com.example.credit_system_kotlin.global.exception.StubGenerationException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test

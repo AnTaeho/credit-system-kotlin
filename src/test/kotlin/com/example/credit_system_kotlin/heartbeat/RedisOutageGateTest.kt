@@ -4,8 +4,6 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import com.example.credit_system_kotlin.global.config.AppProperties
-import com.example.credit_system_kotlin.global.config.appProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -23,10 +21,8 @@ class RedisOutageGateTest {
 
     @BeforeEach
     fun setUp() {
-        val properties = appProperties(
-            heartbeat = AppProperties.Heartbeat(
-                timeoutSeconds = 10, refreshIntervalSeconds = 1, suppressionAlertSeconds = 60
-            )
+        val properties = HeartbeatProperties(
+            timeoutSeconds = 10, refreshIntervalSeconds = 1, suppressionAlertSeconds = 60
         )
         clock = MutableClock(Instant.now())
         gate = RedisOutageGate(properties, clock)

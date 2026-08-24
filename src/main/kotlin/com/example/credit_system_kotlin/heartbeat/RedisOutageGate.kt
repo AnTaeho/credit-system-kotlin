@@ -1,6 +1,5 @@
 package com.example.credit_system_kotlin.heartbeat
 
-import com.example.credit_system_kotlin.global.config.AppProperties
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Duration
@@ -10,7 +9,7 @@ import java.util.concurrent.atomic.AtomicReference
 private val log = LoggerFactory.getLogger(RedisOutageGate::class.java)
 
 class RedisOutageGate internal constructor(
-    private val appProperties: AppProperties,
+    private val heartbeatProperties: HeartbeatProperties,
     private val clock: Clock
 ) {
 
@@ -38,10 +37,10 @@ class RedisOutageGate internal constructor(
     }
 
     private fun isInGraceAt(now: Instant): Boolean =
-        now.isBefore(lastRedisFailureAt.get().plusSeconds(appProperties.heartbeat.timeoutSeconds))
+        now.isBefore(lastRedisFailureAt.get().plusSeconds(heartbeatProperties.timeoutSeconds))
 
     private fun alertIfSuppressionProlonged(now: Instant) {
-        val alertSeconds = appProperties.heartbeat.suppressionAlertSeconds
+        val alertSeconds = heartbeatProperties.suppressionAlertSeconds
         val startedAt = suppressionStartedAt.get()
         val lastAlertAt = lastSuppressionAlertAt.get()
         if (startedAt == NONE || now.isBefore(lastAlertAt.plusSeconds(alertSeconds))) {

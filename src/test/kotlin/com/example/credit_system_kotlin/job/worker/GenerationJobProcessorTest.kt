@@ -1,10 +1,10 @@
 package com.example.credit_system_kotlin.job.worker
 
-import com.example.credit_system_kotlin.global.exception.StubGenerationException
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
 import com.example.credit_system_kotlin.job.stub.GenerationStubClient
+import com.example.credit_system_kotlin.job.stub.StubGenerationException
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith

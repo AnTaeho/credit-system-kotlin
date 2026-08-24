@@ -1,6 +1,5 @@
 package com.example.credit_system_kotlin.job.scheduling
 
-import com.example.credit_system_kotlin.global.config.IdempotencyProperties
 import com.example.credit_system_kotlin.job.domain.IdempotencyKey
 import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
 import org.assertj.core.api.Assertions.assertThat

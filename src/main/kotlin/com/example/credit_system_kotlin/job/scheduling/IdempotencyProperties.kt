@@ -1,4 +1,4 @@
-package com.example.credit_system_kotlin.global.config
+package com.example.credit_system_kotlin.job.scheduling
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 

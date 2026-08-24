@@ -1,7 +1,6 @@
 package com.example.credit_system_kotlin.job.stub
 
 import com.example.credit_system_kotlin.global.config.AppProperties
-import com.example.credit_system_kotlin.global.exception.StubGenerationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.util.UUID

@@ -1,8 +1,6 @@
 package com.example.credit_system_kotlin.heartbeat
 
-import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.global.config.WorkerProperties
-import com.example.credit_system_kotlin.global.config.appProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.AfterEach
@@ -41,10 +39,8 @@ class HeartbeatRegistryTest {
 
     @BeforeEach
     fun setUp() {
-        val properties = appProperties(
-            heartbeat = AppProperties.Heartbeat(
-                timeoutSeconds = 10, refreshIntervalSeconds = 1, suppressionAlertSeconds = 60
-            )
+        val properties = HeartbeatProperties(
+            timeoutSeconds = 10, refreshIntervalSeconds = 1, suppressionAlertSeconds = 60
         )
         clock = MutableClock(Instant.now())
         registry = HeartbeatRegistry(redisTemplate, properties, WorkerProperties(true, 20, 3), clock)

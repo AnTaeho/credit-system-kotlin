@@ -7,8 +7,5 @@ package com.example.credit_system_kotlin.global.config
 fun appProperties(
     generation: AppProperties.Generation = AppProperties.Generation(cost = 100L, maxAttempts = 3),
     stub: AppProperties.Stub = AppProperties.Stub(failureRate = 0.0, minDelayMillis = 0, maxDelayMillis = 0),
-    heartbeat: AppProperties.Heartbeat = AppProperties.Heartbeat(
-        timeoutSeconds = 10, refreshIntervalSeconds = 5, suppressionAlertSeconds = 60
-    ),
     processing: AppProperties.Processing = AppProperties.Processing(timeoutSeconds = 60)
-): AppProperties = AppProperties(generation, stub, heartbeat, processing)
+): AppProperties = AppProperties(generation, stub, processing)
