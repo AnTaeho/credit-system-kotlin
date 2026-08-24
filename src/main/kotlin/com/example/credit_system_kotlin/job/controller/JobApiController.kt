@@ -3,8 +3,8 @@ package com.example.credit_system_kotlin.job.controller
 import com.example.credit_system_kotlin.job.dto.HoldResult
 import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.dto.JobResponse
-import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.HoldService
+import com.example.credit_system_kotlin.job.service.JobQueryService
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/jobs")
 class JobApiController(
     private val holdService: HoldService,
-    private val jobRepository: JobRepository
+    private val jobQueryService: JobQueryService
 ) {
 
     @PostMapping
@@ -27,6 +27,5 @@ class JobApiController(
 
     @GetMapping
     fun list(@RequestHeader("X-Organization-Id") organizationId: Long): List<JobResponse> =
-        jobRepository.findByOrganizationIdOrderByIdDesc(organizationId)
-            .map(JobResponse::from)
+        jobQueryService.findByOrganization(organizationId)
 }
