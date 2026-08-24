@@ -1,4 +1,4 @@
-package com.example.credit_system_kotlin.scheduler
+package com.example.credit_system_kotlin.heartbeat
 
 import java.time.Clock
 import java.time.Duration

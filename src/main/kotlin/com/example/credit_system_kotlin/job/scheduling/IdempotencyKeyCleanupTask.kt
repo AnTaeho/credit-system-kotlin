@@ -1,4 +1,4 @@
-package com.example.credit_system_kotlin.scheduler
+package com.example.credit_system_kotlin.job.scheduling
 
 import com.example.credit_system_kotlin.global.config.IdempotencyProperties
 import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository

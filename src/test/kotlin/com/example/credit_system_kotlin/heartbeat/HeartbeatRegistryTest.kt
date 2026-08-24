@@ -1,4 +1,4 @@
-package com.example.credit_system_kotlin.scheduler
+package com.example.credit_system_kotlin.heartbeat
 
 import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.global.config.WorkerProperties

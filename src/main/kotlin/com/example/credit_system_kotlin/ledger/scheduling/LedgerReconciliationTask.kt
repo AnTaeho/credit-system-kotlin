@@ -1,4 +1,4 @@
-package com.example.credit_system_kotlin.scheduler
+package com.example.credit_system_kotlin.ledger.scheduling
 
 import com.example.credit_system_kotlin.ledger.dto.LedgerBalanceCheck
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository

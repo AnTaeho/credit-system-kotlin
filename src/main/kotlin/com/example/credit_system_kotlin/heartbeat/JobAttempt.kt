@@ -1,4 +1,4 @@
-package com.example.credit_system_kotlin.scheduler
+package com.example.credit_system_kotlin.heartbeat
 
 data class JobAttempt(val jobId: Long, val attemptNo: Int) {
 

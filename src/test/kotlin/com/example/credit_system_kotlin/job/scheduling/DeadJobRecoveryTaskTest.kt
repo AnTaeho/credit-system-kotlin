@@ -1,7 +1,9 @@
-package com.example.credit_system_kotlin.scheduler
+package com.example.credit_system_kotlin.job.scheduling
 
 import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.global.config.appProperties
+import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
+import com.example.credit_system_kotlin.heartbeat.JobAttempt
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
@@ -24,7 +26,7 @@ import org.springframework.test.util.ReflectionTestUtils
 import java.time.Instant
 
 @ExtendWith(MockitoExtension::class)
-class DeadJobSchedulerTaskTest {
+class DeadJobRecoveryTaskTest {
 
     @Mock lateinit var heartbeatRegistry: HeartbeatRegistry
 
@@ -32,11 +34,11 @@ class DeadJobSchedulerTaskTest {
 
     @Mock lateinit var jobLifecycleService: JobLifecycleService
 
-    private lateinit var task: DeadJobSchedulerTask
+    private lateinit var task: DeadJobRecoveryTask
 
     @BeforeEach
     fun setUp() {
-        task = DeadJobSchedulerTask(
+        task = DeadJobRecoveryTask(
             heartbeatRegistry, jobRepository, jobLifecycleService,
             appProperties(processing = AppProperties.Processing(timeoutSeconds = 60))
         )

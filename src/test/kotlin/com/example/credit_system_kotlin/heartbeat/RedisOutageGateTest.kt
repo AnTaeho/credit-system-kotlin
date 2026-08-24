@@ -1,4 +1,4 @@
-package com.example.credit_system_kotlin.scheduler
+package com.example.credit_system_kotlin.heartbeat
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger

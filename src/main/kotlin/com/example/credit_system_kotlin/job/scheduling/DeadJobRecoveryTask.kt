@@ -1,6 +1,8 @@
-package com.example.credit_system_kotlin.scheduler
+package com.example.credit_system_kotlin.job.scheduling
 
 import com.example.credit_system_kotlin.global.config.AppProperties
+import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
+import com.example.credit_system_kotlin.heartbeat.JobAttempt
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
@@ -12,11 +14,11 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Instant
 
-private val log = LoggerFactory.getLogger(DeadJobSchedulerTask::class.java)
+private val log = LoggerFactory.getLogger(DeadJobRecoveryTask::class.java)
 
 @Component
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
-class DeadJobSchedulerTask(
+class DeadJobRecoveryTask(
     private val heartbeatRegistry: HeartbeatRegistry,
     private val jobRepository: JobRepository,
     private val jobLifecycleService: JobLifecycleService,
