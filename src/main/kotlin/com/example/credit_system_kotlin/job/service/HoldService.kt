@@ -12,7 +12,6 @@ import com.example.credit_system_kotlin.job.dto.HoldResult
 import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
-import com.example.credit_system_kotlin.ledger.domain.LedgerType
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import org.slf4j.LoggerFactory
@@ -51,7 +50,7 @@ class HoldService(
 
         attachIdemKeyToJob(organizationId, idemKey, jobId)
 
-        ledgerRepository.save(LedgerEntry.of(organizationId, jobId, LedgerType.HOLD, -cost))
+        ledgerRepository.save(LedgerEntry.hold(organizationId, jobId, cost))
         log.info("hold 완료: organizationId={}, jobId={}, cost={}", organizationId, jobId, cost)
         return HoldResult(jobId, false)
     }

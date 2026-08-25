@@ -3,26 +3,49 @@ package com.example.credit_system_kotlin.ledger.domain
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.EnumSource
 
 class LedgerEntryTest {
 
     @Test
-    fun `of에 CHARGE 타입을 넣으면 예외가 발생한다`() {
-        assertThatThrownBy { LedgerEntry.of(1L, 10L, LedgerType.CHARGE, 500L) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("charge(")
+    fun `hold는 amount를 음수로 기록하고 idemKey가 없다`() {
+        val entry = LedgerEntry.hold(1L, 10L, 100L)
+
+        assertThat(entry.type).isEqualTo(LedgerType.HOLD)
+        assertThat(entry.jobId).isEqualTo(10L)
+        assertThat(entry.amount).isEqualTo(-100L)
+        assertThat(entry.idemKey).isNull()
     }
 
-    @ParameterizedTest
-    @EnumSource(value = LedgerType::class, names = ["HOLD", "CONFIRM", "REFUND"])
-    fun `of에 CHARGE가 아닌 타입은 정상 생성되고 idemKey가 없다`(type: LedgerType) {
-        val entry = LedgerEntry.of(1L, 10L, type, -100L)
+    @Test
+    fun `confirm은 amount가 0이고 idemKey가 없다`() {
+        val entry = LedgerEntry.confirm(1L, 10L)
 
-        assertThat(entry.type).isEqualTo(type)
+        assertThat(entry.type).isEqualTo(LedgerType.CONFIRM)
         assertThat(entry.jobId).isEqualTo(10L)
+        assertThat(entry.amount).isEqualTo(0L)
         assertThat(entry.idemKey).isNull()
+    }
+
+    @Test
+    fun `refund는 amount를 양수로 기록하고 idemKey가 없다`() {
+        val entry = LedgerEntry.refund(1L, 10L, 100L)
+
+        assertThat(entry.type).isEqualTo(LedgerType.REFUND)
+        assertThat(entry.jobId).isEqualTo(10L)
+        assertThat(entry.amount).isEqualTo(100L)
+        assertThat(entry.idemKey).isNull()
+    }
+
+    @Test
+    fun `hold의 cost가 양수가 아니면 예외가 발생한다`() {
+        assertThatThrownBy { LedgerEntry.hold(1L, 10L, 0L) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `refund의 amount가 양수가 아니면 예외가 발생한다`() {
+        assertThatThrownBy { LedgerEntry.refund(1L, 10L, 0L) }
+            .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     @Test

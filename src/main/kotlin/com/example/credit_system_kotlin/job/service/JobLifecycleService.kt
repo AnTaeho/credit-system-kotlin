@@ -4,7 +4,6 @@ import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
-import com.example.credit_system_kotlin.ledger.domain.LedgerType
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import org.slf4j.LoggerFactory
@@ -29,7 +28,7 @@ class JobLifecycleService(
             log.info("이미 무효화된 시도, confirm 무시: jobId={}, attemptNo={}", jobId, job.attemptNo)
             return
         }
-        ledgerRepository.save(LedgerEntry.of(job.organizationId, jobId, LedgerType.CONFIRM, 0))
+        ledgerRepository.save(LedgerEntry.confirm(job.organizationId, jobId))
         log.info("confirm 완료: jobId={}, attemptNo={}", jobId, job.attemptNo)
     }
 
@@ -72,7 +71,7 @@ class JobLifecycleService(
             "환불 잔액 반영 실패: organization이 존재하지 않음, jobId=$jobId, organizationId=${job.organizationId}"
         }
 
-        ledgerRepository.save(LedgerEntry.of(job.organizationId, jobId, LedgerType.REFUND, job.holdAmount))
+        ledgerRepository.save(LedgerEntry.refund(job.organizationId, jobId, job.holdAmount))
         log.info(
             "최종 환불 완료: jobId={}, organizationId={}, amount={}",
             jobId, job.organizationId, job.holdAmount

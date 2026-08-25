@@ -1,7 +1,6 @@
 package com.example.credit_system_kotlin.ledger.controller
 
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
-import com.example.credit_system_kotlin.ledger.domain.LedgerType
 import com.example.credit_system_kotlin.ledger.dto.LedgerResponse
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.domain.Organization
@@ -38,7 +37,7 @@ class LedgerApiControllerTest @Autowired constructor(
     @BeforeEach
     fun setUp() {
         organization = organizationRepository.save(Organization("acme", 1000L))
-        ledgerRepository.save(LedgerEntry.of(organization.persistedId, 1L, LedgerType.HOLD, -100L))
+        ledgerRepository.save(LedgerEntry.hold(organization.persistedId, 1L, 100L))
         ledgerRepository.save(LedgerEntry.charge(organization.persistedId, "charge-key-1", 500L))
     }
 

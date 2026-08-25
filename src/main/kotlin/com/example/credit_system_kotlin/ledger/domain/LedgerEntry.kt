@@ -64,11 +64,20 @@ class LedgerEntry private constructor(
 
     companion object {
 
-        fun of(organizationId: Long, jobId: Long, type: LedgerType, amount: Long): LedgerEntry {
-            require(type != LedgerType.CHARGE) {
-                "CHARGE 타입은 멱등키 없이 생성할 수 없습니다. charge(organizationId, idemKey, amount)를 사용하세요."
-            }
-            return LedgerEntry(organizationId, jobId, type, amount, null)
+        /** hold 는 잔액을 묶는 차변이라 음수로 기록된다. */
+        fun hold(organizationId: Long, jobId: Long, cost: Long): LedgerEntry {
+            require(cost > 0) { "hold 원장의 cost는 양수여야 합니다: cost=$cost" }
+            return LedgerEntry(organizationId, jobId, LedgerType.HOLD, -cost, null)
+        }
+
+        /** confirm 은 hold 를 확정할 뿐 잔액을 움직이지 않아 금액이 0이다. */
+        fun confirm(organizationId: Long, jobId: Long): LedgerEntry =
+            LedgerEntry(organizationId, jobId, LedgerType.CONFIRM, 0, null)
+
+        /** refund 는 묶인 잔액을 되돌려주는 대변이라 양수로 기록된다. */
+        fun refund(organizationId: Long, jobId: Long, amount: Long): LedgerEntry {
+            require(amount > 0) { "refund 원장의 amount는 양수여야 합니다: amount=$amount" }
+            return LedgerEntry(organizationId, jobId, LedgerType.REFUND, amount, null)
         }
 
         fun charge(organizationId: Long, idemKey: String, amount: Long): LedgerEntry {

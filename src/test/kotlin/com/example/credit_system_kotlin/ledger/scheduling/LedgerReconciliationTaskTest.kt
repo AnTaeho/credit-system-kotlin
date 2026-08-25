@@ -5,7 +5,6 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
-import com.example.credit_system_kotlin.ledger.domain.LedgerType
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.domain.Organization
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
@@ -57,7 +56,7 @@ class LedgerReconciliationTaskTest @Autowired constructor(
     fun `충전과 hold가 반영된 조직도 대사를 통과한다`() {
         val org = organizationRepository.save(Organization("acme", 1000L))
         ledgerRepository.save(LedgerEntry.charge(org.persistedId, "charge-key-2", 500L))
-        ledgerRepository.save(LedgerEntry.of(org.persistedId, 1L, LedgerType.HOLD, -100L))
+        ledgerRepository.save(LedgerEntry.hold(org.persistedId, 1L, 100L))
         organizationRepository.addBalance(org.persistedId, 400L, Instant.now())
         organizationRepository.flush()
 
