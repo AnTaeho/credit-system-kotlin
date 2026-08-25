@@ -1384,6 +1384,13 @@ prefix 가 `app.heartbeat` 로 같아 YAML 은 한 줄도 안 바뀌었다.
 
 #### 옮기지 않은 것과 그 이유 — 이쪽이 더 중요하다
 
+> **2026-08-25 갱신:** 여기서 세운 기준("설정 클래스를 따로 두는 근거는 의존을 끊는가")을
+> `IdempotencyProperties` 에도 적용해 `AppProperties.Idempotency` 로 접었다(`a98a99f`).
+> 같은 `job/scheduling` 패키지의 `DeadJobRecoveryTask` 가 이미 `AppProperties` 를 주입받으므로
+> 따로 둬도 끊어지는 의존이 없었다. prefix 가 `app` + 중첩 `idempotency` 라 YAML 은 그대로다.
+> 설정 클래스는 셋만 남는다 — `AppProperties`(우산), `WorkerProperties`(두 패키지가 읽는 공용),
+> `HeartbeatProperties`(분리해야 heartbeat 가 앱 전역 설정을 모른다).
+
 **`WorkerProperties` 는 `global/config` 에 남겼다.** `job/worker` 로 내리는 게
 자연스러워 보인다. 그런데 `heartbeat/HeartbeatRegistry` 가 스레드풀 크기로
 `workerProperties.concurrency` 를 읽는다. 옮기면 `heartbeat → job.worker` 의존이
