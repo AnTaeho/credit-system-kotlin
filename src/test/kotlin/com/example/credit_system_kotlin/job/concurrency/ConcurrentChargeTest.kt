@@ -1,10 +1,10 @@
 package com.example.credit_system_kotlin.job.concurrency
 
-import com.example.credit_system_kotlin.ledger.LedgerRepository
-import com.example.credit_system_kotlin.ledger.LedgerType
-import com.example.credit_system_kotlin.organization.ChargeService
-import com.example.credit_system_kotlin.organization.Organization
-import com.example.credit_system_kotlin.organization.OrganizationRepository
+import com.example.credit_system_kotlin.ledger.domain.LedgerType
+import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
+import com.example.credit_system_kotlin.organization.domain.Organization
+import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.organization.service.ChargeService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired

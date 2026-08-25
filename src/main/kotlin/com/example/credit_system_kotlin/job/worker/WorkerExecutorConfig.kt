@@ -1,6 +1,6 @@
 package com.example.credit_system_kotlin.job.worker
 
-import com.example.credit_system_kotlin.global.WorkerProperties
+import com.example.credit_system_kotlin.global.config.WorkerProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration

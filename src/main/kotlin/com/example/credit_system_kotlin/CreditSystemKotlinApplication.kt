@@ -1,6 +1,6 @@
 package com.example.credit_system_kotlin
 
-import com.example.credit_system_kotlin.global.AppProperties
+import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.heartbeat.HeartbeatProperties
 import com.example.credit_system_kotlin.job.scheduling.IdempotencyProperties
 import org.springframework.boot.autoconfigure.SpringBootApplication

@@ -1,6 +1,6 @@
 package com.example.credit_system_kotlin.heartbeat
 
-import com.example.credit_system_kotlin.global.WorkerProperties
+import com.example.credit_system_kotlin.global.config.WorkerProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.AfterEach

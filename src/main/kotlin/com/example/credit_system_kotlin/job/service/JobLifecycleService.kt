@@ -1,12 +1,12 @@
 package com.example.credit_system_kotlin.job.service
 
 import com.example.credit_system_kotlin.job.domain.Job
-import com.example.credit_system_kotlin.job.domain.JobRepository
 import com.example.credit_system_kotlin.job.domain.JobStatus
-import com.example.credit_system_kotlin.ledger.LedgerEntry
-import com.example.credit_system_kotlin.ledger.LedgerRepository
-import com.example.credit_system_kotlin.ledger.LedgerType
-import com.example.credit_system_kotlin.organization.OrganizationRepository
+import com.example.credit_system_kotlin.job.repository.JobRepository
+import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
+import com.example.credit_system_kotlin.ledger.domain.LedgerType
+import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
+import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional

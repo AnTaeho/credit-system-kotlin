@@ -1,11 +1,11 @@
 package com.example.credit_system_kotlin.job.scheduling
 
-import com.example.credit_system_kotlin.global.AppProperties
+import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.heartbeat.JobAttempt
 import com.example.credit_system_kotlin.job.domain.Job
-import com.example.credit_system_kotlin.job.domain.JobRepository
 import com.example.credit_system_kotlin.job.domain.JobStatus
+import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
