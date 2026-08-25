@@ -19,7 +19,12 @@ class IdempotencyKeyCleanupTask(
     private val appProperties: AppProperties
 ) {
 
-    @Scheduled(fixedDelayString = $$"${app.scheduling.idempotency-cleanup-interval-millis:3600000}")
+    // 보존 기간이 7일이라 하루 한 번이면 충분하다. 트래픽이 한산한 시각에 돌려 삭제 락이
+    // 멱등키 INSERT 와 부딪힐 여지를 줄인다.
+    @Scheduled(
+        cron = $$"${app.scheduling.idempotency-cleanup-cron:0 0 2 * * *}",
+        zone = $$"${app.scheduling.timezone:Asia/Seoul}"
+    )
     fun cleanup() {
         val cutoff = Instant.now().minus(appProperties.idempotency.retentionDays, ChronoUnit.DAYS)
         var deletedCount = 0
