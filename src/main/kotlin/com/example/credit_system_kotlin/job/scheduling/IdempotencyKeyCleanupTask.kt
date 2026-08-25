@@ -1,5 +1,6 @@
 package com.example.credit_system_kotlin.job.scheduling
 
+import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -15,12 +16,12 @@ private val log = LoggerFactory.getLogger(IdempotencyKeyCleanupTask::class.java)
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class IdempotencyKeyCleanupTask(
     private val idempotencyKeyRepository: IdempotencyKeyRepository,
-    private val idempotencyProperties: IdempotencyProperties
+    private val appProperties: AppProperties
 ) {
 
     @Scheduled(fixedDelayString = $$"${app.scheduling.idempotency-cleanup-interval-millis:3600000}")
     fun cleanup() {
-        val cutoff = Instant.now().minus(idempotencyProperties.retentionDays, ChronoUnit.DAYS)
+        val cutoff = Instant.now().minus(appProperties.idempotency.retentionDays, ChronoUnit.DAYS)
         var deletedCount = 0
         do {
             val ids = idempotencyKeyRepository.findIdsCreatedBefore(cutoff, PageRequest.of(0, CLEANUP_BATCH_SIZE))

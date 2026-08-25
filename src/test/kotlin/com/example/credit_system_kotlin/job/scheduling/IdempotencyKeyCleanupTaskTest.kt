@@ -1,5 +1,7 @@
 package com.example.credit_system_kotlin.job.scheduling
 
+import com.example.credit_system_kotlin.global.config.AppProperties
+import com.example.credit_system_kotlin.global.config.appProperties
 import com.example.credit_system_kotlin.job.domain.IdempotencyKey
 import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
 import org.assertj.core.api.Assertions.assertThat
@@ -17,7 +19,10 @@ class IdempotencyKeyCleanupTaskTest @Autowired constructor(
     private val idempotencyKeyRepository: IdempotencyKeyRepository
 ) {
 
-    private val task = IdempotencyKeyCleanupTask(idempotencyKeyRepository, IdempotencyProperties(7))
+    private val task = IdempotencyKeyCleanupTask(
+        idempotencyKeyRepository,
+        appProperties(idempotency = AppProperties.Idempotency(retentionDays = 7))
+    )
 
     private fun saveExpired(idemKey: String): IdempotencyKey {
         val key = idempotencyKeyRepository.save(IdempotencyKey(1L, idemKey))
