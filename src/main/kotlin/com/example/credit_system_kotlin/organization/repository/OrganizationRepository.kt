@@ -1,9 +1,11 @@
 package com.example.credit_system_kotlin.organization.repository
 
+import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
 import com.example.credit_system_kotlin.organization.domain.Organization
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.findByIdOrNull
 import org.springframework.data.repository.query.Param
 import java.time.Instant
 
@@ -37,3 +39,6 @@ interface OrganizationRepository : JpaRepository<Organization, Long> {
         @Param("now") now: Instant
     ): Int
 }
+
+fun OrganizationRepository.getOrThrow(organizationId: Long): Organization =
+    findByIdOrNull(organizationId) ?: throw OrganizationNotFoundException(organizationId)

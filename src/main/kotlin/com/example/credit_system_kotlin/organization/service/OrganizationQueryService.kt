@@ -1,9 +1,8 @@
 package com.example.credit_system_kotlin.organization.service
 
-import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
 import com.example.credit_system_kotlin.organization.dto.BalanceResponse
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
-import org.springframework.data.repository.findByIdOrNull
+import com.example.credit_system_kotlin.organization.repository.getOrThrow
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -12,8 +11,7 @@ class OrganizationQueryService(private val organizationRepository: OrganizationR
 
     @Transactional(readOnly = true)
     fun getBalance(organizationId: Long): BalanceResponse {
-        val organization = organizationRepository.findByIdOrNull(organizationId)
-            ?: throw OrganizationNotFoundException(organizationId)
+        val organization = organizationRepository.getOrThrow(organizationId)
         return BalanceResponse(organization.balance)
     }
 }

@@ -70,16 +70,12 @@ class DeadJobRecoveryTaskTest {
         ).thenReturn(listOf(job))
         whenever(heartbeatRegistry.hasLiveHeartbeat(20L, 0)).thenReturn(false)
         whenever(
-            jobRepository.transitionIfStatusAndAttemptMatch(
-                eq(20L), eq(JobStatus.FAILED), eq(JobStatus.PROCESSING), any(), any<Instant>()
-            )
+            jobRepository.failIfProcessing(eq(20L), any(), any<Instant>())
         ).thenReturn(1)
 
         task.scan()
 
-        verify(jobRepository).transitionIfStatusAndAttemptMatch(
-            eq(20L), eq(JobStatus.FAILED), eq(JobStatus.PROCESSING), eq(0), any<Instant>()
-        )
+        verify(jobRepository).failIfProcessing(eq(20L), eq(0), any<Instant>())
         verify(heartbeatRegistry).removeHeartbeat(20L, 0)
     }
 
@@ -95,25 +91,19 @@ class DeadJobRecoveryTaskTest {
 
         task.scan()
 
-        verify(jobRepository, never()).transitionIfStatusAndAttemptMatch(
-            eq(21L), eq(JobStatus.FAILED), eq(JobStatus.PROCESSING), any(), any<Instant>()
-        )
+        verify(jobRepository, never()).failIfProcessing(eq(21L), any(), any<Instant>())
     }
 
     @Test
     fun `만료 회수는 findById 재조회 없이 heartbeat가 알려준 attemptNo로 전이한다`() {
         whenever(heartbeatRegistry.findExpiredAttempts()).thenReturn(setOf(JobAttempt(31L, 3)))
         whenever(
-            jobRepository.transitionIfStatusAndAttemptMatch(
-                eq(31L), eq(JobStatus.FAILED), eq(JobStatus.PROCESSING), eq(3), any<Instant>()
-            )
+            jobRepository.failIfProcessing(eq(31L), eq(3), any<Instant>())
         ).thenReturn(1)
 
         task.scan()
 
-        verify(jobRepository).transitionIfStatusAndAttemptMatch(
-            eq(31L), eq(JobStatus.FAILED), eq(JobStatus.PROCESSING), eq(3), any<Instant>()
-        )
+        verify(jobRepository).failIfProcessing(eq(31L), eq(3), any<Instant>())
         verify(heartbeatRegistry).removeHeartbeat(31L, 3)
         verify(jobRepository, never()).findById(any())
     }
@@ -174,21 +164,15 @@ class DeadJobRecoveryTaskTest {
         val expiredAttempts = linkedSetOf(JobAttempt(1L, 0), JobAttempt(2L, 0))
         whenever(heartbeatRegistry.findExpiredAttempts()).thenReturn(expiredAttempts)
         whenever(
-            jobRepository.transitionIfStatusAndAttemptMatch(
-                eq(1L), eq(JobStatus.FAILED), eq(JobStatus.PROCESSING), eq(0), any<Instant>()
-            )
+            jobRepository.failIfProcessing(eq(1L), eq(0), any<Instant>())
         ).thenThrow(RuntimeException("DB 오류"))
         whenever(
-            jobRepository.transitionIfStatusAndAttemptMatch(
-                eq(2L), eq(JobStatus.FAILED), eq(JobStatus.PROCESSING), eq(0), any<Instant>()
-            )
+            jobRepository.failIfProcessing(eq(2L), eq(0), any<Instant>())
         ).thenReturn(1)
 
         task.scan()
 
-        verify(jobRepository).transitionIfStatusAndAttemptMatch(
-            eq(2L), eq(JobStatus.FAILED), eq(JobStatus.PROCESSING), eq(0), any<Instant>()
-        )
+        verify(jobRepository).failIfProcessing(eq(2L), eq(0), any<Instant>())
         verify(heartbeatRegistry).removeHeartbeat(2L, 0)
         verify(heartbeatRegistry, never()).removeHeartbeat(1L, 0)
     }

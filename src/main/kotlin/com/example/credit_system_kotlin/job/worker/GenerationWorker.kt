@@ -72,9 +72,7 @@ class GenerationWorker(
 
     private fun rollbackToHolding(job: Job) {
         try {
-            jobRepository.transitionIfStatusAndAttemptMatch(
-                job.persistedId, JobStatus.HOLDING, JobStatus.PROCESSING, job.attemptNo, Instant.now()
-            )
+            jobRepository.rollbackToHoldingIfProcessing(job.persistedId, job.attemptNo, Instant.now())
         } catch (e: RuntimeException) {
             log.error("선점 롤백 실패, timeout 회수 대기: jobId={}, attemptNo={}", job.id, job.attemptNo, e)
         }

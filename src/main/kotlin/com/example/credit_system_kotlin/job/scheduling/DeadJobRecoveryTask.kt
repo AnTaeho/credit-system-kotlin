@@ -53,9 +53,7 @@ class DeadJobRecoveryTask(
     /** 한 건의 실패가 같은 주기의 나머지를 막지 않도록 항목 단위로 격리한다. */
     private fun recoverExpired(attempt: JobAttempt) {
         try {
-            val updated = jobRepository.transitionIfStatusAndAttemptMatch(
-                attempt.jobId, JobStatus.FAILED, JobStatus.PROCESSING, attempt.attemptNo, Instant.now()
-            )
+            val updated = jobRepository.failIfProcessing(attempt.jobId, attempt.attemptNo, Instant.now())
             if (updated == 1) {
                 log.info("heartbeat 만료로 FAILED 전이: jobId={}, attemptNo={}", attempt.jobId, attempt.attemptNo)
             }
@@ -82,9 +80,7 @@ class DeadJobRecoveryTask(
             if (heartbeatRegistry.hasLiveHeartbeat(jobId, job.attemptNo)) {
                 return
             }
-            val updated = jobRepository.transitionIfStatusAndAttemptMatch(
-                jobId, JobStatus.FAILED, JobStatus.PROCESSING, job.attemptNo, Instant.now()
-            )
+            val updated = jobRepository.failIfProcessing(jobId, job.attemptNo, Instant.now())
             if (updated == 1) {
                 heartbeatRegistry.removeHeartbeat(jobId, job.attemptNo)
                 log.info("PROCESSING 정체 job 회수, FAILED 전이: jobId={}, attemptNo={}", jobId, job.attemptNo)

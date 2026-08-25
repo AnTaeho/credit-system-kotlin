@@ -4,7 +4,6 @@ import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.global.exception.DuplicateRequestInProgressException
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
-import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
 import com.example.credit_system_kotlin.global.validation.validateIdemKey
 import com.example.credit_system_kotlin.job.domain.IdempotencyKey
 import com.example.credit_system_kotlin.job.domain.Job
@@ -14,8 +13,8 @@ import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.organization.repository.getOrThrow
 import org.slf4j.LoggerFactory
-import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -77,8 +76,7 @@ class HoldService(
             return
         }
 
-        val organization = organizationRepository.findByIdOrNull(organizationId)
-            ?: throw OrganizationNotFoundException(organizationId)
+        val organization = organizationRepository.getOrThrow(organizationId)
         throw InsufficientBalanceException(organization.balance, cost)
     }
 

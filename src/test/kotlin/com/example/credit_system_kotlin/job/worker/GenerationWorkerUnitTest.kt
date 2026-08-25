@@ -93,9 +93,7 @@ class GenerationWorkerUnitTest {
         doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
         doThrow(QueryTimeoutException("db unavailable")).whenever(jobRepository)
-            .transitionIfStatusAndAttemptMatch(
-                eq(1L), eq(JobStatus.HOLDING), eq(JobStatus.PROCESSING), eq(0), any<Instant>()
-            )
+            .rollbackToHoldingIfProcessing(eq(1L), eq(0), any<Instant>())
 
         assertThatCode { rejectingWorker.dispatchPendingJobs() }.doesNotThrowAnyException()
 
@@ -130,9 +128,7 @@ class GenerationWorkerUnitTest {
 
         rejectingWorker.dispatchPendingJobs()
 
-        verify(jobRepository).transitionIfStatusAndAttemptMatch(
-            eq(1L), eq(JobStatus.HOLDING), eq(JobStatus.PROCESSING), eq(0), any<Instant>()
-        )
+        verify(jobRepository).rollbackToHoldingIfProcessing(eq(1L), eq(0), any<Instant>())
         verify(jobRepository, never()).startProcessingIfAttemptMatches(eq(2L), any<Int>(), any<Instant>())
     }
 

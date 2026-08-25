@@ -1,7 +1,6 @@
 package com.example.credit_system_kotlin.job.service
 
 import com.example.credit_system_kotlin.job.domain.Job
-import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
@@ -34,9 +33,7 @@ class JobLifecycleService(
 
     @Transactional
     fun markFailed(jobId: Long, attemptNo: Int) {
-        val updated = jobRepository.transitionIfStatusAndAttemptMatch(
-            jobId, JobStatus.FAILED, JobStatus.PROCESSING, attemptNo, Instant.now()
-        )
+        val updated = jobRepository.failIfProcessing(jobId, attemptNo, Instant.now())
         if (updated == 0) {
             log.info("이미 무효화된 시도, 실패 처리 무시: jobId={}, attemptNo={}", jobId, attemptNo)
             return
@@ -58,9 +55,7 @@ class JobLifecycleService(
     @Transactional
     fun finalRefund(job: Job) {
         val jobId = job.persistedId
-        val updated = jobRepository.transitionIfStatusAndAttemptMatch(
-            jobId, JobStatus.REFUNDED, JobStatus.FAILED, job.attemptNo, Instant.now()
-        )
+        val updated = jobRepository.refundIfFailed(jobId, job.attemptNo, Instant.now())
         if (updated == 0) {
             log.info("이미 늦은 워커가 처리함, 환불 취소: jobId={}, attemptNo={}", jobId, job.attemptNo)
             return
