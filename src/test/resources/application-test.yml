@@ -17,6 +17,7 @@ app:
   worker:
     enabled: false
     batch-size: 3
+    concurrency: 3
   generation:
     cost: 100
   stub:

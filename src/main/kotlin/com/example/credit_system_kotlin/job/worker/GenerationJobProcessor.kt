@@ -14,7 +14,7 @@ class GenerationJobProcessor(
 
     fun runGeneration(job: Job) {
         val resultUrl = generateOrMarkFailed(job) ?: return
-        jobLifecycleService.confirm(job.persistedId, resultUrl)
+        jobLifecycleService.confirm(job, resultUrl)
     }
 
     /** 생성에 성공하면 resultUrl, 실패하면 FAILED로 기록하고 null */
@@ -22,7 +22,7 @@ class GenerationJobProcessor(
         try {
             stubClient.generate(job.prompt)
         } catch (_: StubGenerationException) {
-            jobLifecycleService.markFailed(job.persistedId)
+            jobLifecycleService.markFailed(job.persistedId, job.attemptNo)
             null
         }
 }

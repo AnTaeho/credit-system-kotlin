@@ -10,7 +10,6 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Index
 import jakarta.persistence.Table
-import java.time.Instant
 
 @Entity
 @Table(name = "jobs", indexes = [Index(name = "idx_jobs_status_id", columnList = "status, id")])
@@ -40,24 +39,12 @@ class Job private constructor(
     var status: JobStatus = JobStatus.HOLDING
         protected set
 
-    var resultUrl: String? = null
+    @Column(nullable = false)
+    var attemptNo: Int = 0
         protected set
 
-    fun startProcessing() {
-        this.status = JobStatus.PROCESSING
-        this.updatedAt = Instant.now()
-    }
-
-    fun complete(resultUrl: String) {
-        this.status = JobStatus.COMPLETED
-        this.resultUrl = resultUrl
-        this.updatedAt = Instant.now()
-    }
-
-    fun fail() {
-        this.status = JobStatus.FAILED
-        this.updatedAt = Instant.now()
-    }
+    var resultUrl: String? = null
+        protected set
 
     companion object {
         fun hold(organizationId: Long, holdAmount: Long, prompt: String): Job =

@@ -37,7 +37,7 @@ class GenerationJobProcessorTest {
 
         processor.runGeneration(job)
 
-        verify(jobLifecycleService).confirm(job.persistedId, "https://example.test/cat.png")
+        verify(jobLifecycleService).confirm(job, "https://example.test/cat.png")
     }
 
     @Test
@@ -46,7 +46,7 @@ class GenerationJobProcessorTest {
 
         processor.runGeneration(job)
 
-        verify(jobLifecycleService).markFailed(job.persistedId)
-        verify(jobLifecycleService, never()).confirm(job.persistedId, "https://example.test/cat.png")
+        verify(jobLifecycleService).markFailed(1L, 0)
+        verify(jobLifecycleService, never()).confirm(job, "https://example.test/cat.png")
     }
 }

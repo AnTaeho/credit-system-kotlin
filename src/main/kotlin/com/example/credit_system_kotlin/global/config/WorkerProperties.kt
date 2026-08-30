@@ -5,5 +5,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 @ConfigurationProperties(prefix = "app.worker")
 data class WorkerProperties(
     val enabled: Boolean,
-    val batchSize: Int
+    val batchSize: Int,
+    val concurrency: Int
 )

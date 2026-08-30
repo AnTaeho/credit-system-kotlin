@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.util.ReflectionTestUtils
+import java.time.Instant
 
 @ActiveProfiles("test")
 @DataJpaTest
@@ -20,21 +22,11 @@ class JobLifecycleServiceTest @Autowired constructor(
     private val jobLifecycleService = JobLifecycleService(jobRepository, ledgerRepository)
 
     @Test
-    fun `startProcessing은 상태를 PROCESSING으로 바꾼다`() {
+    fun `attemptNo가 일치하면 완료 처리되고 ledger가 남는다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
 
-        jobLifecycleService.startProcessing(job.persistedId)
-
-        assertThat(jobRepository.findById(job.persistedId).orElseThrow().status)
-            .isEqualTo(JobStatus.PROCESSING)
-    }
-
-    @Test
-    fun `confirm은 완료 처리되고 ledger가 남는다`() {
-        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobLifecycleService.startProcessing(job.persistedId)
-
-        jobLifecycleService.confirm(job.persistedId, "https://stub/x.png")
+        jobLifecycleService.confirm(job, "https://stub/x.png")
 
         val found = jobRepository.findById(job.persistedId).orElseThrow()
         assertThat(found.status).isEqualTo(JobStatus.COMPLETED)
@@ -43,13 +35,65 @@ class JobLifecycleServiceTest @Autowired constructor(
     }
 
     @Test
-    fun `markFailed는 FAILED로 전이한다`() {
+    fun `attemptNo가 불일치하면 아무것도 하지 않는다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobLifecycleService.startProcessing(job.persistedId)
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        ReflectionTestUtils.setField(job, "attemptNo", 5)
 
-        jobLifecycleService.markFailed(job.persistedId)
+        jobLifecycleService.confirm(job, "https://stub/x.png")
+
+        val found = jobRepository.findById(job.persistedId).orElseThrow()
+        assertThat(found.status).isEqualTo(JobStatus.PROCESSING)
+        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(1L)).isEmpty()
+    }
+
+    @Test
+    fun `같은 attempt의 confirm을 두 번 호출해도 원장은 한 번만 기록된다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+
+        jobLifecycleService.confirm(job, "https://stub/first.png")
+        jobLifecycleService.confirm(job, "https://stub/second.png")
+
+        val found = jobRepository.findById(job.persistedId).orElseThrow()
+        assertThat(found.status).isEqualTo(JobStatus.COMPLETED)
+        assertThat(found.resultUrl).isEqualTo("https://stub/first.png")
+        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(1L)).hasSize(1)
+    }
+
+    @Test
+    fun `attemptNo가 일치하면 FAILED로 전이한다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+
+        jobLifecycleService.markFailed(job.persistedId, 0)
 
         assertThat(jobRepository.findById(job.persistedId).orElseThrow().status)
             .isEqualTo(JobStatus.FAILED)
+    }
+
+    @Test
+    fun `attemptNo가 불일치하면 전이하지 않는다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+
+        jobLifecycleService.markFailed(job.persistedId, 9)
+
+        assertThat(jobRepository.findById(job.persistedId).orElseThrow().status)
+            .isEqualTo(JobStatus.PROCESSING)
+    }
+
+    @Test
+    fun `완료된 작업의 늦은 실패는 무시한다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.completeIfAttemptMatches(
+            job.persistedId, "https://stub/done.png", 0, Instant.now()
+        )
+
+        jobLifecycleService.markFailed(job.persistedId, 0)
+
+        assertThat(jobRepository.findById(job.persistedId).orElseThrow().status)
+            .isEqualTo(JobStatus.COMPLETED)
     }
 }
