@@ -7,7 +7,6 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
-import java.time.Instant
 
 @Entity
 @Table(name = "organizations")
@@ -30,14 +29,4 @@ class Organization(
     @Column(nullable = false)
     var balance: Long = balance
         protected set
-
-    fun charge(amount: Long) {
-        balance += amount
-        updatedAt = Instant.now()
-    }
-
-    fun deduct(amount: Long) {
-        balance -= amount
-        updatedAt = Instant.now()
-    }
 }

@@ -5,6 +5,7 @@ import com.example.credit_system_kotlin.global.exception.InsufficientBalanceExce
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
 import com.example.credit_system_kotlin.job.repository.JobRepository
+import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.domain.Organization
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import com.example.credit_system_kotlin.organization.service.OrganizationFinder
@@ -20,11 +21,12 @@ import org.springframework.test.context.ActiveProfiles
 @DataJpaTest
 class HoldServiceTest @Autowired constructor(
     private val organizationRepository: OrganizationRepository,
-    private val jobRepository: JobRepository
+    private val jobRepository: JobRepository,
+    private val ledgerRepository: LedgerRepository
 ) {
 
     private val holdService = HoldService(
-        OrganizationFinder(organizationRepository), jobRepository,
+        organizationRepository, OrganizationFinder(organizationRepository), jobRepository, ledgerRepository,
         appProperties()
     )
 
@@ -41,11 +43,12 @@ class HoldServiceTest @Autowired constructor(
     }
 
     @Test
-    fun `정상 요청은 잔액을 차감하고 job을 생성한다`() {
+    fun `정상 요청은 잔액을 차감하고 job과 ledger를 생성한다`() {
         holdService.requestGeneration(organization.persistedId, "a cat")
 
         val found = organizationRepository.findById(organization.persistedId).orElseThrow()
         assertThat(found.balance).isEqualTo(900L)
+        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId)).hasSize(1)
     }
 
     @Test
@@ -56,6 +59,7 @@ class HoldServiceTest @Autowired constructor(
             .isInstanceOf(InsufficientBalanceException::class.java)
 
         assertThat(jobRepository.findByOrganizationIdOrderByIdDesc(poor.persistedId)).isEmpty()
+        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(poor.persistedId)).isEmpty()
     }
 
     @Test
@@ -90,5 +94,6 @@ class HoldServiceTest @Autowired constructor(
             .hasMessage("존재하지 않는 organization: $missingOrganizationId")
 
         assertThat(jobRepository.count()).isZero()
+        assertThat(ledgerRepository.count()).isZero()
     }
 }

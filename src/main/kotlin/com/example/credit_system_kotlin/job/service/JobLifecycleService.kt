@@ -2,6 +2,8 @@ package com.example.credit_system_kotlin.job.service
 
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.repository.JobRepository
+import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
+import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import org.slf4j.LoggerFactory
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
@@ -11,7 +13,8 @@ private val log = LoggerFactory.getLogger(JobLifecycleService::class.java)
 
 @Service
 class JobLifecycleService(
-    private val jobRepository: JobRepository
+    private val jobRepository: JobRepository,
+    private val ledgerRepository: LedgerRepository
 ) {
 
     @Transactional
@@ -24,6 +27,7 @@ class JobLifecycleService(
     fun confirm(jobId: Long, resultUrl: String) {
         val job = getJob(jobId)
         job.complete(resultUrl)
+        ledgerRepository.save(LedgerEntry.confirm(job.organizationId, jobId))
         log.info("confirm 완료: jobId={}", jobId)
     }
 

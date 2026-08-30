@@ -3,6 +3,7 @@ package com.example.credit_system_kotlin.job.concurrency
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.HoldService
+import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.domain.Organization
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import org.assertj.core.api.Assertions.assertThat
@@ -27,6 +28,7 @@ import java.util.concurrent.TimeUnit
 class GenerationPipelineEndToEndTest @Autowired constructor(
     private val holdService: HoldService,
     private val jobRepository: JobRepository,
+    private val ledgerRepository: LedgerRepository,
     private val organizationRepository: OrganizationRepository
 ) {
 
@@ -54,5 +56,8 @@ class GenerationPipelineEndToEndTest @Autowired constructor(
 
         val found = organizationRepository.findById(organization.persistedId).orElseThrow()
         assertThat(found.balance).isEqualTo(900L)
+        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId))
+            .extracting<String> { it.type.name }
+            .contains("HOLD", "CONFIRM")
     }
 }

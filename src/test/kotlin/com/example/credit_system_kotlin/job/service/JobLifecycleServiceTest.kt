@@ -3,6 +3,7 @@ package com.example.credit_system_kotlin.job.service
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
+import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -12,10 +13,11 @@ import org.springframework.test.context.ActiveProfiles
 @ActiveProfiles("test")
 @DataJpaTest
 class JobLifecycleServiceTest @Autowired constructor(
-    private val jobRepository: JobRepository
+    private val jobRepository: JobRepository,
+    private val ledgerRepository: LedgerRepository
 ) {
 
-    private val jobLifecycleService = JobLifecycleService(jobRepository)
+    private val jobLifecycleService = JobLifecycleService(jobRepository, ledgerRepository)
 
     @Test
     fun `startProcessing은 상태를 PROCESSING으로 바꾼다`() {
@@ -28,7 +30,7 @@ class JobLifecycleServiceTest @Autowired constructor(
     }
 
     @Test
-    fun `confirm은 완료 처리된다`() {
+    fun `confirm은 완료 처리되고 ledger가 남는다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
         jobLifecycleService.startProcessing(job.persistedId)
 
@@ -37,6 +39,7 @@ class JobLifecycleServiceTest @Autowired constructor(
         val found = jobRepository.findById(job.persistedId).orElseThrow()
         assertThat(found.status).isEqualTo(JobStatus.COMPLETED)
         assertThat(found.resultUrl).isEqualTo("https://stub/x.png")
+        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(1L)).hasSize(1)
     }
 
     @Test

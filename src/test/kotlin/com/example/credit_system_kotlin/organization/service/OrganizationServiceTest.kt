@@ -2,6 +2,8 @@ package com.example.credit_system_kotlin.organization.service
 
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
+import com.example.credit_system_kotlin.ledger.domain.LedgerType
+import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.domain.Organization
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import org.assertj.core.api.Assertions.assertThat
@@ -14,13 +16,15 @@ import org.springframework.test.context.ActiveProfiles
 @ActiveProfiles("test")
 @DataJpaTest
 class OrganizationServiceTest @Autowired constructor(
-    private val organizationRepository: OrganizationRepository
+    private val organizationRepository: OrganizationRepository,
+    private val ledgerRepository: LedgerRepository
 ) {
 
-    private val organizationService = OrganizationService(OrganizationFinder(organizationRepository))
+    private val organizationService =
+        OrganizationService(organizationRepository, OrganizationFinder(organizationRepository), ledgerRepository)
 
     @Test
-    fun `충전하면 잔액이 증가한다`() {
+    fun `충전하면 잔액이 증가하고 ledger에 CHARGE가 남는다`() {
         val organization = organizationRepository.save(Organization("acme", 500L))
 
         val response = organizationService.charge(organization.persistedId, 300L)
@@ -28,6 +32,8 @@ class OrganizationServiceTest @Autowired constructor(
         assertThat(response.balance).isEqualTo(800L)
         val found = organizationRepository.findById(organization.persistedId).orElseThrow()
         assertThat(found.balance).isEqualTo(800L)
+        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId))
+            .anyMatch { it.type == LedgerType.CHARGE }
     }
 
     @Test
@@ -40,6 +46,7 @@ class OrganizationServiceTest @Autowired constructor(
 
         assertThat(organizationRepository.findById(organization.persistedId).orElseThrow().balance)
             .isEqualTo(500L)
+        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId)).isEmpty()
     }
 
     @Test
@@ -52,6 +59,7 @@ class OrganizationServiceTest @Autowired constructor(
 
         assertThat(organizationRepository.findById(organization.persistedId).orElseThrow().balance)
             .isEqualTo(500L)
+        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId)).isEmpty()
     }
 
     @Test
