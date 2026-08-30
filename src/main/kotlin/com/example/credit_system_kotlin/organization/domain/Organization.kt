@@ -7,12 +7,16 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import java.time.Instant
 
 @Entity
 @Table(name = "organizations")
 class Organization(
-    name: String,
+
+    @Column(nullable = false)
+    val name: String,
     balance: Long
+
 ) : BaseEntity() {
 
     @Id
@@ -20,22 +24,20 @@ class Organization(
     var id: Long? = null
         protected set
 
-    /**
-     * persist 이후에만 유효한 id. 저장된 엔티티를 다루는 자리에서는 이쪽을 쓴다.
-     * `id` 는 JPA가 persist 전 상태를 표현해야 해서 nullable로 남아 있을 뿐이다.
-     */
     val persistedId: Long
         get() = requireNotNull(id) { "아직 저장되지 않은 Organization입니다." }
-
-    @Column(nullable = false)
-    var name: String = name
-        protected set
 
     @Column(nullable = false)
     var balance: Long = balance
         protected set
 
-    @Column(nullable = false)
-    var initialBalance: Long = balance
-        protected set
+    fun charge(amount: Long) {
+        balance += amount
+        updatedAt = Instant.now()
+    }
+
+    fun deduct(amount: Long) {
+        balance -= amount
+        updatedAt = Instant.now()
+    }
 }

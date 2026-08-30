@@ -4,6 +4,5 @@ enum class JobStatus {
     HOLDING,
     PROCESSING,
     COMPLETED,
-    FAILED,
-    REFUNDED
+    FAILED
 }
