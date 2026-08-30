@@ -5,6 +5,7 @@ package com.example.credit_system_kotlin.global.config
  * Kotlin AppProperties는 모두 non-null이므로 기본값을 채워 만든다.
  */
 fun appProperties(
-    generation: AppProperties.Generation = AppProperties.Generation(cost = 100L),
-    stub: AppProperties.Stub = AppProperties.Stub(failureRate = 0.0, minDelayMillis = 0, maxDelayMillis = 0)
-): AppProperties = AppProperties(generation, stub)
+    generation: AppProperties.Generation = AppProperties.Generation(cost = 100L, maxAttempts = 3),
+    stub: AppProperties.Stub = AppProperties.Stub(failureRate = 0.0, minDelayMillis = 0, maxDelayMillis = 0),
+    processing: AppProperties.Processing = AppProperties.Processing(timeoutSeconds = 60)
+): AppProperties = AppProperties(generation, stub, processing)

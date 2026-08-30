@@ -27,8 +27,24 @@ class LedgerEntryTest {
     }
 
     @Test
+    fun `refund는 amount를 양수로 기록하고 idemKey가 없다`() {
+        val entry = LedgerEntry.refund(1L, 10L, 100L)
+
+        assertThat(entry.type).isEqualTo(LedgerType.REFUND)
+        assertThat(entry.jobId).isEqualTo(10L)
+        assertThat(entry.amount).isEqualTo(100L)
+        assertThat(entry.idemKey).isNull()
+    }
+
+    @Test
     fun `hold의 cost가 양수가 아니면 예외가 발생한다`() {
         assertThatThrownBy { LedgerEntry.hold(1L, 10L, 0L) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `refund의 amount가 양수가 아니면 예외가 발생한다`() {
+        assertThatThrownBy { LedgerEntry.refund(1L, 10L, 0L) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 

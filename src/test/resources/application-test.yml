@@ -20,7 +20,13 @@ app:
     concurrency: 3
   generation:
     cost: 100
+    max-attempts: 3
   stub:
     failure-rate: 0.0
     min-delay-millis: 0
     max-delay-millis: 0
+  heartbeat:
+    timeout-seconds: 10
+    refresh-interval-seconds: 5
+  processing:
+    timeout-seconds: 60

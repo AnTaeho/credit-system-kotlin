@@ -19,6 +19,10 @@ interface JobRepository : JpaRepository<Job, Long> {
     fun failIfProcessing(jobId: Long, attemptNo: Int, now: Instant): Int =
         transitionIfStatusAndAttemptMatch(jobId, JobStatus.FAILED, JobStatus.PROCESSING, attemptNo, now)
 
+    /** FAILED 인 시도만 REFUNDED 로 내린다. */
+    fun refundIfFailed(jobId: Long, attemptNo: Int, now: Instant): Int =
+        transitionIfStatusAndAttemptMatch(jobId, JobStatus.REFUNDED, JobStatus.FAILED, attemptNo, now)
+
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
@@ -55,7 +59,28 @@ interface JobRepository : JpaRepository<Job, Long> {
         @Param("now") now: Instant
     ): Int
 
+    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        """
+        UPDATE Job j
+        SET j.attemptNo = j.attemptNo + 1,
+            j.status = JobStatus.HOLDING,
+            j.updatedAt = :now
+        WHERE j.id = :jobId
+          AND j.status = JobStatus.FAILED
+          AND j.attemptNo = :expectedAttemptNo
+        """
+    )
+    fun incrementAttemptForRetry(
+        @Param("jobId") jobId: Long,
+        @Param("expectedAttemptNo") expectedAttemptNo: Int,
+        @Param("now") now: Instant
+    ): Int
+
     fun findByStatusOrderByIdAsc(status: JobStatus, pageable: Pageable): List<Job>
 
     fun findByOrganizationIdOrderByIdDesc(organizationId: Long): List<Job>
+
+    fun findByStatusAndUpdatedAtBeforeOrderByIdAsc(status: JobStatus, cutoff: Instant, pageable: Pageable): List<Job>
 }

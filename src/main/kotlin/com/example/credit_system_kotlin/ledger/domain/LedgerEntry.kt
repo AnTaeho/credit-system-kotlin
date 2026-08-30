@@ -61,6 +61,12 @@ class LedgerEntry private constructor(
         fun confirm(organizationId: Long, jobId: Long): LedgerEntry =
             LedgerEntry(organizationId, jobId, LedgerType.CONFIRM, 0, null)
 
+        /** refund 는 묶인 잔액을 되돌려주는 대변이라 양수로 기록된다. */
+        fun refund(organizationId: Long, jobId: Long, amount: Long): LedgerEntry {
+            require(amount > 0) { "refund 원장의 amount는 양수여야 합니다: amount=$amount" }
+            return LedgerEntry(organizationId, jobId, LedgerType.REFUND, amount, null)
+        }
+
         fun charge(organizationId: Long, idemKey: String, amount: Long): LedgerEntry {
             require(idemKey.isNotBlank()) {
                 "CHARGE 원장은 idemKey가 비어 있으면 안 됩니다: idemKey=$idemKey"
