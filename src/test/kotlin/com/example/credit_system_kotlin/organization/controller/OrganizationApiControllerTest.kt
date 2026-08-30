@@ -1,5 +1,6 @@
 package com.example.credit_system_kotlin.organization.controller
 
+import com.example.credit_system_kotlin.global.exception.ErrorResponse
 import com.example.credit_system_kotlin.organization.domain.Organization
 import com.example.credit_system_kotlin.organization.dto.BalanceResponse
 import com.example.credit_system_kotlin.organization.dto.ChargeRequest
@@ -61,6 +62,36 @@ class OrganizationApiControllerTest @Autowired constructor(
         )
 
         assertThat(after.body?.balance).isEqualTo(800L)
+    }
+
+    @Test
+    fun `존재하지 않는 조직이면 404다`() {
+        val headers = HttpHeaders()
+        headers.add("X-Organization-Id", (organization.persistedId + 999_999L).toString())
+
+        val response = restTemplate.exchange(
+            url("/api/organizations/me/balance"), HttpMethod.GET,
+            HttpEntity<Void>(headers), String::class.java
+        )
+
+        assertThat(response.statusCode.value()).isEqualTo(404)
+    }
+
+    @Test
+    fun `amount 필드가 없는 본문은 400으로 거부된다`() {
+        val headers = HttpHeaders()
+        headers.add("X-Organization-Id", organization.persistedId.toString())
+        headers.contentType = MediaType.APPLICATION_JSON
+
+        val response = restTemplate.exchange(
+            url("/api/organizations/me/charge"), HttpMethod.POST,
+            HttpEntity("""{}""", headers), ErrorResponse::class.java
+        )
+
+        assertThat(response.statusCode.value()).isEqualTo(400)
+        assertThat(response.body?.code).isEqualTo("INVALID_REQUEST")
+        assertThat(organizationRepository.findById(organization.persistedId).orElseThrow().balance)
+            .isEqualTo(500L)
     }
 
     private fun url(path: String) = "http://localhost:$port$path"

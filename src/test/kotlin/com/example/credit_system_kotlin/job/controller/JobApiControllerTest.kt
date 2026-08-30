@@ -45,6 +45,13 @@ class JobApiControllerTest @Autowired constructor(
     }
 
     @Test
+    fun `조직 헤더 없이 호출하면 400이다`() {
+        val response = restTemplate.getForEntity(url("/api/jobs"), String::class.java)
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+    }
+
+    @Test
     fun `생성 요청과 목록 조회가 정상 동작한다`() {
         val headers = HttpHeaders()
         headers.add("X-Organization-Id", organization.persistedId.toString())
