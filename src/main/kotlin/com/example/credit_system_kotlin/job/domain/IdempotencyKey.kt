@@ -5,6 +5,7 @@ import jakarta.persistence.Entity
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
+import jakarta.persistence.Index
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import java.time.Instant
@@ -14,7 +15,8 @@ import java.time.Instant
     name = "idempotency_keys",
     uniqueConstraints = [
         UniqueConstraint(name = "uk_idempotency_org_key", columnNames = ["organizationId", "idemKey"])
-    ]
+    ],
+    indexes = [Index(name = "idx_idem_created_at", columnList = "createdAt")]
 )
 class IdempotencyKey(
 

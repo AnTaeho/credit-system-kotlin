@@ -2,6 +2,7 @@ package com.example.credit_system_kotlin.heartbeat
 
 import com.example.credit_system_kotlin.global.config.WorkerProperties
 import jakarta.annotation.PreDestroy
+import org.slf4j.LoggerFactory
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Component
 import java.time.Instant
@@ -9,6 +10,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+
+private val log = LoggerFactory.getLogger(HeartbeatRegistry::class.java)
 
 @Component
 class HeartbeatRegistry(
@@ -40,15 +43,28 @@ class HeartbeatRegistry(
         }
         val attempts = mutableSetOf<JobAttempt>()
         for (member in expired) {
-            val attempt = JobAttempt.parse(member) ?: continue
-            attempts.add(attempt)
+            val attempt = JobAttempt.parse(member)
+            if (attempt != null) {
+                attempts.add(attempt)
+            } else {
+                removeUnparseableMember(member)
+            }
         }
         return attempts
     }
 
+    private fun removeUnparseableMember(member: String) {
+        redisTemplate.opsForZSet().remove(KEY, member)
+        log.warn("해석할 수 없는 heartbeat 멤버 제거: {}", member)
+    }
+
     private fun refreshHeartbeat(attempt: JobAttempt) {
         val expireAt = Instant.now().epochSecond + heartbeatProperties.timeoutSeconds
-        redisTemplate.opsForZSet().add(KEY, attempt.toMember(), expireAt.toDouble())
+        try {
+            redisTemplate.opsForZSet().add(KEY, attempt.toMember(), expireAt.toDouble())
+        } catch (e: RuntimeException) {
+            log.warn("heartbeat 갱신 실패: jobId={}, attemptNo={}", attempt.jobId, attempt.attemptNo, e)
+        }
     }
 
     fun hasLiveHeartbeat(jobId: Long, attemptNo: Int): Boolean {

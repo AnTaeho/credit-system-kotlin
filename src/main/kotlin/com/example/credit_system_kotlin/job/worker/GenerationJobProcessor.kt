@@ -5,7 +5,10 @@ import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
 import com.example.credit_system_kotlin.job.stub.GenerationStubClient
 import com.example.credit_system_kotlin.job.stub.StubGenerationException
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
+
+private val log = LoggerFactory.getLogger(GenerationJobProcessor::class.java)
 
 @Component
 class GenerationJobProcessor(
@@ -20,7 +23,7 @@ class GenerationJobProcessor(
         val heartbeatFuture = heartbeatRegistry.startHeartbeat(jobId, attemptNo)
         try {
             val resultUrl = generateOrMarkFailed(job) ?: return
-            jobLifecycleService.confirm(job, resultUrl)
+            confirm(job, resultUrl)
         } finally {
             heartbeatRegistry.stopHeartbeat(jobId, attemptNo, heartbeatFuture)
         }
@@ -33,5 +36,21 @@ class GenerationJobProcessor(
         } catch (_: StubGenerationException) {
             jobLifecycleService.markFailed(job.persistedId, job.attemptNo)
             null
+        } catch (e: RuntimeException) {
+            log.error("생성 중 예기치 못한 예외 발생: jobId={}, attemptNo={}", job.persistedId, job.attemptNo, e)
+            jobLifecycleService.markFailed(job.persistedId, job.attemptNo)
+            null
         }
+
+    /** 결과 반영에 실패하면 job 은 PROCESSING 으로 남아 정체 회수 대상이 된다. */
+    private fun confirm(job: Job, resultUrl: String) {
+        try {
+            jobLifecycleService.confirm(job, resultUrl)
+        } catch (e: RuntimeException) {
+            log.error(
+                "생성 결과 반영 실패, timeout 회수 대기: jobId={}, attemptNo={}",
+                job.persistedId, job.attemptNo, e
+            )
+        }
+    }
 }

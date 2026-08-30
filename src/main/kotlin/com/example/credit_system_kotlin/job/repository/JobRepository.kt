@@ -19,6 +19,10 @@ interface JobRepository : JpaRepository<Job, Long> {
     fun failIfProcessing(jobId: Long, attemptNo: Int, now: Instant): Int =
         transitionIfStatusAndAttemptMatch(jobId, JobStatus.FAILED, JobStatus.PROCESSING, attemptNo, now)
 
+    /** 선점을 되돌린다. PROCESSING 인 시도만 HOLDING 으로 돌린다. */
+    fun rollbackToHoldingIfProcessing(jobId: Long, attemptNo: Int, now: Instant): Int =
+        transitionIfStatusAndAttemptMatch(jobId, JobStatus.HOLDING, JobStatus.PROCESSING, attemptNo, now)
+
     /** FAILED 인 시도만 REFUNDED 로 내린다. */
     fun refundIfFailed(jobId: Long, attemptNo: Int, now: Instant): Int =
         transitionIfStatusAndAttemptMatch(jobId, JobStatus.REFUNDED, JobStatus.FAILED, attemptNo, now)

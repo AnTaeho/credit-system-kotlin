@@ -16,6 +16,7 @@ import org.mockito.Mock
 import org.mockito.junit.jupiter.MockitoExtension
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
@@ -143,6 +144,52 @@ class DeadJobRecoveryTaskTest {
         verify(jobLifecycleService).finalRefund(jobCaptor.capture())
         assertThat(jobCaptor.firstValue).isSameAs(staleSnapshot)
         verify(jobLifecycleService, never()).retry(any())
+    }
+
+    @Test
+    fun `한 job의 환불 실패가 같은 주기의 나머지 job을 막지 않는다`() {
+        val job1 = failedJob(1L, 2)
+        val job2 = failedJob(2L, 2)
+        whenever(jobRepository.findByStatusOrderByIdAsc(eq(JobStatus.FAILED), any<Pageable>()))
+            .thenReturn(listOf(job1, job2))
+        doThrow(IllegalStateException("조직 행 없음")).whenever(jobLifecycleService).finalRefund(job1)
+
+        task.scan()
+
+        verify(jobLifecycleService).finalRefund(job2)
+    }
+
+    @Test
+    fun `heartbeat 만료 회수 실패가 나머지 만료 job을 막지 않는다`() {
+        val expiredAttempts = linkedSetOf(JobAttempt(1L, 0), JobAttempt(2L, 0))
+        whenever(heartbeatRegistry.findExpiredAttempts()).thenReturn(expiredAttempts)
+        whenever(
+            jobRepository.failIfProcessing(eq(1L), eq(0), any<Instant>())
+        ).thenThrow(RuntimeException("DB 오류"))
+        whenever(
+            jobRepository.failIfProcessing(eq(2L), eq(0), any<Instant>())
+        ).thenReturn(1)
+
+        task.scan()
+
+        verify(jobRepository).failIfProcessing(eq(2L), eq(0), any<Instant>())
+        verify(heartbeatRegistry).removeHeartbeat(2L, 0)
+        verify(heartbeatRegistry, never()).removeHeartbeat(1L, 0)
+    }
+
+    @Test
+    fun `한 단계의 실패가 다음 단계를 막지 않는다`() {
+        doThrow(RuntimeException("PROCESSING 조회 실패"))
+            .whenever(jobRepository).findByStatusAndUpdatedAtBeforeOrderByIdAsc(
+                eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
+            )
+        val job = failedJob(50L, 1)
+        whenever(jobRepository.findByStatusOrderByIdAsc(eq(JobStatus.FAILED), any<Pageable>()))
+            .thenReturn(listOf(job))
+
+        task.scan()
+
+        verify(jobLifecycleService).retry(job)
     }
 
     @Test

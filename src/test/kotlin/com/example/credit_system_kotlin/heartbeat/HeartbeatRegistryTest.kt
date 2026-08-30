@@ -2,6 +2,7 @@ package com.example.credit_system_kotlin.heartbeat
 
 import com.example.credit_system_kotlin.global.config.WorkerProperties
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -13,8 +14,10 @@ import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.atLeast
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
+import org.mockito.kotlin.timeout
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import org.springframework.data.redis.RedisConnectionFailureException
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.ZSetOperations
 import org.springframework.test.util.ReflectionTestUtils
@@ -44,6 +47,64 @@ class HeartbeatRegistryTest {
     }
 
     @Test
+    fun `refreshHeartbeat가 Redis 예외를 삼키고 갱신 스레드를 죽이지 않는다`() {
+        whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
+        whenever(zSetOperations.add(any<String>(), any<String>(), any<Double>()))
+            .thenThrow(RedisConnectionFailureException("redis down"))
+
+        val future = registry.startHeartbeat(1L, 0)
+
+        verify(zSetOperations, timeout(5000).atLeast(3)).add(eq(KEY), eq("1:0"), any<Double>())
+        assertThat(future.isDone).isFalse()
+        future.cancel(false)
+    }
+
+    @Test
+    fun `findExpiredAttempts는 Redis 예외를 전파한다`() {
+        whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
+        whenever(zSetOperations.rangeByScore(eq(KEY), eq(Double.NEGATIVE_INFINITY), any<Double>()))
+            .thenThrow(RedisConnectionFailureException("redis down"))
+
+        assertThatThrownBy { registry.findExpiredAttempts() }
+            .isInstanceOf(RedisConnectionFailureException::class.java)
+    }
+
+    @Test
+    fun `hasLiveHeartbeat는 Redis 예외를 전파한다`() {
+        whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
+        whenever(zSetOperations.score(KEY, "5:0"))
+            .thenThrow(RedisConnectionFailureException("redis down"))
+
+        assertThatThrownBy { registry.hasLiveHeartbeat(5L, 0) }
+            .isInstanceOf(RedisConnectionFailureException::class.java)
+    }
+
+    @Test
+    fun `removeHeartbeat는 Redis 예외를 전파한다`() {
+        whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
+        whenever(zSetOperations.remove(KEY, "7:0"))
+            .thenThrow(RedisConnectionFailureException("redis down"))
+
+        assertThatThrownBy { registry.removeHeartbeat(7L, 0) }
+            .isInstanceOf(RedisConnectionFailureException::class.java)
+    }
+
+    @Test
+    fun `stopHeartbeat은 removeHeartbeat가 Redis 예외를 던지면 전파한다`() {
+        whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
+        whenever(zSetOperations.add(any<String>(), any<String>(), any<Double>()))
+            .thenThrow(RedisConnectionFailureException("redis down"))
+        whenever(zSetOperations.remove(KEY, "3:0"))
+            .thenThrow(RedisConnectionFailureException("redis down"))
+
+        val future = registry.startHeartbeat(3L, 0)
+
+        assertThatThrownBy { registry.stopHeartbeat(3L, 0, future) }
+            .isInstanceOf(RedisConnectionFailureException::class.java)
+        assertThat(future.isCancelled).isTrue()
+    }
+
+    @Test
     fun `정상 상황에서 refreshHeartbeat는 now에 timeout을 더한 score로 기록한다`() {
         whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
         val before = Instant.now().epochSecond
@@ -65,6 +126,20 @@ class HeartbeatRegistryTest {
 
         assertThat(registry.findExpiredAttempts())
             .containsExactlyInAnyOrder(JobAttempt(11L, 0), JobAttempt(12L, 3))
+    }
+
+    @Test
+    fun `findExpiredAttempts는 깨진 멤버를 zset에서 제거하고 정상 멤버만 돌려준다`() {
+        whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
+        whenever(zSetOperations.rangeByScore(eq(KEY), eq(Double.NEGATIVE_INFINITY), any<Double>()))
+            .thenReturn(setOf("12", "abc", "1:x", "20:5"))
+
+        assertThat(registry.findExpiredAttempts()).containsExactly(JobAttempt(20L, 5))
+
+        verify(zSetOperations).remove(KEY, "12")
+        verify(zSetOperations).remove(KEY, "abc")
+        verify(zSetOperations).remove(KEY, "1:x")
+        verify(zSetOperations, never()).remove(KEY, "20:5")
     }
 
     @Test

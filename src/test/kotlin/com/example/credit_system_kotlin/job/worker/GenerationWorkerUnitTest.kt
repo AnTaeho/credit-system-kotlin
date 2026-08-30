@@ -4,6 +4,7 @@ import com.example.credit_system_kotlin.global.config.WorkerProperties
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
+import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -11,11 +12,15 @@ import org.mockito.Mock
 import org.mockito.junit.jupiter.MockitoExtension
 import org.mockito.kotlin.any
 import org.mockito.kotlin.doReturn
+import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.springframework.core.task.SyncTaskExecutor
+import org.springframework.core.task.TaskExecutor
+import org.springframework.core.task.TaskRejectedException
+import org.springframework.dao.QueryTimeoutException
 import org.springframework.test.util.ReflectionTestUtils
 import java.time.Instant
 
@@ -59,6 +64,72 @@ class GenerationWorkerUnitTest {
         worker.dispatchPendingJobs()
 
         verify(jobProcessor, never()).runGeneration(job)
+    }
+
+    @Test
+    fun `선점 UPDATE가 반복 실패해도 이후 주기에서 다시 처리한다`() {
+        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doThrow(QueryTimeoutException("db unavailable"))
+            .whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+
+        repeat(CONCURRENCY + 2) { worker.dispatchPendingJobs() }
+
+        verify(jobProcessor, never()).runGeneration(job)
+
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+
+        worker.dispatchPendingJobs()
+
+        verify(jobProcessor).runGeneration(job)
+    }
+
+    @Test
+    fun `executor 위임과 롤백이 모두 실패해도 예외가 새어나가지 않는다`() {
+        val rejectingWorker = GenerationWorker(
+            jobRepository, jobProcessor,
+            TaskExecutor { throw IllegalStateException("executor shutdown") },
+            WorkerProperties(true, 20, CONCURRENCY)
+        )
+        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+        doThrow(QueryTimeoutException("db unavailable")).whenever(jobRepository)
+            .rollbackToHoldingIfProcessing(eq(1L), eq(0), any<Instant>())
+
+        assertThatCode { rejectingWorker.dispatchPendingJobs() }.doesNotThrowAnyException()
+
+        verify(jobProcessor, never()).runGeneration(job)
+    }
+
+    @Test
+    fun `한 작업의 선점 실패가 같은 배치의 나머지 작업을 막지 않는다`() {
+        val second = Job.hold(10L, 100L, "dog")
+        ReflectionTestUtils.setField(second, "id", 2L)
+        doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doThrow(QueryTimeoutException("db unavailable"))
+            .whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(2L), eq(0), any<Instant>())
+
+        worker.dispatchPendingJobs()
+
+        verify(jobProcessor).runGeneration(second)
+    }
+
+    @Test
+    fun `executor가 거부하면 선점을 롤백하고 이번 주기를 중단한다`() {
+        val second = Job.hold(10L, 100L, "dog")
+        ReflectionTestUtils.setField(second, "id", 2L)
+        val rejectingWorker = GenerationWorker(
+            jobRepository, jobProcessor,
+            TaskExecutor { throw TaskRejectedException("pool exhausted") },
+            WorkerProperties(true, 20, CONCURRENCY)
+        )
+        doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+
+        rejectingWorker.dispatchPendingJobs()
+
+        verify(jobRepository).rollbackToHoldingIfProcessing(eq(1L), eq(0), any<Instant>())
+        verify(jobRepository, never()).startProcessingIfAttemptMatches(eq(2L), any<Int>(), any<Instant>())
     }
 
     @Test

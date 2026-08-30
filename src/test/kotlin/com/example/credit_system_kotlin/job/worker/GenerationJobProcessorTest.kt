@@ -5,15 +5,18 @@ import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
 import com.example.credit_system_kotlin.job.stub.GenerationStubClient
 import com.example.credit_system_kotlin.job.stub.StubGenerationException
+import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.Mock
 import org.mockito.junit.jupiter.MockitoExtension
 import org.mockito.kotlin.doReturn
+import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.test.util.ReflectionTestUtils
 import java.util.concurrent.ScheduledFuture
 
@@ -57,6 +60,29 @@ class GenerationJobProcessorTest {
 
         verify(jobLifecycleService).markFailed(1L, 0)
         verify(jobLifecycleService, never()).confirm(job, "https://example.test/cat.png")
+        verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
+    }
+
+    @Test
+    fun `예기치 못한 런타임예외도 FAILED로 기록하고 heartbeat를 정리한다`() {
+        whenever(stubClient.generate("cat")).thenThrow(IllegalStateException("interrupted"))
+
+        processor.runGeneration(job)
+
+        verify(jobLifecycleService).markFailed(1L, 0)
+        verify(jobLifecycleService, never()).confirm(job, "https://example.test/cat.png")
+        verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
+    }
+
+    @Test
+    fun `결과 반영이 실패해도 FAILED로 바꾸지 않고 PROCESSING을 유지한다`() {
+        whenever(stubClient.generate("cat")).thenReturn("https://example.test/cat.png")
+        doThrow(DataIntegrityViolationException("constraint violation"))
+            .whenever(jobLifecycleService).confirm(job, "https://example.test/cat.png")
+
+        assertThatCode { processor.runGeneration(job) }.doesNotThrowAnyException()
+
+        verify(jobLifecycleService, never()).markFailed(1L, 0)
         verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
     }
 }

@@ -29,4 +29,8 @@ class Organization(
     @Column(nullable = false)
     var balance: Long = balance
         protected set
+
+    @Column(nullable = false)
+    var initialBalance: Long = balance
+        protected set
 }
