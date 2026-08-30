@@ -58,10 +58,32 @@ class OrganizationApiControllerTest @Autowired constructor(
         headers.contentType = MediaType.APPLICATION_JSON
         val after = restTemplate.exchange(
             url("/api/organizations/me/charge"), HttpMethod.POST,
-            HttpEntity(ChargeRequest(300L), headers), ChargeResponse::class.java
+            HttpEntity(ChargeRequest("idem-1", 300L), headers), ChargeResponse::class.java
         )
 
         assertThat(after.body?.balance).isEqualTo(800L)
+        assertThat(after.body?.duplicate).isFalse()
+    }
+
+    @Test
+    fun `같은 idemKey로 두 번 충전하면 두 번째 응답은 중복이다`() {
+        val headers = HttpHeaders()
+        headers.add("X-Organization-Id", organization.persistedId.toString())
+        headers.contentType = MediaType.APPLICATION_JSON
+
+        val first = restTemplate.exchange(
+            url("/api/organizations/me/charge"), HttpMethod.POST,
+            HttpEntity(ChargeRequest("idem-dup", 300L), headers), ChargeResponse::class.java
+        )
+        val second = restTemplate.exchange(
+            url("/api/organizations/me/charge"), HttpMethod.POST,
+            HttpEntity(ChargeRequest("idem-dup", 300L), headers), ChargeResponse::class.java
+        )
+
+        assertThat(first.body?.duplicate).isFalse()
+        assertThat(first.body?.balance).isEqualTo(800L)
+        assertThat(second.body?.duplicate).isTrue()
+        assertThat(second.body?.balance).isEqualTo(800L)
     }
 
     @Test
@@ -77,15 +99,21 @@ class OrganizationApiControllerTest @Autowired constructor(
         assertThat(response.statusCode.value()).isEqualTo(404)
     }
 
+    /**
+     * Java 원본은 OrganizationServiceTest 에서 idemKey에 null을 넘겨 이 경계를 확인했다.
+     * Kotlin은 idemKey를 non-null로 닫아(report.md A-4) 그 호출이 컴파일되지 않으므로
+     * 남은 실제 경로 — 필드가 아예 없는 JSON — 를 여기서 확인한다.
+     * 코드(INVALID_REQUEST)와 상태(400)는 Java와 같고 메시지 문구만 다르다.
+     */
     @Test
-    fun `amount 필드가 없는 본문은 400으로 거부된다`() {
+    fun `idemKey 필드가 없는 본문은 400으로 거부된다`() {
         val headers = HttpHeaders()
         headers.add("X-Organization-Id", organization.persistedId.toString())
         headers.contentType = MediaType.APPLICATION_JSON
 
         val response = restTemplate.exchange(
             url("/api/organizations/me/charge"), HttpMethod.POST,
-            HttpEntity("""{}""", headers), ErrorResponse::class.java
+            HttpEntity("""{"amount":300}""", headers), ErrorResponse::class.java
         )
 
         assertThat(response.statusCode.value()).isEqualTo(400)

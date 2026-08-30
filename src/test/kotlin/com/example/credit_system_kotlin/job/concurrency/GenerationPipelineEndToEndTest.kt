@@ -45,7 +45,7 @@ class GenerationPipelineEndToEndTest @Autowired constructor(
         val organization = organizationRepository.save(Organization("acme", 1000L))
 
         val result = holdService.requestGeneration(
-            organization.persistedId, "a cat wearing sunglasses"
+            organization.persistedId, "e2e-key", "a cat wearing sunglasses"
         )
 
         await().atMost(20, TimeUnit.SECONDS).untilAsserted {

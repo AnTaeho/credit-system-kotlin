@@ -59,11 +59,12 @@ class JobApiControllerTest @Autowired constructor(
 
         val createResponse = restTemplate.exchange(
             url("/api/jobs"), HttpMethod.POST,
-            HttpEntity(JobCreateRequest("a cat"), headers),
+            HttpEntity(JobCreateRequest("idem-1", "a cat"), headers),
             HoldResult::class.java
         )
 
         assertThat(createResponse.statusCode).isEqualTo(HttpStatus.OK)
+        assertThat(createResponse.body?.duplicate).isFalse()
 
         val listResponse = restTemplate.exchange(
             url("/api/jobs"), HttpMethod.GET, HttpEntity<Void>(headers),

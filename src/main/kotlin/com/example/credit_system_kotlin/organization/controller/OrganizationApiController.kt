@@ -25,5 +25,5 @@ class OrganizationApiController(
     fun charge(
         @RequestHeader("X-Organization-Id") organizationId: Long,
         @RequestBody request: ChargeRequest
-    ): ChargeResponse = organizationService.charge(organizationId, request.amount)
+    ): ChargeResponse = organizationService.charge(organizationId, request.idemKey, request.amount)
 }

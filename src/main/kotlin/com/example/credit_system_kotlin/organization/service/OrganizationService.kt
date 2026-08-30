@@ -2,6 +2,7 @@ package com.example.credit_system_kotlin.organization.service
 
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
+import com.example.credit_system_kotlin.global.validation.validateIdemKey
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.dto.BalanceResponse
@@ -28,21 +29,30 @@ class OrganizationService(
     }
 
     @Transactional
-    fun charge(organizationId: Long, amount: Long): ChargeResponse {
-        validateRequest(amount)
+    fun charge(organizationId: Long, idemKey: String, amount: Long): ChargeResponse {
+        validateRequest(idemKey, amount)
+
+        val existing = ledgerRepository.findByOrganizationIdAndIdemKey(organizationId, idemKey)
+        if (existing != null) {
+            val balance = organizationFinder.getOrThrow(organizationId).balance
+            log.info("중복 충전 요청 감지: organizationId={}, idemKey={}", organizationId, idemKey)
+            return ChargeResponse(balance, true)
+        }
 
         val updated = organizationRepository.addBalance(organizationId, amount, Instant.now())
         if (updated != 1) {
             throw OrganizationNotFoundException(organizationId)
         }
 
-        ledgerRepository.save(LedgerEntry.charge(organizationId, amount))
+        ledgerRepository.save(LedgerEntry.charge(organizationId, idemKey, amount))
         log.info("충전 완료: organizationId={}, amount={}", organizationId, amount)
 
-        return ChargeResponse(organizationFinder.getOrThrow(organizationId).balance)
+        val balance = organizationFinder.getOrThrow(organizationId).balance
+        return ChargeResponse(balance, false)
     }
 
-    private fun validateRequest(amount: Long) {
+    private fun validateRequest(idemKey: String, amount: Long) {
+        validateIdemKey(idemKey)
         if (amount <= 0) {
             throw InvalidRequestException("amount는 0보다 커야 합니다.")
         }

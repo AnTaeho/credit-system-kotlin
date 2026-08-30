@@ -23,7 +23,7 @@ class JobApiController(
     fun create(
         @RequestHeader("X-Organization-Id") organizationId: Long,
         @RequestBody request: JobCreateRequest
-    ): HoldResult = holdService.requestGeneration(organizationId, request.prompt)
+    ): HoldResult = holdService.requestGeneration(organizationId, request.idemKey, request.prompt)
 
     @GetMapping
     fun list(@RequestHeader("X-Organization-Id") organizationId: Long): List<JobResponse> =

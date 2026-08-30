@@ -38,7 +38,7 @@ class LedgerApiControllerTest @Autowired constructor(
     fun setUp() {
         organization = organizationRepository.save(Organization("acme", 1000L))
         ledgerRepository.save(LedgerEntry.hold(organization.persistedId, 1L, 100L))
-        ledgerRepository.save(LedgerEntry.charge(organization.persistedId, 500L))
+        ledgerRepository.save(LedgerEntry.charge(organization.persistedId, "charge-key-1", 500L))
     }
 
     @AfterEach

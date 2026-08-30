@@ -36,9 +36,9 @@ class ConcurrentHoldTest @Autowired constructor(
         val successCount = AtomicInteger()
         val rejectedCount = AtomicInteger()
 
-        runConcurrently(threadCount) {
+        runConcurrently(threadCount) { idx ->
             try {
-                holdService.requestGeneration(organization.persistedId, "cat")
+                holdService.requestGeneration(organization.persistedId, "concurrent-key-$idx", "cat")
                 successCount.incrementAndGet()
             } catch (e: InsufficientBalanceException) {
                 rejectedCount.incrementAndGet()

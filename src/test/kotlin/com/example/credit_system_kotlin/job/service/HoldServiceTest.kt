@@ -4,6 +4,7 @@ import com.example.credit_system_kotlin.global.config.appProperties
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
+import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.domain.Organization
@@ -20,13 +21,15 @@ import org.springframework.test.context.ActiveProfiles
 @ActiveProfiles("test")
 @DataJpaTest
 class HoldServiceTest @Autowired constructor(
+    private val idempotencyKeyRepository: IdempotencyKeyRepository,
     private val organizationRepository: OrganizationRepository,
     private val jobRepository: JobRepository,
     private val ledgerRepository: LedgerRepository
 ) {
 
     private val holdService = HoldService(
-        organizationRepository, OrganizationFinder(organizationRepository), jobRepository, ledgerRepository,
+        idempotencyKeyRepository, organizationRepository, OrganizationFinder(organizationRepository),
+        jobRepository, ledgerRepository,
         appProperties()
     )
 
@@ -44,18 +47,30 @@ class HoldServiceTest @Autowired constructor(
 
     @Test
     fun `정상 요청은 잔액을 차감하고 job과 ledger를 생성한다`() {
-        holdService.requestGeneration(organization.persistedId, "a cat")
+        val result = holdService.requestGeneration(organization.persistedId, "key-1", "a cat")
 
         val found = organizationRepository.findById(organization.persistedId).orElseThrow()
+        assertThat(result.duplicate).isFalse()
         assertThat(found.balance).isEqualTo(900L)
         assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId)).hasSize(1)
+    }
+
+    @Test
+    fun `동일 idemKey로 재요청하면 같은 job을 반환하고 잔액이 추가로 차감되지 않는다`() {
+        val first = holdService.requestGeneration(organization.persistedId, "key-1", "a cat")
+        val second = holdService.requestGeneration(organization.persistedId, "key-1", "a cat")
+
+        val found = organizationRepository.findById(organization.persistedId).orElseThrow()
+        assertThat(second.duplicate).isTrue()
+        assertThat(second.jobId).isEqualTo(first.jobId)
+        assertThat(found.balance).isEqualTo(900L)
     }
 
     @Test
     fun `잔액이 부족하면 예외가 발생하고 job이 생성되지 않는다`() {
         val poor = organizationRepository.save(Organization("poor", 50L))
 
-        assertThatThrownBy { holdService.requestGeneration(poor.persistedId, "a cat") }
+        assertThatThrownBy { holdService.requestGeneration(poor.persistedId, "key-2", "a cat") }
             .isInstanceOf(InsufficientBalanceException::class.java)
 
         assertThat(jobRepository.findByOrganizationIdOrderByIdDesc(poor.persistedId)).isEmpty()
@@ -64,11 +79,11 @@ class HoldServiceTest @Autowired constructor(
 
     @Test
     fun `필수값이 없거나 길이 제한을 넘으면 요청을 거부한다`() {
-        assertThatThrownBy { holdService.requestGeneration(organization.persistedId, " ") }
+        assertThatThrownBy { holdService.requestGeneration(organization.persistedId, " ", "cat") }
             .isInstanceOf(InvalidRequestException::class.java)
-            .hasMessage("prompt는 필수입니다.")
+            .hasMessage("idemKey는 필수입니다.")
         assertThatThrownBy {
-            holdService.requestGeneration(organization.persistedId, "a".repeat(1001))
+            holdService.requestGeneration(organization.persistedId, "key", "a".repeat(1001))
         }
             .isInstanceOf(InvalidRequestException::class.java)
             .hasMessage("prompt는 1000자를 초과할 수 없습니다.")
@@ -77,10 +92,28 @@ class HoldServiceTest @Autowired constructor(
     }
 
     @Test
-    fun `prompt의 최대 길이는 허용한다`() {
-        val result = holdService.requestGeneration(organization.persistedId, "p".repeat(1000))
+    fun `idemKey와 prompt의 최대 길이는 허용한다`() {
+        val result = holdService.requestGeneration(
+            organization.persistedId, "k".repeat(100), "p".repeat(1000)
+        )
 
+        assertThat(result.duplicate).isFalse()
         assertThat(jobRepository.findById(result.jobId).orElseThrow().prompt).hasSize(1000)
+    }
+
+    @Test
+    fun `idemKey가 최대 길이를 넘으면 어떤 데이터도 변경하지 않는다`() {
+        assertThatThrownBy {
+            holdService.requestGeneration(organization.persistedId, "k".repeat(101), "cat")
+        }
+            .isInstanceOf(InvalidRequestException::class.java)
+            .hasMessage("idemKey는 100자를 초과할 수 없습니다.")
+
+        assertThat(organizationRepository.findById(organization.persistedId).orElseThrow().balance)
+            .isEqualTo(1000L)
+        assertThat(idempotencyKeyRepository.count()).isZero()
+        assertThat(jobRepository.count()).isZero()
+        assertThat(ledgerRepository.count()).isZero()
     }
 
     @Test
@@ -88,7 +121,7 @@ class HoldServiceTest @Autowired constructor(
         val missingOrganizationId = organization.persistedId + 999_999L
 
         assertThatThrownBy {
-            holdService.requestGeneration(missingOrganizationId, "a cat")
+            holdService.requestGeneration(missingOrganizationId, "key-3", "a cat")
         }
             .isInstanceOf(OrganizationNotFoundException::class.java)
             .hasMessage("존재하지 않는 organization: $missingOrganizationId")
