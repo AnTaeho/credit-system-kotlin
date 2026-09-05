@@ -48,6 +48,15 @@ app:
   processing:
     timeout-seconds: 60
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  metrics:
+    tags:
+      application: credit_system
+
 logging:
   level:
     com.example.credit_system_kotlin: info

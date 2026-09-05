@@ -1,23 +1,29 @@
 package com.example.credit_system_kotlin.ledger.scheduling
 
 import com.example.credit_system_kotlin.ledger.dto.LedgerBalanceCheck
+import com.example.credit_system_kotlin.ledger.event.LedgerReconciliationCompleted
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
+import java.time.Duration
+import java.time.Instant
 
 private val log = LoggerFactory.getLogger(LedgerReconciliationTask::class.java)
 
 @Component
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class LedgerReconciliationTask(
-    private val ledgerRepository: LedgerRepository
+    private val ledgerRepository: LedgerRepository,
+    private val eventPublisher: ApplicationEventPublisher
 ) {
 
     @Scheduled(fixedDelayString = $$"${app.scheduling.reconciliation-interval-millis:60000}")
     fun reconcile() {
+        val startedAt = Instant.now()
         var checkedCount = 0
         var mismatchCount = 0
         var lastId = 0L
@@ -36,6 +42,15 @@ class LedgerReconciliationTask(
             }
         } while (checks.size == RECONCILE_BATCH_SIZE)
         log.info("원장 대사 주기 완료: checkedCount={}, mismatchCount={}", checkedCount, mismatchCount)
+        val completedAt = Instant.now()
+        eventPublisher.publishEvent(
+            LedgerReconciliationCompleted(
+                checkedCount = checkedCount,
+                mismatchCount = mismatchCount,
+                duration = Duration.between(startedAt, completedAt),
+                completedAt = completedAt
+            )
+        )
     }
 
     private fun isBalanceConsistent(balanceCheck: LedgerBalanceCheck): Boolean {
