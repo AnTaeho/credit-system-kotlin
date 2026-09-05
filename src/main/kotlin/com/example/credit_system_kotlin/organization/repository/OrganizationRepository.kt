@@ -36,4 +36,7 @@ interface OrganizationRepository : JpaRepository<Organization, Long> {
         @Param("amount") amount: Long,
         @Param("now") now: Instant
     ): Int
+
+    /** 잔액이 음수인 조직 수. 불변식이라 0 이 아니면 즉시 사고다. */
+    fun countByBalanceLessThan(balance: Long): Long
 }

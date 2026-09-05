@@ -23,7 +23,7 @@ L3 이 특히 서버 지표로 대체 불가능하다. attemptNo 가 낡은 세�
 |---|---|---|---|
 | ① | 원장 대사 지표 승격 — 이미 계산 중이던 대사 결과를 Gauge/Counter/Timer 로 노출 | L1 | 완료 |
 | ② | 방어 발동 카운터 — 조건부 UPDATE 의 `updated == 0` 분기를 세는 이벤트로 승격 | L3 | 완료 |
-| ③ | 스냅샷 게이지 — 상태별 job 수와 미결 hold 나이를 주기적으로 찍는다 | L0·L2 | 예정 |
+| ③ | 상태 스냅샷 게이지 — 미결 hold 의 건수·금액·나이와 불변식 3종을 주기적으로 찍는다 | L0·L1 | 완료 |
 | ④ | docker-compose 관측 스택 — Prometheus + Grafana 를 띄워 대시보드와 알람 규칙을 코드로 남긴다 | — | 예정 |
 | ⑤ | 장애 주입 — Redis·MySQL 을 실제로 죽여 지표가 사고를 어떻게 그리는지 확인한다 | — | 예정 |
 | ⑥ | 알람 규칙 정리 — P1/P2 기준과 대응 절차를 문서로 확정한다 | — | 예정 |
@@ -230,7 +230,7 @@ Prometheus 는 태그(레이블)의 조합마다 별도의 시계열을 만든�
 
 - **`LedgerReconciliationTaskTest`** — 기존 로그 기반 단언(일치 시 무경보, 불일치 시 ERROR 1건, 배치 경계 등)은 전부 그대로 유지된다. 여기에 `일치 2건 불일치 1건이면 이벤트로 checkedCount 3 mismatchCount 1을 발행한다` 테스트를 추가했다. 조직 3개(2개는 잔액·원장 일치, 1개는 원장 없이 잔액만 증가)를 만들고 `task.reconcile()` 을 호출한 뒤, mock 한 `ApplicationEventPublisher` 에 `argumentCaptor` 로 잡힌 이벤트의 `checkedCount == 3`, `mismatchCount == 1` 을 검증한다. 태스크 생성자에 `ApplicationEventPublisher` 가 추가되어 깨졌던 컴파일은 mock 주입으로 고쳤다.
 
-- **`LedgerReconciliationMetricsTest`** — `SimpleMeterRegistry` 와 (기존 API 로는 값을 되돌릴 수 없는 `Clock.fixed` 대신) 직접 시각을 앞으로 당길 수 있는 테스트 전용 `FixedMutableClock` 을 써서 Spring 컨텍스트 없이 순수 단위 테스트로 검증한다:
+- **`LedgerReconciliationMetricsTest`** — `SimpleMeterRegistry` 와 (기존 API 로는 값을 되돌릴 수 없는 `Clock.fixed` 대신) 직접 시각을 앞으로 당길 수 있는 테스트 전용 `FixedMutableClock`(③에서 `DomainSnapshotMetricsTest` 도 쓰게 되어 `src/test/.../support/` 로 옮겼다) 을 써서 Spring 컨텍스트 없이 순수 단위 테스트로 검증한다:
   - 이벤트 하나를 넣으면 `mismatch`/`checked` 게이지가 그 이벤트의 값이 된다.
   - 이벤트를 두 번 넣으면 게이지는 **마지막 이벤트의 값**으로 덮이고, `cycles` 카운터는 정확히 2가 된다.
   - 이벤트가 오기 전 `staleness` 는 `-1.0` 이고, 이벤트가 온 뒤 시계를 30초 앞당기면 `staleness` 가 `30.0` 을 반환한다.
@@ -277,8 +277,8 @@ curl localhost:8080/actuator/prometheus | grep credit_ledger
 ### 이 단계에서 남는 것
 
 - **①은 L1(불변식) 한 겹만 덮는다.** 원장 대사가 지키는 것은 "잔액 = 최초 잔액 + 원장 합계" 라는 데이터 정합성 불변식이다. 이번 단계가 지표로 승격한 것은 이 불변식이 깨졌는지 여부뿐이다.
-- **방어 발동 지표(L3)는 다음 단계다.** step2~step6 이 만든 조건부 UPDATE, 유니크 제약, CAS, heartbeat 회수 같은 방어 장치들이 실제로 몇 번 발동했는지(예: 잔액 부족으로 거절된 횟수, 유니크 제약으로 막힌 중복 요청 수, timeout 회수 횟수)는 아직 지표가 없다. 이런 장치가 "얼마나 자주 실제로 막고 있는지" 를 보려면 도메인 서비스 계측이 필요하고, 이는 이번 범위 밖이다.
-- **미결 hold 나이(L0)도 다음 단계다.** 확정도 환불도 되지 않은 채 오래 떠 있는 hold 가 있는지(돈이 묶인 채 방치되는 상황)는 스냅샷 게이지가 필요한 영역이고, 아직 손대지 않았다.
+- **방어 발동 지표(L3)는 다음 단계다.** (→ ② 에서 구현했다) step2~step6 이 만든 조건부 UPDATE, 유니크 제약, CAS, heartbeat 회수 같은 방어 장치들이 실제로 몇 번 발동했는지(예: 잔액 부족으로 거절된 횟수, 유니크 제약으로 막힌 중복 요청 수, timeout 회수 횟수)는 아직 지표가 없다. 이런 장치가 "얼마나 자주 실제로 막고 있는지" 를 보려면 도메인 서비스 계측이 필요하고, 이는 이번 범위 밖이다.
+- **미결 hold 나이(L0)도 다음 단계다.** (→ ③ 에서 구현했다) 확정도 환불도 되지 않은 채 오래 떠 있는 hold 가 있는지(돈이 묶인 채 방치되는 상황)는 스냅샷 게이지가 필요한 영역이고, 아직 손대지 않았다.
 - **여전히 감지일 뿐 교정하지 않는다.** step6 의 원칙이 그대로 이어진다 — `mismatch` 게이지가 0 이 아니어도 자동으로 아무것도 고치지 않는다. 사람이 알람을 보고 대응하는 구조다. 이번 단계가 바꾼 것은 "그 알아챔이 로그 grep 이 아니라 지표와 알람 규칙으로 자동화됐다"는 것뿐이다.
 ---
 
@@ -653,12 +653,284 @@ sum(rate(credit_defense_total{point="idem_key"}[5m])) by (outcome)
 - **L2 흐름은 여전히 비어 있다.** 상태별 job 수와 단계별 소요 시간(hold → 선점 → 확정)은 아직 지표가 없다. 어디서 막혔는지를 보려면 필요하다.
 - **여전히 감지일 뿐 교정하지 않는다.** step6 부터 이어지는 원칙 그대로다. `final_refund/raced` 가 올라도 자동으로 아무것도 되돌리지 않는다. 방어 장치는 이미 옳게 동작했고, 지표는 그것이 동작했다는 사실만 알린다.
 
+## ③ 상태 스냅샷 게이지
+
+### 논지: 없는 것은 셀 수 없다
+
+②가 만든 카운터는 **"코드가 불렸다"만 센다.** `credit_defense_total{point="confirm",outcome="applied"}` 이 올랐다는 것은 누군가 그 자리를 지나갔다는 뜻이다. 뒤집으면, 코드가 **안 불린** 사고는 이 지표로 절대 잡히지 않는다.
+
+워커 프로세스가 통째로 죽었다고 하자. confirm 은 영영 호출되지 않는다. `confirm/applied` 도 안 오르고 `confirm/stale` 도 안 오른다. 카운터는 그냥 조용하다. 그런데 트래픽이 없는 새벽에도 카운터는 똑같이 조용하다 — **"안 오름"과 "사고"가 지표상 구분되지 않는다.** 없는 것은 셀 수 없기 때문이다.
+
+그래서 **실행을 세는 지표(카운터)와 상태를 재는 지표(스냅샷 게이지)는 다른 물건이다.** 스냅샷은 주기적으로 DB 에 "지금 이 상태인 row 가 몇 개냐"를 직접 묻는다. 어떤 코드 경로가 불렸는지와 무관하게 상태 자체를 본다. **사고 탐지는 반드시 이쪽이어야 하고, 카운터는 사고가 난 뒤 원인을 좁히는 진단용이다.** ①의 `staleness` 게이지가 "대사 자체가 멈춘 것"을 잡았던 것과 정확히 같은 구조인데, 이번엔 관측 장치가 아니라 도메인 상태 전체에 그 구조를 적용한다.
+
+### 미결(pending)의 정의
+
+미결은 **`status NOT IN (COMPLETED, REFUNDED)`** 다. 즉 HOLDING, PROCESSING, **그리고 FAILED** 가 전부 미결이다.
+
+FAILED 를 미결에 넣는 것이 이 정의의 핵심이다. FAILED 는 종결이 아니다 — 재시도를 기다리거나 최종 환불을 기다리는 중이고, 그 job 의 돈은 hold 된 채 **여전히 묶여 있다.** 이 지표군이 재는 것은 "파이프라인이 어느 상태 이름에 머무는가"가 아니라 "돈이 풀렸는가"다. 돈이 실제로 풀리는 상태는 COMPLETED(확정)와 REFUNDED(환불) 둘뿐이고, 그래서 미결의 정의도 그 둘의 여집합이다.
+
+### `createdAt` 인가 `updatedAt` 인가
+
+`oldestPendingAgeSeconds` 는 **`createdAt` 기준**이다. `updatedAt` 이 아니다.
+
+이 값이 답하려는 질문은 "돈이 얼마나 오래 묶여 있나"(L0)이지 "현재 상태에 얼마나 머물렀나"가 아니다. 재시도로 HOLDING → PROCESSING → FAILED → HOLDING 을 몇 번 돌아도, 그 job 이 처음 hold 한 돈은 생성 순간부터 한 번도 풀린 적이 없다.
+
+`updatedAt` 기준이었다면 **재시도가 나이를 0 으로 리셋한다.** 재시도가 계속 실패해서 영원히 도는 job — 정확히 가장 잡고 싶은 상황 — 은 매 재시도마다 나이가 0 으로 돌아가서 지표상 영원히 젊다. 상태 전이가 활발할수록 지표가 침묵하는 구조는 쓸 수 없다. `createdAt` 은 상태 전이가 건드리지 않는 값이라 그 리셋이 원천적으로 불가능하다.
+
+### 0 인가 -1 인가
+
+미결이 하나도 없을 때 `oldestPendingAgeSeconds` 는 **0** 이다. ①의 `staleness` 에서 초기값을 -1 로 둔 것과 반대 선택인데, 이유가 있다.
+
+`staleness` 에서 0 은 "방금 성공적으로 대사를 마쳤다"와 "한 번도 안 돌았다"를 구분하지 못했다. 그래서 존재할 수 없는 음수를 "기준점 없음"에 배정해야 했다.
+
+여기서는 그 모호함이 없다. `oldest_pending_age = 0` 은 곧 **"묶인 돈이 없다"** 이고, 그건 정상 상태를 정확히 뜻한다. `outstanding_count` 가 0 이면 나이도 0 인 것이 자연스럽고, 알람 규칙(`> 300`)도 그대로 성립한다. 굳이 -1 을 쓰면 오히려 "정상"에 특별한 상수를 배정하는 꼴이 된다.
+
+다만 이 절의 지표군에도 -1 이 하나 있다. `credit.snapshot.staleness` 다. 그건 도메인 상태가 아니라 **관측 장치 자신의 건강**을 재는 값이라 ①과 같은 이유로 -1 에서 시작한다.
+
+### 파일별 변경 목록
+
+| 파일 | 신규/수정 | 무엇을, 왜 |
+|---|---|---|
+| `global/event/DomainSnapshotTaken.kt` | 신규 | 한 시점의 도메인 상태 6개 값 + `duration`/`takenAt` 을 담는 불변 이벤트. Micrometer 를 모른다 |
+| `global/scheduling/DomainSnapshotTask.kt` | 신규 | 15초마다 쿼리 6개를 날려 이벤트 하나를 발행하는 스케줄러. `Clock` 빈을 주입받아 나이를 계산한다 |
+| `observability/DomainSnapshotMetrics.kt` | 신규 | 이벤트를 받아 Gauge 7종 + Counter + Timer 를 갱신하는 유일한 컴포넌트 |
+| `job/repository/JobRepository.kt` | 수정 | 스냅샷용 조회 5개 추가(파생 쿼리 1 + JPQL 4). 기존 전이 쿼리는 한 글자도 건드리지 않았다 |
+| `organization/repository/OrganizationRepository.kt` | 수정 | `countByBalanceLessThan` 파생 쿼리 한 줄 추가 |
+| `src/main/resources/application.yml` | 수정 | `app.scheduling.snapshot-interval-millis: 15000` 한 줄. `AppProperties` 에는 넣지 않았다 — `reconciliation-interval-millis` 와 같이 `@Scheduled` 의 `${...:15000}` 로만 읽힌다 |
+| `src/test/.../support/FixedMutableClock.kt` | 신규 | ①의 `LedgerReconciliationMetricsTest` 안에 private 으로 있던 테스트용 시계를 꺼내 공유한다. `RecordingEventPublisher` 와 같은 자리다 |
+| `global/scheduling/DomainSnapshotTaskTest.kt` | 신규 | `@DataJpaTest` + 실제 리포지토리 + 고정 시계로 여섯 값이 실제 DB 상태와 맞는지 확인 |
+| `observability/DomainSnapshotMetricsTest.kt` | 신규 | `SimpleMeterRegistry` 로 게이지 갱신·덮어쓰기·staleness 를 검증하는 순수 단위 테스트 |
+| `observability/PrometheusEndpointTest.kt` | 수정 | `credit_job_oldest_pending_age_seconds` 노출 단언 한 줄 추가 |
+
+### 지표 표
+
+| Micrometer 이름 | Prometheus 에서 보이는 이름 | 타입 | 의미 | 알람 기준 |
+|---|---|---|---|---|
+| `credit.hold.outstanding.count` | `credit_hold_outstanding_count` | Gauge | 미결 job 수 | 알람 없음. 추세와 분모용 |
+| `credit.hold.outstanding.amount` | `credit_hold_outstanding_amount` | Gauge | 미결 job 에 묶인 크레딧 합 | **추세.** 절대 임계값이 아니라 평소 대비 급증을 본다 |
+| `credit.job.oldest.pending.age` | `credit_job_oldest_pending_age_seconds` | Gauge (초) | 가장 오래된 미결 job 의 나이 | **P2.** 300초 초과면 파이프라인이 어딘가에서 멈춘 것으로 본다 |
+| `credit.invariant.negative.balance.orgs` | `credit_invariant_negative_balance_orgs` | Gauge | `balance < 0` 인 조직 수 | **P1, 즉시 호출.** SLO 가 아니라 불변식이다 |
+| `credit.invariant.jobs.without.hold` | `credit_invariant_jobs_without_hold` | Gauge | HOLD 원장이 없는 job 수 | **P1, 즉시 호출** |
+| `credit.invariant.unsettled.terminal.jobs` | `credit_invariant_unsettled_terminal_jobs` | Gauge | 종결됐는데 정산 원장이 없는 job 수 | **P1, 즉시 호출** |
+| `credit.snapshot.cycles` | `credit_snapshot_cycles_total` | Counter | 완료한 스냅샷 주기 수 | 알람 없음. `rate()` 로 눈으로 확인 |
+| `credit.snapshot.duration` | `credit_snapshot_duration_seconds{_count,_sum}` / `_max` | Timer | 스냅샷 한 주기 소요 | 알람 없음. 전체 스캔 쿼리의 비용 추세 관찰용 |
+| `credit.snapshot.staleness` | `credit_snapshot_staleness_seconds` | Gauge (초) | 마지막 성공 스냅샷 이후 경과. 초기값 -1 | **P2.** 스냅샷 주기(15초)의 3배인 45초를 넘으면 스냅샷 자체가 멈춘 것 |
+
+불변식 3종의 알람 기준이 "0 이 아니면"인 것은 게으른 임계값 설정이 아니다. **SLO 와 불변식은 다르다.** 응답 시간 p99 는 넘길 수도 있는 목표지만, "잔액은 음수가 될 수 없다"는 넘길 수 있는 목표가 아니라 이 시스템이 참이라고 주장하는 명제다. 1건이라도 어긋났다면 그건 성능 저하가 아니라 코드나 데이터가 틀렸다는 뜻이고, 임계값을 논할 여지가 없다. ①의 `mismatch` 게이지와 같은 성격이다.
+
+### `oldest_pending_age` 가 단일 최중요 지표인 이유
+
+이 절에서 지표를 하나만 남기고 다 지워야 한다면 `credit_job_oldest_pending_age_seconds` 를 남긴다. 파이프라인이 **어디서** 멈추든 이 숫자 하나가 무한히 오르기 때문이다.
+
+| 사고 | ②의 카운터는 | `oldest_pending_age` 는 |
+|---|---|---|
+| 워커 프로세스가 전부 죽음 | `worker_claim/*`, `confirm/*` 전부 **침묵**. 트래픽 없는 시간대와 구분 불가 | HOLDING job 이 선점되지 않은 채 늙는다 → **무한 증가** |
+| 스케줄러(회수·재시도)가 죽음 | `job_recovery_total` 침묵. FAILED job 이 재시도되지 않아도 카운터엔 흔적 없음 | FAILED job 이 미결에 남아 늙는다 → **무한 증가** |
+| Redis 가 죽어 heartbeat 가 안 붙음 | `recovery/heartbeat` 침묵, `recovery/backstop` 이 뒤늦게 오를 수도 있고 아닐 수도 | PROCESSING job 이 회수되지 못한 채 늙는다 → **무한 증가** |
+| 스텁 생성 API 가 무한 지연 | `confirm/*` 도 `mark_failed/*` 도 안 오름. 에러율 0%, 응답 시간 정상 | PROCESSING job 이 계속 늙는다 → **무한 증가** |
+| DB 커넥션 풀 고갈로 confirm 이 실패 | `confirm/applied` 가 안 오르지만 그게 "안 왔다"인지 "실패했다"인지 모름 | 확정되지 못한 job 이 늙는다 → **무한 증가** |
+
+왼쪽 열의 다섯 가지 사고가 **전부 카운터의 침묵으로 나타난다.** 침묵은 정상과 구분되지 않는다. 오른쪽은 다섯 가지 모두에서 같은 방향으로 단조 증가한다 — 원인은 다르지만 증상이 하나다.
+
+그리고 이 지표는 **원리상 카운터로 만들 수 없다.** 카운터는 무언가가 일어날 때 오른다. 여기서 재는 것은 "미결 job 이 아무 코드도 안 불리는 채로 늙어가는 것", 즉 **아무 일도 일어나지 않고 있다는 사실**이다. 일어나지 않은 일에는 증가시킬 지점이 없다. 시간을 재는 주체가 job 바깥(주기적 스냅샷)에 있어야만 성립한다.
+
+### 부분 스냅샷 금지
+
+`LedgerReconciliationTask` 는 항목 단위로 `try/catch` 를 걸어 한 조직의 실패가 주기 전체를 죽이지 않게 한다. `DomainSnapshotTask` 는 정반대로 간다 — **쿼리 하나라도 실패하면 주기 전체를 버리고 이벤트를 발행하지 않는다.**
+
+두 태스크의 산출물 성격이 다르기 때문이다. 대사는 "몇 건 검사했고 몇 건 어긋났다"는 누적 집계라, 일부를 못 봤어도 나머지 결과는 여전히 참이다. 스냅샷은 **한 시점의 일관된 그림**이다. `outstanding_count` 는 읽었는데 `oldest_pending_age` 쿼리가 실패했다고 앞의 것만 반영하면, 게이지는 "미결 3건, 최고 나이 0초"라는 존재하지 않는 상태를 그린다. 반쯤 채운 스냅샷은 관측이 없는 것보다 나쁘다 — 없으면 아무도 안 믿지만, 있으면 사람들이 믿는다.
+
+이벤트를 발행하지 않으면 게이지는 직전 값에 얼어붙는데, 이 침묵은 `credit_snapshot_staleness_seconds` 가 대신 드러낸다. 게이지가 얼었다는 사실 자체를 별도 지표가 말해주므로, 부분 발행으로 억지로 값을 채울 이유가 없다.
+
+예외는 `log.error` 를 남기고 삼킨다. `@Scheduled` 메서드가 예외를 던져도 스케줄 자체는 유지되지만, 명시적으로 잡아 "이번 주기는 발행하지 않았다"를 로그에 남기는 편이 나중에 staleness 알람을 받았을 때 원인을 바로 찾게 해준다.
+
+### 비용
+
+쿼리 6개가 훑는 범위는 두 부류로 갈린다.
+
+| 쿼리 | 훑는 범위 | 비용 |
+|---|---|---|
+| `countByStatusNotIn` | `idx_jobs_status_id` 로 미결 상태 3개의 인덱스 구간 | 미결 수에 비례 |
+| `sumHoldAmountByStatusNotIn` | 같은 구간 + `holdAmount` 조회 | 미결 수에 비례 |
+| `findOldestCreatedAtByStatusNotIn` | 같은 구간 + `createdAt` 조회 | 미결 수에 비례 |
+| `countByBalanceLessThan` | `organizations` 전체 | 조직 수에 비례(작다) |
+| `countJobsWithoutHoldEntry` | **`jobs` 전체** + 원장 NOT EXISTS | job 총수에 비례 |
+| `countUnsettledTerminalJobs` | **`jobs` 전체** + 원장 NOT EXISTS ×2 | job 총수에 비례 |
+
+앞의 세 개는 싸다. **미결 집합은 정상 운영에서 작게 유지되기 때문이다** — 파이프라인이 돌면 job 은 COMPLETED/REFUNDED 로 빠져 인덱스 구간에서 사라진다. 미결이 커지는 상황은 곧 사고이고, 그때는 쿼리가 무거워지는 것보다 알람이 울리는 것이 먼저다.
+
+뒤의 두 개는 **전체 스캔이다.** 불변식 검사라 "지금 미결인 것"만 봐서는 답이 안 나온다 — 이미 COMPLETED 된 job 의 정산 원장이 빠진 것을 찾는 것이 목적이기 때문이다. 대사 성격의 쿼리를 15초 주기에 얹은 셈인데, 지금은 job 수가 작아 문제가 없고 단순함을 우선했다.
+
+**한계와 다음 조치:** job 수가 수백만이 되면 이 두 쿼리는 15초 주기를 감당하지 못한다. 그때는 (a) 대사 태스크 쪽(1분 주기)으로 옮기거나, (b) `id > lastId` 커서 배치로 나눠 한 주기에 일부 구간만 훑고 결과를 누적하는 방식으로 바꿔야 한다. `LedgerReconciliationTask` 가 이미 (b) 를 쓰고 있으므로 옮길 자리는 정해져 있다. `credit_snapshot_duration_seconds` 를 붙여 둔 것이 그 시점을 알아채기 위한 것이다.
+
+### 핵심 코드 읽기
+
+#### `DomainSnapshotTask` — 여섯 값을 한 번에 읽고 한 번에 발행한다
+
+```kotlin
+@Scheduled(fixedDelayString = $$"${app.scheduling.snapshot-interval-millis:15000}")
+fun takeSnapshot() {
+    val startedAt = clock.instant()
+    try {
+        val outstandingHoldCount = jobRepository.countByStatusNotIn(PENDING_EXCLUDED_STATUSES)
+        val outstandingHoldAmount = jobRepository.sumHoldAmountByStatusNotIn(PENDING_EXCLUDED_STATUSES)
+        val oldestCreatedAt = jobRepository.findOldestCreatedAtByStatusNotIn(PENDING_EXCLUDED_STATUSES)
+        val negativeBalanceOrgs = organizationRepository.countByBalanceLessThan(0L)
+        val jobsWithoutHold = jobRepository.countJobsWithoutHoldEntry()
+        val unsettledTerminalJobs = jobRepository.countUnsettledTerminalJobs()
+
+        val takenAt = clock.instant()
+        val oldestPendingAgeSeconds = oldestCreatedAt
+            ?.let { Duration.between(it, takenAt).seconds }
+            ?: 0L
+
+        log.info("도메인 스냅샷 완료: ...")
+        eventPublisher.publishEvent(DomainSnapshotTaken(...))
+    } catch (e: RuntimeException) {
+        log.error("도메인 스냅샷 주기 실패, 이번 주기는 발행하지 않는다", e)
+    }
+}
+
+companion object {
+    private val PENDING_EXCLUDED_STATUSES = listOf(JobStatus.COMPLETED, JobStatus.REFUNDED)
+}
+```
+
+`Instant.now()` 가 아니라 주입받은 `clock.instant()` 를 쓴다. ①에서 `ClockConfig` 를 만든 이유가 여기서 한 번 더 쓰인다 — 테스트에서 시계를 고정해야 `oldestPendingAgeSeconds` 를 `90` 같은 정확한 값으로 단언할 수 있다. 벽시계를 쓰면 "대략 90초쯤"이라는 느슨한 단언밖에 못 한다.
+
+미결의 정의가 `PENDING_EXCLUDED_STATUSES` 라는 **여집합 목록 하나**로만 표현되는 것도 의도적이다. 상태가 하나 늘어날 때(예: CANCELLED) 그것이 미결인지 아닌지를 한 자리에서만 결정하면 된다. 미결 목록을 나열했다면 새 상태는 조용히 집계에서 빠졌을 것이다 — 그리고 빠진 것은 셀 수 없다.
+
+#### JPQL — 전부 H2(MODE=MySQL)와 MySQL 양쪽에서 돈다
+
+```kotlin
+@Query(
+    """
+    SELECT MIN(j.createdAt) FROM Job j
+    WHERE j.status NOT IN :statuses
+    """
+)
+fun findOldestCreatedAtByStatusNotIn(@Param("statuses") statuses: Collection<JobStatus>): Instant?
+
+@Query(
+    """
+    SELECT COUNT(j) FROM Job j
+    WHERE NOT EXISTS (
+        SELECT 1 FROM LedgerEntry l
+        WHERE l.jobId = j.id AND l.type = LedgerType.HOLD
+    )
+    """
+)
+fun countJobsWithoutHoldEntry(): Long
+```
+
+네이티브 쿼리를 쓰지 않은 것이 제약이자 안전장치다. 테스트는 H2, 운영은 MySQL 이라 네이티브 SQL 은 한쪽에서만 검증된다. JPQL 로 묶어 두면 테스트가 통과한 쿼리가 운영에서도 같은 의미로 번역된다. 반환 타입을 `Instant?` 로 둔 것도 같은 맥락이다 — 미결이 없으면 `MIN` 은 `NULL` 이고, 그 null 을 0 으로 바꾸는 결정은 SQL 이 아니라 태스크의 Kotlin 코드가 한다. "미결 없음 = 나이 0" 은 도메인 판단이지 쿼리의 기본값이 아니다.
+
+#### `DomainSnapshotMetrics` — 최중요 게이지
+
+```kotlin
+// 이 단계의 단일 최중요 지표다. 워커가 죽든, 스케줄러가 죽든, Redis 가 죽든,
+// 스텁 API 가 무한히 지연되든 파이프라인이 멈추면 이 값 하나가 무한히 오른다.
+// 카운터로는 만들 수 없는 지표다 — 아무 코드도 안 불리는 채로 늙어가는 것을 재기 때문이다.
+Gauge.builder(OLDEST_PENDING_AGE_METRIC, oldestPendingAgeSeconds) { it.get().toDouble() }
+    .description("가장 오래된 미결 job 의 나이(초). createdAt 기준이라 재시도로 리셋되지 않는다")
+    .baseUnit("seconds")
+    .register(registry)
+```
+
+`AtomicLong` 을 컴포넌트 필드로 두고 생성자에서 한 번만 등록하는 것은 ①의 Gauge 함정과 같은 이유다. 태그는 붙이지 않는다 — `organizationId` 를 넣고 싶은 유혹이 가장 큰 지표가 바로 이것("어느 조직의 job 이 묶여 있나")인데, 그건 로그의 일이다.
+
+### 테스트가 보장하는 것
+
+- **`DomainSnapshotTaskTest` (`@DataJpaTest`, 실제 리포지토리, 고정 시계)** — 여섯 값이 실제 DB 상태와 맞는지 확인한다. job 이 없으면 전부 0 이고 나이도 0 이다. HOLDING 1건(100 크레딧, 90초 전 생성)·COMPLETED 1건·REFUNDED 1건을 넣으면 `outstandingHoldCount == 1`, `outstandingHoldAmount == 100`, `oldestPendingAgeSeconds == 90` 이다 — 종결된 둘이 빠진다는 뜻이다. **FAILED 도 미결에 포함된다**는 것은 별도 테스트로 못 박았고, "300초 전에 생성돼 세 번 상태가 바뀐 FAILED job" 과 "10초 전 HOLDING" 을 같이 두면 나이가 `300` 이 나오는 테스트가 `createdAt` 기준 선택을 지킨다. `updatedAt` 기준으로 바꾸면 이 테스트만 깨진다.
+
+- **불변식 3종** — 잔액을 음수로 만든 조직 1개면 `negativeBalanceOrgs == 1`, HOLD 원장 없이 저장한 job 이면 `jobsWithoutHold == 1`, CONFIRM 원장 없는 COMPLETED job 이면 `unsettledTerminalJobs == 1` 이고 CONFIRM 을 넣으면 0 이 된다. REFUNDED/REFUND 쪽도 같은 방식으로 확인한다.
+
+- **부분 스냅샷 금지** — 리포지토리를 mock 으로 갈아 끼워 앞의 세 쿼리는 값을 돌려주고 네 번째(`countJobsWithoutHoldEntry`)에서 예외를 던지게 한 뒤, **이벤트가 하나도 발행되지 않는 것**을 단언한다. 앞 세 값을 이미 읽었다는 점이 중요하다 — "실패하면 아무것도 안 한다"가 아니라 "절반을 읽었어도 버린다"를 검증하는 것이다.
+
+- **`DomainSnapshotMetricsTest` (`SimpleMeterRegistry`)** — 이벤트 하나로 게이지 6개가 갱신되고, 두 번째 이벤트로 전부 마지막 값에 덮이며, `cycles` 카운터는 정확히 2 가 된다. `duration` 타이머가 이벤트의 250ms 를 그대로 기록하고, `staleness` 는 이벤트 전 `-1.0` 이었다가 이벤트 후 시계를 30초 당기면 `30.0` 이 된다.
+
+- **함정: `createdAt` 과 `status` 는 `protected set` 이다.** 테스트에서 job 을 과거로 밀거나 상태를 바꿀 때 세터를 부를 수 없다. 상태는 프로덕션과 같은 전이 메서드(`startProcessingIfAttemptMatches` → `failIfProcessing` → `refundIfFailed`)를 실제로 호출해서 만든다 — 이러면 "테스트가 만든 상태"와 "코드가 만드는 상태"가 같다는 것이 덤으로 보장된다. `createdAt` 만 `ReflectionTestUtils.setField` 로 민다(`IdempotencyKeyCleanupTaskTest` 가 쓰던 방법 그대로). 리플렉션은 시간을 조작할 때만 쓰고, 상태 전이에는 쓰지 않는다.
+
+- **`FixedMutableClock` 을 `support/` 로 꺼냈다.** ①에서 `LedgerReconciliationMetricsTest` 안의 private 클래스였는데, ③의 두 테스트가 같은 시계를 필요로 해서 `RecordingEventPublisher` 옆으로 옮겼다. ①의 기존 단언은 그대로다.
+
+### 직접 확인하는 방법
+
+```
+curl localhost:8080/actuator/prometheus | grep -E "credit_hold|credit_job_oldest|credit_invariant|credit_snapshot"
+```
+
+아래는 테스트 프로파일(H2, `app.scheduling.enabled=false`, 스냅샷이 아직 한 번도 안 돈 상태)에서 `/actuator/prometheus` 를 실제로 호출해 받은 응답이다:
+
+```
+# HELP credit_hold_outstanding_amount 미결 job 에 묶여 있는 크레딧 합계
+# TYPE credit_hold_outstanding_amount gauge
+credit_hold_outstanding_amount{application="credit_system"} 0.0
+# HELP credit_hold_outstanding_count 미결 job 수. COMPLETED/REFUNDED 가 아닌 모든 job 이며 FAILED 도 포함한다
+# TYPE credit_hold_outstanding_count gauge
+credit_hold_outstanding_count{application="credit_system"} 0.0
+# HELP credit_invariant_jobs_without_hold HOLD 원장이 없는 job 수. 0이 아니면 즉시 사고다
+# TYPE credit_invariant_jobs_without_hold gauge
+credit_invariant_jobs_without_hold{application="credit_system"} 0.0
+# HELP credit_invariant_negative_balance_orgs 잔액이 음수인 조직 수. 0이 아니면 즉시 사고다
+# TYPE credit_invariant_negative_balance_orgs gauge
+credit_invariant_negative_balance_orgs{application="credit_system"} 0.0
+# HELP credit_invariant_unsettled_terminal_jobs 종결됐는데 정산 원장이 없는 job 수. 0이 아니면 즉시 사고다
+# TYPE credit_invariant_unsettled_terminal_jobs gauge
+credit_invariant_unsettled_terminal_jobs{application="credit_system"} 0.0
+# HELP credit_job_oldest_pending_age_seconds 가장 오래된 미결 job 의 나이(초). createdAt 기준이라 재시도로 리셋되지 않는다
+# TYPE credit_job_oldest_pending_age_seconds gauge
+credit_job_oldest_pending_age_seconds{application="credit_system"} 0.0
+# HELP credit_snapshot_cycles_total 완료한 도메인 스냅샷 주기의 누적 수
+# TYPE credit_snapshot_cycles_total counter
+credit_snapshot_cycles_total{application="credit_system"} 0.0
+# HELP credit_snapshot_duration_seconds 도메인 스냅샷 한 주기에 걸린 시간
+# TYPE credit_snapshot_duration_seconds summary
+credit_snapshot_duration_seconds_count{application="credit_system"} 0
+credit_snapshot_duration_seconds_sum{application="credit_system"} 0.0
+# HELP credit_snapshot_duration_seconds_max 도메인 스냅샷 한 주기에 걸린 시간
+# TYPE credit_snapshot_duration_seconds_max gauge
+credit_snapshot_duration_seconds_max{application="credit_system"} 0.0
+# HELP credit_snapshot_staleness_seconds 마지막 성공 스냅샷으로부터 흐른 시간(초). 스냅샷 자체가 멈춘 것을 탐지한다
+# TYPE credit_snapshot_staleness_seconds gauge
+credit_snapshot_staleness_seconds{application="credit_system"} -1.0
+```
+
+**값이 전부 0 이고 `staleness` 만 -1 인 이 출력이 오히려 이 지표군의 성질을 잘 보여준다.** ②의 카운터는 0 이 "아직 아무 일도 없었다"는 애매한 뜻이었지만, 여기서 0 은 **"묶인 돈이 없고 불변식이 전부 성립한다"** 는 명확한 정상 선언이다. 이 지표군에서는 **0 이 목표값이고, 0 이 아닌 것이 뉴스다.** 그리고 `staleness = -1` 은 "그 정상 선언이 언제 찍힌 것인지 아직 모른다"는 뜻이라, 두 값을 함께 봐야 비로소 "지금 정상"이라고 말할 수 있다.
+
+실제 서버를 띄우고(`app.scheduling.enabled=true`, MySQL/Redis 필요) job 을 몇 건 밀어 넣으면 `credit_hold_outstanding_count` 와 `credit_hold_outstanding_amount` 가 오르고, 워커가 처리를 끝내면 다시 0 으로 내려온다. 워커를 죽여 놓고 job 을 넣으면 `credit_job_oldest_pending_age_seconds` 가 15초마다 계속 증가하는 것을 볼 수 있다 — ⑤의 장애 주입에서 이 곡선을 직접 그린다.
+
+PromQL 로 옮기면 이렇게 된다:
+
+```
+# 파이프라인이 멈췄나 (P2)
+credit_job_oldest_pending_age_seconds > 300
+
+# 불변식이 깨졌나 (P1, 셋 중 하나라도)
+credit_invariant_negative_balance_orgs > 0
+  or credit_invariant_jobs_without_hold > 0
+  or credit_invariant_unsettled_terminal_jobs > 0
+
+# 관측 자체가 멈췄나 (P2)
+credit_snapshot_staleness_seconds > 45
+
+# 묶인 돈의 추세
+credit_hold_outstanding_amount
+```
+
+### 이 단계에서 남는 것
+
+- **L0·L1·L3 이 갖춰졌다.** ①이 L1(원장 불변식), ②가 L3(방어 발동), ③이 L0(묶인 돈과 그 나이)에 더해 L1 을 세 개 더 얹었다. L2(흐름 — 상태별 job 수 분포와 단계별 소요 시간)는 여전히 비어 있는데, 지금 지표들로 "멈췄다"는 알 수 있고 "어느 단계에서 얼마나 느린가"는 아직 모른다.
+- **노출은 되지만 아직 아무도 긁어가지 않는다.** 지금까지 만든 지표는 전부 `/actuator/prometheus` 에 문자열로 떠 있을 뿐이다. 스크레이프하는 주체도, 저장하는 곳도, 그리는 대시보드도 없다. 알람 규칙은 이 문서의 표에만 있다.
+- **④는 노출 경계와 카디널리티 가드다.** 어떤 엔드포인트를 누구에게 열 것인가(`/actuator/prometheus` 를 공개 포트에 두면 시스템 내부가 그대로 노출된다), 그리고 앞으로 태그가 늘어날 때 시계열 상한을 어떻게 지킬 것인가를 정한다.
+- **⑤에서 Prometheus/Grafana 를 붙인다.** docker-compose 로 스크레이프·저장·대시보드·알람 규칙을 코드로 남기고, Redis·MySQL 을 실제로 죽여 이 지표들이 사고를 어떻게 그리는지 확인한다. `oldest_pending_age` 가 실제로 무한히 오르는 곡선을 보는 것이 그 단계의 목표다.
+- **여전히 감지일 뿐 교정하지 않는다.** step6 부터 이어지는 원칙 그대로다. `credit_invariant_negative_balance_orgs` 가 1 이 되어도 자동으로 아무것도 고치지 않는다.
+
 ---
 
 ## 명령어
 
 ```
-# 이 브랜치에서 전체 테스트 실행 (Docker 필요 — MySQL + Redis Testcontainers, 150개 테스트)
+# 이 브랜치에서 전체 테스트 실행 (Docker 필요 — MySQL + Redis Testcontainers, 164개 테스트)
 ./gradlew test
 
 # 정적 분석
@@ -667,7 +939,7 @@ sum(rate(credit_defense_total{point="idem_key"}[5m])) by (outcome)
 
 # 도메인/서비스/스케줄러 코드가 Micrometer 를 모르는지 직접 확인
 grep -rl "io.micrometer" src/main/kotlin
-# (observability/ 아래 두 파일만 나와야 한다)
+# (observability/ 아래 세 파일만 나와야 한다)
 
 # 지표 하나만 골라 실제 배선까지 확인
 ./gradlew test --tests "com.example.credit_system_kotlin.observability.PrometheusEndpointTest"
@@ -677,4 +949,8 @@ grep -rl "io.micrometer" src/main/kotlin
 
 # 진짜 경쟁 상태에서 카운터 합이 맞는지 (Docker 필요)
 ./gradlew test --tests "com.example.credit_system_kotlin.observability.DefenseMetricsConcurrencyTest"
+
+# 스냅샷 게이지 — 쿼리가 실제 DB 상태와 맞는지, 게이지 갱신이 맞는지
+./gradlew test --tests "com.example.credit_system_kotlin.global.scheduling.DomainSnapshotTaskTest"
+./gradlew test --tests "com.example.credit_system_kotlin.observability.DomainSnapshotMetricsTest"
 ```

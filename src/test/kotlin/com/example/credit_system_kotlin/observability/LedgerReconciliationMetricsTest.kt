@@ -1,14 +1,13 @@
 package com.example.credit_system_kotlin.observability
 
 import com.example.credit_system_kotlin.ledger.event.LedgerReconciliationCompleted
+import com.example.credit_system_kotlin.support.FixedMutableClock
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.time.ZoneOffset
 
 class LedgerReconciliationMetricsTest {
 
@@ -93,18 +92,5 @@ class LedgerReconciliationMetricsTest {
         val timer = registry.get("credit.ledger.reconciliation.duration").timer()
         assertThat(timer.count()).isEqualTo(1)
         assertThat(timer.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS)).isEqualTo(250.0)
-    }
-
-    /** [Clock.fixed] 는 인스턴트를 바꿀 수 없어, 흐르는 시간을 흉내 내려고 직접 변경 가능한 시계를 둔다. */
-    private class FixedMutableClock(private var instant: Instant) : Clock() {
-        fun advance(duration: Duration) {
-            instant = instant.plus(duration)
-        }
-
-        override fun getZone(): java.time.ZoneId = ZoneOffset.UTC
-
-        override fun withZone(zone: java.time.ZoneId?): Clock = this
-
-        override fun instant(): Instant = instant
     }
 }

@@ -30,5 +30,6 @@ class PrometheusEndpointTest @Autowired constructor(
 
         assertThat(result.response.status).isEqualTo(HttpStatus.OK.value())
         assertThat(result.response.contentAsString).contains("credit_ledger_reconciliation_mismatch")
+        assertThat(result.response.contentAsString).contains("credit_job_oldest_pending_age_seconds")
     }
 }

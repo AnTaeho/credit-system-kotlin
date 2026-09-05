@@ -27,6 +27,7 @@ app:
   scheduling:
     enabled: true
     reconciliation-interval-millis: 60000
+    snapshot-interval-millis: 15000
     idempotency-cleanup-cron: "0 0 2 * * *"
     timezone: Asia/Seoul
   idempotency:
