@@ -1,0 +1,90 @@
+# step7 5단계 — 도메인 지표 관측 스택
+#
+# 올리기:  ./gradlew bootJar && docker compose -f deploy/observability/docker-compose.yml up -d --build
+# 내리기:  docker compose -f deploy/observability/docker-compose.yml down -v
+
+services:
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: an902318
+      MYSQL_DATABASE: credit_system
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    # 포트를 publish 하지 않는다. 개발 머신의 로컬 MySQL(3306)과 충돌하기 때문이다.
+    # 디버깅은 docker compose exec mysql mysql -uroot -pan902318 credit_system 으로 한다.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pan902318"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    # 마찬가지로 publish 하지 않는다. 로컬 Redis(6379)와 충돌한다.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      # 컨텍스트가 저장소 루트여야 build/libs/*.jar 를 COPY 할 수 있다.
+      context: ../..
+      dockerfile: deploy/observability/Dockerfile
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/credit_system?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: an902318
+      SPRING_DATA_REDIS_HOST: redis
+      # 노출 경계의 실물. 관리 포트를 애플리케이션 포트에서 떼어낸다.
+      # application.yml 에 쓰지 않고 여기서 주는 이유는 docs/step7-observability.md 4단계 참고.
+      MANAGEMENT_SERVER_PORT: 8081
+    ports:
+      # 8080 만 호스트로 나간다. 8081 은 compose 네트워크 안에서만 보이고,
+      # Prometheus 가 app:8081 로 긁는다. 호스트에서는 /actuator/* 에 닿을 수 없다.
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # 헬스체크가 관리 포트에 의존한다. 관리 포트가 죽으면 컨테이너는 unhealthy 가 되는데,
+      # 이건 트레이드오프다(docs 5단계 참고).
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # 로그인 없이 대시보드를 볼 수 있게 한다. 로컬 관측 스택이므로 열어 둔다.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus

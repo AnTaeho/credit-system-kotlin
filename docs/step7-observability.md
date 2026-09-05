@@ -24,8 +24,8 @@ L3 이 특히 서버 지표로 대체 불가능하다. attemptNo 가 낡은 세�
 | 1 | 원장 대사 지표 승격 — 이미 계산 중이던 대사 결과를 Gauge/Counter/Timer 로 노출 | L1 | 완료 |
 | 2 | 방어 발동 카운터 — 조건부 UPDATE 의 `updated == 0` 분기를 세는 이벤트로 승격 | L3 | 완료 |
 | 3 | 상태 스냅샷 게이지 — 미결 hold 의 건수·금액·나이와 불변식 3종을 주기적으로 찍는다 | L0·L1 | 완료 |
-| 4 | 노출 경계와 카디널리티 가드 — 관리 포트 분리, `/actuator/prometheus` 를 누구에게 열지, 레지스트리 수준의 시계열 상한 | — | 예정 |
-| 5 | docker-compose 관측 스택 — Prometheus + Grafana 를 띄워 스크레이프·대시보드·알람 규칙(P1/P2)을 코드로 남긴다 | — | 예정 |
+| 4 | 노출 경계와 카디널리티 가드 — 관리 포트 분리, `/actuator/prometheus` 를 누구에게 열지, 레지스트리 수준의 시계열 상한 | — | 완료 |
+| 5 | docker-compose 관측 스택 — Prometheus + Grafana 를 띄워 스크레이프·대시보드·알람 규칙(P1/P2)을 코드로 남긴다 | — | 완료 |
 | 6 | 장애 주입 — 워커·스케줄러·Redis 를 실제로 죽이고 원장을 손으로 깨서, 어느 지표가 반응하고 어느 지표가 침묵하는지 확인한다 | — | 예정 |
 
 ---
@@ -927,10 +927,593 @@ credit_hold_outstanding_amount
 
 ---
 
+## 4단계 — 노출 경계와 카디널리티 가드
+
+1~3단계는 지표를 만드는 단계였다. 이 단계는 아무 지표도 만들지 않는다. **이미 만든 지표를 누구에게 보여줄 것인가**, 그리고 **앞으로 지표가 늘어날 때 시계열 폭발을 어디서 막을 것인가** 두 가지를 정한다.
+
+### 논지: `/actuator/prometheus` 는 시스템 내부의 전문(全文)이다
+
+지금까지 만든 응답 하나를 다시 보자.
+
+```
+credit_invariant_negative_balance_orgs{application="credit_system"} 0.0
+credit_hold_outstanding_amount{application="credit_system"} 12300.0
+credit_defense_total{application="credit_system",outcome="rejected",point="hold_balance"} 9.0
+```
+
+각각 "잔액이 음수인 조직이 몇 개인가", "지금 묶여 있는 돈이 얼마인가", "잔액 부족으로 몇 건이 거절됐는가"를 말한다. 이건 운영자를 위한 정보이지 사용자를 위한 정보가 아니다. 묶인 크레딧 총액은 서비스 규모를 그대로 드러내고, `rejected` 카운터의 추세는 고객사의 잔액 사정을 드러낸다. 인증도 없다.
+
+그런데 지금 이 엔드포인트는 공개 API(`/api/jobs`, `/api/organizations/me/charge`)와 **같은 8080 포트**에 열려 있다. 공개 API 를 노출하려면 8080 을 열어야 하고, 8080 을 여는 순간 `/actuator/prometheus` 도 같이 열린다. 경로만 다를 뿐 도달 가능성은 완전히 같다.
+
+이걸 애플리케이션 코드로 막는 방법(Spring Security 로 `/actuator/**` 에 인증을 거는 것)도 있지만, 이 단계가 택한 답은 다르다. **노출 경계는 애플리케이션 설정이 아니라 배포 결정이다.**
+
+관리 엔드포인트를 별도 포트로 옮기고, 그 포트를 컨테이너 네트워크 밖으로 publish 하지 않으면 된다. 그러면 인증 코드도, 필터 체인도, 잘못 설정될 여지도 없다. 컨테이너 네트워크 안에 있는 Prometheus 만 `app:8081` 에 닿고, 호스트에서는 애초에 그런 포트가 존재하지 않는다. 5단계의 `docker-compose.yml` 이 이 결정의 실물이다.
+
+### 왜 `application.yml` 이 아니라 배포 쪽에서 정하는가
+
+`management.server.port: 8081` 을 `application.yml` 에 쓰면 간단하다. 그렇게 하지 않았다.
+
+포트를 나눌지 말지는 **그 애플리케이션이 어디에 놓이느냐**에 달린 결정이다. 로컬에서 `./gradlew bootRun` 으로 띄우고 `curl localhost:8080/actuator/prometheus` 로 지표를 확인하는 사람에게 포트 분리는 순수한 불편이다 — 로컬에는 격리할 네트워크 경계 자체가 없기 때문이다. 반대로 compose 나 쿠버네티스에 올라가면 분리는 필수다. 같은 코드가 두 곳에 다 놓이는데, `application.yml` 은 한 값만 가질 수 있다.
+
+그래서 `application.yml` 은 기본값(포트 분리 없음)을 유지하고, 분리는 배포 쪽에서 환경변수로 준다:
+
+```yaml
+# deploy/observability/docker-compose.yml
+app:
+  environment:
+    MANAGEMENT_SERVER_PORT: 8081
+  ports:
+    - "8080:8080"      # 8081 은 없다
+```
+
+`src/main` 은 이번 단계에서 `MetricsCardinalityConfig.kt` 신규 파일 하나 외에 한 글자도 바뀌지 않았다. 노출 경계가 바뀌었는데 애플리케이션 코드가 안 바뀐 것이 이 결정의 요점이다.
+
+이 선택의 대가는 "설정 파일만 봐서는 경계가 있는지 알 수 없다"는 것이고, 그래서 `ManagementPortBoundaryTest` 가 필요하다. 경계는 코드에 없지만, 경계가 **성립한다는 사실**은 테스트로 코드에 남는다.
+
+### 카디널리티 가드는 두 겹이다
+
+2단계에서 이미 카디널리티를 한 번 막았다. `DefensePoint`/`DefenseOutcome` 을 enum 으로 두어 태그 값 집합이 컴파일 타임에 닫히게 한 것이다. 그건 **코드 수준** 가드다. 하지만 그 가드는 오늘 존재하는 계측에만 걸린다. 내일 누가 이런 코드를 새로 짜면 enum 은 아무 말도 하지 않는다:
+
+```kotlin
+Counter.builder("credit.job.created").tag("organizationId", orgId.toString()).register(registry)
+```
+
+이 한 줄이 조직 수만큼의 시계열을 만든다. 컴파일도 되고, 테스트도 통과하고, 리뷰에서 놓치기도 쉽다. 사고는 조직이 100개일 때가 아니라 10만 개가 됐을 때 터진다.
+
+4단계가 그 아래 계층을 깐다. **레지스트리 수준** 가드는 미터가 등록되는 마지막 문에서 판정하므로, 어떤 코드가 어떻게 짜였든 반드시 통과해야 한다. 2단계 문서가 멱등키를 두고 쓴 구조와 같다 — "1차 멱등 조회(애플리케이션)로 빠르게 걸러내고, 최종 판정은 DB 유니크 제약이 한다." 여기서도 enum 이 빠르게 걸러내고, 최종 판정은 레지스트리가 한다. 위층 가드는 사람이 지켜야 성립하고, 아래층 가드는 사람이 잊어도 성립한다.
+
+### 파일별 변경 목록
+
+| 파일 | 신규/수정 | 무엇을, 왜 |
+|---|---|---|
+| `observability/MetricsCardinalityConfig.kt` | 신규 | `MeterFilter` 빈 5개. 식별자 태그 거부, `credit.` 접두 미터의 태그 값 상한 3종, 전체 미터 수 상한 |
+| `observability/MetricsCardinalityConfigTest.kt` | 신규 | `SimpleMeterRegistry` 순수 단위 테스트 5개 + 실제 컨텍스트 배선 확인 3개 |
+| `observability/ManagementPortBoundaryTest.kt` | 신규 | 관리 포트를 분리한 상태에서 애플리케이션 포트의 `/actuator/prometheus` 가 404 임을 못 박는다 |
+| `deploy/observability/docker-compose.yml` | 신규(5단계) | `MANAGEMENT_SERVER_PORT=8081` 을 주고 8080 만 publish 한다. 노출 경계의 실물 |
+
+`application.yml` 은 건드리지 않았다. 이 단계의 결정 중 하나가 "여기에 쓰지 않는다"였기 때문이다.
+
+### 핵심 코드 읽기
+
+#### 식별자 태그 거부 — 거부하되 죽이지 않는다
+
+```kotlin
+@Bean
+fun denyIdentifierTagsMeterFilter(): MeterFilter = object : MeterFilter {
+
+    private val warnedOnce = ConcurrentHashMap.newKeySet<String>()
+
+    override fun accept(id: Meter.Id): MeterFilterReply {
+        val offendingKey = FORBIDDEN_TAG_KEYS.firstOrNull { id.getTag(it) != null }
+            ?: return MeterFilterReply.NEUTRAL
+        if (warnedOnce.add("${id.name}/$offendingKey")) {
+            log.warn(
+                "식별자 태그가 붙은 미터를 거부했다: name={}, tag={}. " +
+                    "개별 식별은 로그의 몫이다 — 지표에 붙이면 카디널리티가 폭발한다",
+                id.name, offendingKey
+            )
+        }
+        return MeterFilterReply.DENY
+    }
+}
+```
+
+`organizationId`, `organization_id`, `jobId`, `job_id`, `idemKey`, `idem_key` 여섯 키를 막는다. 카멜과 스네이크를 둘 다 적는 이유는 Micrometer 태그 키 표기가 코드마다 갈리기 때문이다 — 한쪽만 막으면 다른 쪽으로 새어 나간다.
+
+**거부된 미터에 대해 Micrometer 는 예외 대신 noop 미터를 돌려준다.** 그래서 `counter.increment()` 를 부르는 도메인 코드는 아무 일도 없었다는 듯 계속 돈다. 2단계의 원칙 그대로다 — 사전 등록에 없는 조합이 들어와도 예외를 던지는 대신 세면서 경고했던 것과 같은 판단이다. 관측 가드가 도메인 호출을 죽이면, 관측을 켠 것이 사고의 원인이 된다.
+
+`warnedOnce` 는 중복 억제다. 이 필터는 미터를 등록하려 할 때마다 불리므로, 같은 이름으로 반복 호출되는 계측이 있으면 로그가 초당 수백 줄로 쏟아진다. 이름+태그키 조합당 한 번만 경고한다.
+
+#### 태그 값 상한 — 왜 32인가
+
+```kotlin
+@Bean
+fun creditPointTagLimitMeterFilter(): MeterFilter =
+    MeterFilter.maximumAllowableTags(CREDIT_PREFIX, "point", MAX_TAG_VALUES, MeterFilter.deny())
+```
+
+`point`, `outcome`, `detector` 세 태그 키에 각각 같은 필터를 건다. 지금 실제 값은 **point 7개, outcome 7개, detector 2개**다(2단계의 14개 조합이 이 값들의 조합이다).
+
+32는 "enum 이 지금의 네 배로 커져도 걸리지 않는" 값이다. 방어 지점이 7개에서 20개, 30개로 늘어나는 것은 시스템이 커지면 있을 수 있는 일이고, 그때마다 상한을 만지게 하면 가드가 방해물이 된다. 반면 32를 넘는 값이 관측된다면 그건 enum 이 커진 것이 아니라 **누군가 자유 문자열을 태그에 넣었다**는 뜻이다 — 예외 메시지, 사용자 입력, ID 같은 것들. 그 순간이 정확히 막아야 할 순간이다.
+
+상한에 걸린 태그 **값**만 거부되고, 이미 등록된 32개는 그대로 산다. 즉 사고가 나도 기존 대시보드와 알람은 계속 작동한다.
+
+#### 전체 미터 수 상한 — 2000의 근거
+
+```kotlin
+@Bean
+fun maximumMetricsMeterFilter(): MeterFilter = MeterFilter.maximumAllowableMetrics(MAX_METERS)
+```
+
+앞의 두 필터를 우회하는 길이 있다. 태그가 아니라 **미터 이름 자체**에 식별자를 박는 것이다(`credit.job.12345.duration`). 이건 태그 필터로는 못 잡는다. 마지막 그물이 필요하다.
+
+기준값을 실측했다. 5단계 스택을 띄워 실제 MySQL·Redis·Tomcat 위에서 돈 애플리케이션의 `/actuator/prometheus` 는 이랬다:
+
+```
+$ docker compose ... exec app curl -s http://localhost:8081/actuator/prometheus \
+    | awk '/^# TYPE/{t++} !/^#/{s++} END{print "TYPE(미터 이름) =", t, " 시계열 =", s}'
+TYPE(미터 이름) = 100  시계열 = 305
+```
+
+미터 이름 100개, 시계열 305개다. 이 중 도메인 지표는 20개 남짓이고 나머지는 전부 JVM·Tomcat·Hikari·Logback 기본 미터다. 2000은 실측치의 6배 이상 여유를 두면서도, "시계열이 수천으로 늘었다"는 명백한 이상은 잡는 값이다. 근거 없는 숫자를 피하려면 이 실측이 먼저 있어야 한다 — 기준값을 모르면 어떤 상한도 임의의 숫자다.
+
+#### `ManagementPortBoundaryTest` — 경계가 존재한다는 증거
+
+```kotlin
+@ActiveProfiles("test")
+@AutoConfigureTestRestTemplate
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = ["management.server.port=0"]
+)
+class ManagementPortBoundaryTest @Autowired constructor(
+    private val restTemplate: TestRestTemplate
+) {
+
+    @LocalServerPort
+    private var serverPort: Int = 0
+
+    @LocalManagementPort
+    private var managementPort: Int = 0
+
+    @Test
+    fun `애플리케이션 포트에서는 prometheus 엔드포인트에 닿을 수 없다`() {
+        val response = restTemplate.getForEntity(
+            "http://localhost:$serverPort/actuator/prometheus",
+            String::class.java
+        )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
+    }
+
+    @Test
+    fun `관리 포트에서는 prometheus 엔드포인트가 도메인 지표를 노출한다`() {
+        val response = restTemplate.getForEntity(
+            "http://localhost:$managementPort/actuator/prometheus",
+            String::class.java
+        )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+        assertThat(response.body).contains("credit_defense_total")
+        assertThat(response.body).contains("credit_job_oldest_pending_age_seconds")
+    }
+}
+```
+
+`management.server.port=0` 은 "임의의 빈 포트에 관리 컨텍스트를 따로 띄우라"는 뜻이다. `@LocalManagementPort` 가 그 실제 포트를 받아 온다. **404 단언이 이 테스트의 전부다.** 200 도 아니고 401/403 도 아니다 — 그 경로가 애플리케이션 포트에는 아예 존재하지 않는다는 뜻이다.
+
+컨텍스트가 `RANDOM_PORT` 에 `management.server.port` 프로퍼티까지 달라서 다른 `@SpringBootTest` 와 컨텍스트 캐시를 공유하지 않는다. 테스트 전체 시간이 조금 늘지만, 경계를 실제 소켓 두 개로 확인하는 값이 그보다 크다. MockMvc 로는 이 단언을 쓸 수 없다 — MockMvc 에는 포트가 없기 때문이다.
+
+### 테스트가 보장하는 것
+
+- **`MetricsCardinalityConfigTest` (순수 단위, `SimpleMeterRegistry`)** — `organizationId` 태그를 단 카운터를 등록하면 `registry.find(...)` 로 찾을 수 없다(거부됐다). 금지 키 6개 전부에 대해 레지스트리가 비어 있다. **거부된 미터에 `increment()` 를 해도 예외가 없고 `count()` 는 0 이다** — 이 단언이 "가드가 도메인을 죽이지 않는다"를 지킨다. `point` 태그 값을 32개까지 넣으면 32개가 등록되고, 33번째를 넣어도 여전히 32개다.
+- **정상 지표는 통과한다** — `point`/`outcome` 만 단 `credit.defense` 카운터는 그대로 등록된다. 가드가 지나치게 세면 아무 에러 없이 대시보드만 비는데, 그건 알람이 울리지 않는 종류의 사고다.
+- **`MetricsCardinalityWiringTest` (`@SpringBootTest`)** — 실제 컨텍스트의 `MeterRegistry` 에서 `credit.defense` 카운터가 **정확히 14개** 보인다. 즉 필터가 붙은 뒤에도 2단계의 사전 등록이 온전하다. 같은 레지스트리에 `organizationId` 태그 미터를 넣으려 하면 거부된다 — 필터가 실제로 배선됐다는 뜻이다.
+- **`ManagementPortBoundaryTest`** — 두 포트가 서로 다르고, 애플리케이션 포트는 404, 관리 포트는 200 이며 `credit_defense_total` 과 `credit_job_oldest_pending_age_seconds` 를 담고 있다. 누가 `management.server.port` 설정을 되돌리면 첫 두 테스트가 동시에 깨진다.
+
+### 직접 확인하는 방법
+
+로컬(`./gradlew bootRun`)은 포트가 그대로 하나다:
+
+```
+curl -s -o /dev/null -w "%{http_code}\n" localhost:8080/actuator/prometheus
+# 200
+```
+
+5단계 스택(관리 포트 분리 + publish 안 함)에서는:
+
+```
+$ curl -s -o /dev/null -w "%{http_code}\n" localhost:8080/actuator/prometheus
+404
+$ curl -s -o /dev/null -w "%{http_code}\n" -H "X-Organization-Id: 1" localhost:8080/api/jobs
+200
+```
+
+**같은 포트에서 공개 API 는 200 이고 액추에이터는 404 다.** 8081 은 호스트에 바인딩되지 않았으므로 `localhost:8081` 은 아예 연결이 거부된다. 지표를 눈으로 보려면 컨테이너 안으로 들어가야 한다:
+
+```
+$ docker compose -f deploy/observability/docker-compose.yml exec app \
+    curl -s http://localhost:8081/actuator/prometheus | grep -E "^credit_(hold|invariant)"
+credit_hold_outstanding_amount{application="credit_system"} 0.0
+credit_hold_outstanding_count{application="credit_system"} 0.0
+credit_invariant_jobs_without_hold{application="credit_system"} 0.0
+credit_invariant_negative_balance_orgs{application="credit_system"} 0.0
+credit_invariant_unsettled_terminal_jobs{application="credit_system"} 0.0
+```
+
+카디널리티 가드가 살아 있는지는 로그로 확인한다. 금지 태그를 단 미터를 등록하려 하면 필터가 WARN 을 한 번 남기고(이름+태그키 조합당 한 번) 미터는 등록되지 않는다:
+
+```
+식별자 태그가 붙은 미터를 거부했다: name=credit.custom, tag=organizationId.
+개별 식별은 로그의 몫이다 — 지표에 붙이면 카디널리티가 폭발한다
+```
+
+그리고 `/actuator/prometheus` 에 `credit_custom` 이라는 이름은 나타나지 않는다. 이 두 가지를 `MetricsCardinalityConfigTest` 와 `MetricsCardinalityWiringTest` 가 각각 단언한다.
+
+### 이 단계에서 남는 것
+
+- **경계는 배포에만 있다.** `application.yml` 만 보면 이 시스템에 노출 경계가 있는지 알 수 없다. 누가 쿠버네티스로 옮기면서 8081 을 Service 에 그대로 노출하면 경계는 사라지고, `ManagementPortBoundaryTest` 는 여전히 초록이다. 테스트가 지키는 것은 "포트를 나누면 실제로 갈라진다"이지 "배포가 그 포트를 안 연다"가 아니다.
+- **인증은 여전히 없다.** compose 네트워크 안에 들어온 무언가는 `app:8081` 을 자유롭게 읽는다. 네트워크 경계 하나에 의존하는 구조이고, 다중 테넌트 클러스터라면 이것으로 부족하다.
+- **`/actuator/health` 도 같이 옮겨갔다.** 관리 포트를 나누면 헬스체크도 그 포트로 간다. 5단계의 컨테이너 healthcheck 가 `localhost:8081/actuator/health` 를 부르는 이유이고, 동시에 트레이드오프이기도 하다(5단계 참고).
+- **가드는 등록을 막을 뿐 이름 설계를 대신하지 않는다.** `maximumAllowableMetrics` 에 걸리면 그 시점 이후의 **모든** 새 미터가 거부된다. 즉 상한에 닿는 순간 정상 지표도 함께 못 들어온다 — 그물이지 해법이 아니다.
+- **5단계에서 이 결정의 실물을 만든다.** 관리 포트를 publish 하지 않는 compose 를 짜고, Prometheus 가 컨테이너 네트워크 안에서 `app:8081` 을 긁게 한다.
+
+---
+
+## 5단계 — docker-compose 관측 스택
+
+1~4단계가 만든 것은 전부 애플리케이션 안에 있다. 지표는 문자열로 떠 있고, 알람 기준은 문서의 표에만 있고, "이 값이 이렇게 움직이면 사고"라는 판단은 사람 머릿속에만 있다. 이 단계는 그 전부를 **저장소 안의 파일**로 옮긴다. 스크레이프 설정, 알람 규칙, 대시보드가 코드가 되면 리뷰할 수 있고, 되돌릴 수 있고, 무엇보다 **실제로 돌려서 틀렸는지 확인할 수 있다.**
+
+### 구성
+
+```
+deploy/observability/
+  docker-compose.yml                                   # 서비스 5개
+  Dockerfile                                           # 앱 이미지 (bootJar 를 COPY)
+  prometheus/prometheus.yml                            # 스크레이프 설정
+  prometheus/rules/credit.rules.yml                    # 알람 규칙 10개
+  grafana/provisioning/datasources/prometheus.yml      # 데이터소스 (uid: prometheus)
+  grafana/provisioning/dashboards/dashboards.yml       # 대시보드 프로비저너
+  grafana/dashboards/credit-domain.json                # 대시보드 4행
+  scripts/seed.sh                                      # 조직 1개 INSERT
+  scripts/smoke.sh                                     # 충전 + job + 중복/잔액부족 유발
+  README.md                                            # 띄우는 법 한 페이지
+```
+
+서비스는 `mysql`(8.4), `redis`(7), `app`, `prometheus`(v3.1.0), `grafana`(11.5.1) 다섯 개다.
+
+### 포트 publish 규칙 — 4단계 결정의 실물
+
+```yaml
+  app:
+    environment:
+      MANAGEMENT_SERVER_PORT: 8081
+    ports:
+      # 8080 만 호스트로 나간다. 8081 은 compose 네트워크 안에서만 보이고,
+      # Prometheus 가 app:8081 로 긁는다. 호스트에서는 /actuator/* 에 닿을 수 없다.
+      - "8080:8080"
+```
+
+세 가지 규칙이 있고 각각 이유가 다르다.
+
+| 서비스 | publish | 이유 |
+|---|---|---|
+| `app` | **8080 만** | 8081(관리 포트)을 내보내지 않는 것이 4단계 노출 경계 그 자체다. Prometheus 는 compose 네트워크 안에서 `app:8081` 을 긁는다 |
+| `mysql`, `redis` | **하지 않음** | 이 개발 머신은 로컬 3306/6379 에 이미 MySQL/Redis 가 떠 있다. publish 하면 포트 충돌로 스택이 아예 안 뜬다. 디버깅은 `docker compose exec mysql mysql ...` 로 한다 |
+| `prometheus`, `grafana` | 9090, 3000 | 사람이 브라우저로 봐야 하는 것들이다 |
+
+`mysql`/`redis` 를 안 여는 결정에는 부수 효과가 하나 더 있다. 스택 안의 DB 는 호스트의 어떤 도구로도 실수로 건드릴 수 없다 — 로컬 MySQL 에 연결한 채로 `TRUNCATE` 를 치는 종류의 사고가 구조적으로 불가능해진다.
+
+### 앱 이미지 — 멀티스테이지 빌드를 쓰지 않은 이유
+
+```dockerfile
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+# 글롭(build/libs/*.jar)을 쓰면 -plain.jar 까지 잡힌다. 실행 가능한 fat jar 이름을 못 박는다.
+COPY build/libs/credit-system-kotlin-0.0.1-SNAPSHOT.jar /app/app.jar
+EXPOSE 8080 8081
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+```
+
+컨테이너 안에서 Gradle 을 돌리는 멀티스테이지 빌드가 "정석"이지만, 여기서는 세 가지 이유로 피했다.
+
+1. **느리다.** 이미지를 다시 만들 때마다 의존성을 새로 받는다. 관측 스택은 고치고 다시 띄우기를 반복하는 물건이다.
+2. **JDK 문제를 컨테이너 안으로 끌고 들어온다.** 이 저장소는 detekt 때문에 이미 "Gradle 데몬 JDK 26 / 프로젝트 toolchain 17" 분리를 안고 있다(`build.gradle.kts` 주석 참고). 이걸 이미지 안에서 재현할 이유가 없다.
+3. **목적이 다르다.** 이 이미지는 배포물이 아니라 관측 실험대다. 빌드 재현성은 호스트의 `./gradlew` 가 이미 담당한다.
+
+대가는 **`./gradlew bootJar` 를 먼저 돌려야 한다**는 것이고, `README.md` 첫 줄에 그렇게 적혀 있다. jar 이름을 글롭이 아니라 정확한 이름으로 쓴 것은 `build/libs/` 에 `credit-system-kotlin-0.0.1-SNAPSHOT.jar` 와 `credit-system-kotlin-0.0.1-SNAPSHOT-plain.jar` 두 개가 있어서다 — 글롭은 `-plain.jar`(fat jar 가 아니라 클래스만 든 jar)를 잡을 수 있고, 그러면 `no main manifest attribute` 로 죽는다.
+
+`build.context` 는 저장소 루트(`../..`)다. 그래야 `build/libs/` 가 빌드 컨텍스트에 들어온다.
+
+### 기동 순서 — `depends_on` 과 healthcheck
+
+```yaml
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+```
+
+`depends_on` 만 쓰면 "컨테이너가 시작됐다"까지만 보장된다. MySQL 컨테이너는 시작 후 초기화에 10~20초가 더 걸리므로, 앱이 그 사이에 붙으려다 죽는다. `condition: service_healthy` 로 mysql 의 `mysqladmin ping` 과 redis 의 `redis-cli ping` 이 통과할 때까지 기다린다.
+
+앱 자신의 healthcheck 는 관리 포트를 부른다:
+
+```yaml
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
+```
+
+`eclipse-temurin:17-jre` 는 Ubuntu 기반이라 `curl` 과 `wget` 이 둘 다 들어 있다(`docker run --rm eclipse-temurin:17-jre which curl` 로 확인). 컨테이너 **안에서** 부르는 것이므로 8081 을 publish 하지 않은 것과 충돌하지 않는다.
+
+### Prometheus
+
+```yaml
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: credit_system
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # 8080 이 아니라 8081 이다. 관리 포트는 compose 네트워크 안에서만 보인다.
+      - targets: ["app:8081"]
+```
+
+**Alertmanager 는 붙이지 않는다.** 알람을 Slack 이나 PagerDuty 로 라우팅하는 것은 이 시스템의 문제가 아니라 조직의 문제다 — 누가 당번인지, 어느 채널로 갈지, 야간에 전화를 걸지는 코드로 정할 수 없다. 이번 범위는 **규칙 자체를 코드로 남기고, Prometheus `/alerts` 페이지에서 fire 되는 것을 확인하는 데까지**다. 라우팅은 붙일 곳이 정해졌을 때 Alertmanager 하나를 추가하면 되고, 규칙 파일은 그대로 쓰인다.
+
+`scrape_interval: 5s` 는 프로덕션 기준으로는 짧다(보통 15~30초). 도메인 스냅샷 주기가 15초라 5초로 긁으면 같은 값을 세 번 보게 되는데, 그래도 5초로 둔 이유는 6단계 때문이다 — 워커를 죽였을 때 `oldest_pending_age` 가 오르는 곡선을 촘촘히 봐야 한다. 대가는 TSDB 사용량이 3배가 되는 것이고, 실험용 스택이라 감수한다.
+
+### 알람 규칙
+
+| 규칙명 | 식 | severity | for | 왜 이 기준인가 |
+|---|---|---|---|---|
+| `CreditLedgerReconciliationMismatch` | `credit_ledger_reconciliation_mismatch > 0` | P1 | 0m | 잔액 = 최초 잔액 + 원장 합계 는 SLO 가 아니라 등식이다. 1건도 허용값이 아니므로 유예도 없다 |
+| `CreditNegativeBalanceOrgs` | `credit_invariant_negative_balance_orgs > 0` | P1 | 0m | 조건부 UPDATE 의 잔액 가드가 뚫렸다는 뜻. 차감 경로 전체를 의심해야 한다 |
+| `CreditJobsWithoutHold` | `credit_invariant_jobs_without_hold > 0` | P1 | 0m | job 은 있는데 돈이 안 묶였다. 무료로 처리되는 job 이 있다는 뜻 |
+| `CreditUnsettledTerminalJobs` | `credit_invariant_unsettled_terminal_jobs > 0` | P1 | 0m | 종결됐는데 CONFIRM/REFUND 원장이 없다. 묶인 돈이 공중에 뜬 상태 |
+| `CreditPipelineStalled` | `credit_job_oldest_pending_age_seconds > 300` | P2 | 1m | 스텁 지연(3~7초)에 재시도 3회를 더해도 300초에 닿지 않는다. `for: 1m` 은 스냅샷 한 주기(15초)의 흔들림을 걸러낸다 |
+| `CreditReconciliationStale` | `credit_ledger_reconciliation_staleness_seconds > 180` | P2 | 0m | 대사 주기 60초의 3배. 게이지 자체가 시간의 함수라 `for` 가 필요 없다 |
+| `CreditSnapshotStale` | `credit_snapshot_staleness_seconds > 45` | P2 | 0m | 스냅샷 주기 15초의 3배. 이게 울리면 L0/L1 게이지 전부가 낡은 값이다 |
+| `CreditBackstopRecovery` | `increase(credit_job_recovery_total{detector="backstop"}[10m]) > 0` | P2 | 0m | heartbeat 가 잡았어야 할 것을 최후 방어선이 잡았다. 1건도 정상이 아니다 |
+| `CreditSystemDown` | `up{job="credit_system"} == 0` | P2 | 30s | 이게 0 이면 **다른 모든 규칙이 침묵한다.** `for: 30s` 는 재시작·배포로 인한 순간 실패를 거른다 |
+| `CreditRetryExhaustionRateHigh` | `increase(credit_defense_total{point="final_refund",outcome="applied"}[1h]) / increase(credit_defense_total{point="hold_balance",outcome="applied"}[1h]) > 0.1` | P3 | 10m | hold 를 통과한 요청 중 10% 넘게 재시도를 다 쓰고 환불로 끝났다. 추세라서 호출하지 않고 다음 근무일에 본다 |
+
+P1 네 개에 `for: 0m` 을 준 것이 이 표의 핵심이다. 보통 알람에는 유예를 준다 — 순간적인 스파이크로 사람을 깨우지 않기 위해서다. 불변식에는 그 논리가 적용되지 않는다. `mismatch > 0` 은 "지금 값이 높다"가 아니라 **"등식이 깨진 상태를 대사가 목격했다"**이고, 그건 1초든 10분이든 똑같이 사고다.
+
+규칙 파일의 P1 블록은 이렇게 생겼다:
+
+```yaml
+  - name: credit-invariants
+    rules:
+      - alert: CreditLedgerReconciliationMismatch
+        expr: credit_ledger_reconciliation_mismatch > 0
+        for: 0m
+        labels:
+          severity: P1
+        annotations:
+          summary: "원장 대사 불일치 {{ $value }}건"
+          description: "잔액 = 최초 잔액 + 원장 합계 가 깨진 조직이 있다. LedgerReconciliationTask 의 ERROR 로그에서 organizationId 를 찾아라."
+```
+
+`description` 에 **다음 행동**을 적었다. 1단계에서 "집계는 메트릭이, 개별 식별은 로그가 맡는다"고 정한 결과가 여기로 온다 — 알람에는 조직 ID 가 없으므로, 알람 문구가 로그를 가리켜야 한다. 그러지 않으면 새벽에 깬 사람이 어디를 봐야 할지 모른다.
+
+### 대시보드 구성의 근거
+
+`grafana/dashboards/credit-domain.json` 은 문서의 4계층을 그대로 행(row)으로 옮겼다. 순서와 패널 종류에 각각 이유가 있다.
+
+**1행 — L1 불변식을 맨 위에 둔다.** stat 패널 4개(mismatch, negative_balance_orgs, jobs_without_hold, unsettled_terminal_jobs)이고 0 이면 초록, 1 이상이면 배경 전체가 빨강이다. 대시보드를 여는 사람의 첫 질문은 "지금 사고가 났나"이지 "추세가 어떤가"가 아니다. 이 네 칸이 전부 초록이면 나머지는 천천히 봐도 된다.
+
+**왜 시계열이 아니라 stat 인가.** 시계열 패널은 "값이 어떻게 변해왔는가"를 보여주는 도구다. 불변식에는 추세가 없다 — 참이거나 거짓이다. `jobs_without_hold` 가 어제 3이었다가 오늘 1이 된 것은 "좋아지는 중"이 아니라 여전히 사고다. 3단계 문서의 표현을 그대로 쓰면, **이 지표군에서는 0 이 목표값이고 0 이 아닌 것이 뉴스다.** 그 성질에는 큰 숫자 하나와 배경색이 맞는다.
+
+**2행 — L0 돈.** `oldest_pending_age_seconds` 시계열에 300초 임계선을 빨간 선으로 그렸고, 옆에 `outstanding_amount` 와 `outstanding_count` 를 같은 패널에 겹쳤다. 이 둘은 반드시 같이 봐야 한다 — 건수는 그대로인데 금액만 오르면 큰 job 이 묶인 것이고, 둘 다 오르면 적체다. 여기는 추세가 의미를 갖는 자리라 시계열이 맞다.
+
+**3행 — L3 방어 발동은 `rate` 로 그린다.** 누적 카운터를 그대로 그리면 영원히 우상향하는 계단만 보인다. "지금까지 총 몇 번 막았나"는 대시보드를 볼 때 궁금한 것이 아니다. 궁금한 건 **"지금 얼마나 자주 막고 있나"**이고, 그건 `rate(credit_defense_total[1m])` 이다. `point`+`outcome` 으로 stack 해서 어느 지점이 전체 방어량의 얼마를 차지하는지 한눈에 보이게 했고, 별도 패널로 `idem_key` 의 `app_hit` vs `db_unique`, `credit_job_recovery_total` 의 `heartbeat` vs `backstop` 을 따로 뺐다. 이 두 쌍은 **비율 자체가 신호**여서다 — db_unique 비중이 커지면 경합이 심해진 것이고, backstop 이 0 이 아니면 heartbeat 가 새는 것이다. 합쳐 그리면 그 비율이 안 보인다.
+
+**4행 — 메타.** 두 staleness 와 `up` 을 맨 아래 둔다. 이건 도메인 지표가 아니라 **관측 장치 자신의 건강**이다. 위의 세 행이 전부 초록인 두 가지 이유가 있는데, 하나는 "정말 정상"이고 다른 하나는 "지표가 얼어붙었다"이다. 4행이 그 둘을 구분한다.
+
+JSON 의 datasource 참조는 전부 `{"type": "prometheus", "uid": "prometheus"}` 이고, 이 uid 는 `provisioning/datasources/prometheus.yml` 이 고정한다. uid 를 바꾸면 패널 전부가 "Datasource not found" 가 된다.
+
+### 직접 확인하는 방법 — 실제로 띄운 기록
+
+아래는 이 스택을 실제로 올려서 받은 출력이다.
+
+**1. jar 를 만들고 2. 스택을 올린다**
+
+```
+$ ./gradlew bootJar
+$ docker compose -f deploy/observability/docker-compose.yml up -d --build
+ Container observability-redis-1 Healthy
+ Container observability-mysql-1 Healthy
+ Container observability-app-1 Started
+ Container observability-prometheus-1 Started
+ Container observability-grafana-1 Started
+```
+
+**3. 전부 뜰 때까지 기다린다**
+
+```
+$ docker compose -f deploy/observability/docker-compose.yml ps
+SERVICE      STATUS
+app          Up 25 seconds (healthy)
+grafana      Up 24 seconds
+mysql        Up 30 seconds (healthy)
+prometheus   Up 25 seconds
+redis        Up 30 seconds (healthy)
+```
+
+**4. 노출 경계 확인 — 같은 포트, 다른 결과**
+
+```
+$ curl -s -o /dev/null -w "%{http_code}\n" localhost:8080/actuator/prometheus
+404
+$ curl -s -o /dev/null -w "%{http_code}\n" -H "X-Organization-Id: 1" localhost:8080/api/jobs
+200
+```
+
+공개 API 는 열려 있고 액추에이터는 없다. 4단계가 말한 경계가 실물로 존재한다.
+
+**5. Prometheus 가 관리 포트를 긁고 있다**
+
+```
+$ curl -s 'localhost:9090/api/v1/targets' | ...
+http://app:8081/actuator/prometheus  up  {'instance': 'app:8081', 'job': 'credit_system'}
+```
+
+**6. 규칙 10개가 전부 로드됐다**
+
+```
+$ curl -s 'localhost:9090/api/v1/rules' | ...
+group: credit-invariants 4
+    CreditLedgerReconciliationMismatch P1 for=0s   inactive
+    CreditNegativeBalanceOrgs          P1 for=0s   inactive
+    CreditJobsWithoutHold              P1 for=0s   inactive
+    CreditUnsettledTerminalJobs        P1 for=0s   inactive
+group: credit-pipeline 5
+    CreditPipelineStalled              P2 for=60s  inactive
+    CreditReconciliationStale          P2 for=0s   inactive
+    CreditSnapshotStale                P2 for=0s   inactive
+    CreditBackstopRecovery             P2 for=0s   inactive
+    CreditSystemDown                   P2 for=30s  inactive
+group: credit-trends 1
+    CreditRetryExhaustionRateHigh      P3 for=600s inactive
+total rules: 10
+```
+
+10개 전부 `inactive` 다 — 정상 상태에서 fire 되는 규칙이 하나도 없어야 한다는 것 자체가 확인 항목이다. 규칙을 잘못 쓰면(예: `>=` 를 `>` 대신) 가만히 있어도 울린다.
+
+**7. Grafana 가 프로비저닝됐다**
+
+```
+$ curl -s localhost:3000/api/health
+{"database": "ok", "version": "11.5.1", ...}
+
+$ curl -s localhost:3000/api/datasources/uid/prometheus | ...
+Prometheus prometheus http://prometheus:9090
+
+$ curl -s 'localhost:3000/api/search?tag=credit' | ...
+credit-domain  크레딧 도메인 관측  /d/credit-domain/d90bde0
+```
+
+여기서 하나 걸렸다. 처음에 `?query=credit` 로 검색했더니 빈 배열이 왔다 — Grafana 의 `query` 는 **제목** 검색인데 이 대시보드 제목이 한국어("크레딧 도메인 관측")여서 매칭되지 않은 것이다. 프로비저닝은 정상이었고 검색어가 틀렸다. `?tag=credit` 나 `?type=dash-db` 로 보면 나온다.
+
+**8. seed → smoke → 실제 값**
+
+```
+$ ./deploy/observability/scripts/seed.sh
+앱이 UP 이 될 때까지 대기한다...
+앱 UP (1회 시도)
+조직 id=1 을 넣는다...
+id  name      balance  initial_balance
+1   seed-org  0        0
+
+$ ./deploy/observability/scripts/smoke.sh
+== 1000 크레딧 충전
+  charge   HTTP 200 {"balance":1000,"duplicate":false}
+== job 5건 생성 (건당 100)
+  job1     HTTP 200 {"jobId":1,"duplicate":false}
+  ...
+  job5     HTTP 200 {"jobId":5,"duplicate":false}
+== 같은 idemKey 로 한 번 더 (idem_key/app_hit 유발)
+  job1-재  HTTP 200 {"jobId":1,"duplicate":true}
+== 잔액을 넘겨 요청 (hold_balance/rejected 유발)
+  job6     HTTP 200 {"jobId":6,"duplicate":false}
+  ...
+  job10    HTTP 200 {"jobId":10,"duplicate":false}
+  job11    HTTP 409 {"code":"INSUFFICIENT_BALANCE","message":"잔액이 부족합니다. balance=0, required=100"}
+  job12    HTTP 409 {"code":"INSUFFICIENT_BALANCE","message":"잔액이 부족합니다. balance=0, required=100"}
+```
+
+워커가 다 처리하고 나면(`app.stub.failure-rate: 0.3` 이라 일부는 실패→재시도→환불로 흐른다) Prometheus 에서 본 방어 카운터는 이랬다:
+
+```
+$ curl -s --get localhost:9090/api/v1/query --data-urlencode 'query=credit_defense_total' | ...
+  point=idem_key      outcome=app_hit     1
+  point=idem_key      outcome=db_unique   0
+  point=hold_balance  outcome=applied     10
+  point=hold_balance  outcome=rejected    9
+  point=worker_claim  outcome=applied     44
+  point=worker_claim  outcome=lost        0
+  point=confirm       outcome=applied     9
+  point=confirm       outcome=stale       0
+  point=mark_failed   outcome=applied     4
+  point=mark_failed   outcome=stale       0
+  point=retry_claim   outcome=applied     3
+  point=retry_claim   outcome=lost        0
+  point=final_refund  outcome=applied     1
+  point=final_refund  outcome=raced       0
+```
+
+DB 최종 상태는 `COMPLETED 9, REFUNDED 1` 이었고 잔액은 100 이었다. 숫자들이 서로 맞는지 읽어 보자.
+
+- `hold_balance/applied 10` + `rejected 9` — hold 를 10건 잡았고 9건은 잔액 부족으로 막혔다(rejected 9 중 7건은 이 실행 전에 스크립트를 고치며 낸 요청분이다. 카운터는 앱 생애 동안 누적된다).
+- `mark_failed/applied 4` → `retry_claim/applied 3` → `final_refund/applied 1`. 스텁이 4번 실패했고, 그중 3번은 재시도로 살아났고, 1번은 시도를 다 써서 최종 환불로 끝났다. `4 = 3 + 1` 이 맞는다. 환불된 100 크레딧이 최종 잔액 100 이다.
+- `confirm/applied 9` — 완료된 job 9건. `COMPLETED 9` 와 맞는다.
+- 모든 `stale`, `lost`, `raced`, `db_unique` 가 0 — 이 트래픽에는 경쟁 상태가 없었다. 6단계에서 워커를 두 개 띄우거나 죽여서 이 칸들을 움직이게 하는 것이 목표다.
+
+**`worker_claim/applied 44` 가 눈에 걸린다.** job 10건 + 재시도 3건 = 13번이면 될 텐데 44다. 로그를 세어 보니 답이 나왔다:
+
+```
+$ docker compose ... logs app | grep -c "executor 위임 실패"
+31
+```
+
+`31 + 13 = 44` 다. `GenerationWorker` 는 job 을 선점(`worker_claim/applied`)한 뒤 executor 에 넘기는데, 워커 풀(`app.worker.concurrency: 3`)이 꽉 차 있으면 `execute` 가 거부된다. 그러면 `rollbackToHolding` 으로 job 을 HOLDING 으로 되돌리고, 다음 폴링(500ms)에서 같은 job 을 다시 선점한다. **선점 성공 카운터는 "처리된 job 수"가 아니라 "선점이라는 동작이 성공한 횟수"였다.**
+
+이건 버그가 아니라 설계대로의 동작이지만, 지표만 보던 사람은 몰랐을 사실이다. HTTP 응답에도, ERROR 로그에도 안 남는다(위임 실패는 WARN 이다). 카운터가 예상과 어긋난 덕에 발견했고, 이게 2단계에서 말한 "이 줄이 유일한 흔적이다"의 실제 사례다. 다만 대시보드에서 `worker_claim/applied` 를 처리량으로 읽으면 안 된다는 뜻이기도 하다 — 문서에 남긴다.
+
+L0·L1 게이지는 처리가 끝난 뒤 이랬다:
+
+```
+  credit_hold_outstanding_count               0
+  credit_hold_outstanding_amount              0
+  credit_job_oldest_pending_age_seconds       0
+  credit_invariant_negative_balance_orgs      0
+  credit_invariant_jobs_without_hold          0
+  credit_invariant_unsettled_terminal_jobs    0
+  credit_ledger_reconciliation_mismatch       0
+  credit_ledger_reconciliation_checked        1
+  credit_ledger_reconciliation_staleness_seconds  9.466
+  credit_snapshot_staleness_seconds               9.293
+```
+
+처리 중간에 찍힌 값은 달랐다 — `outstanding_count 4`, `outstanding_amount 400`, `oldest_pending_age 16` 이었다. 묶였다가 풀리는 곡선이 실제로 그려진다는 뜻이다. staleness 두 개가 -1 이 아니라는 것은 대사와 스냅샷이 실제로 돌고 있다는 뜻이고(테스트 프로파일의 -1 과 대비된다), `up == 1` 이며 fire 중인 알람은 0개였다.
+
+**9. 정리**
+
+```
+$ docker compose -f deploy/observability/docker-compose.yml down -v
+$ docker compose -f deploy/observability/docker-compose.yml ps
+NAME   IMAGE   COMMAND   SERVICE   CREATED   STATUS   PORTS
+```
+
+반드시 내려야 한다. Testcontainers 를 쓰는 테스트와 자원·포트를 두고 다툰다.
+
+### 트레이드오프
+
+- **Alertmanager 가 없다.** 규칙은 Prometheus `/alerts` 에서 fire 되지만 아무 데도 안 간다. 즉 이 스택은 **"누가 보고 있을 때만"** 알려준다. 진짜 온콜은 라우팅이 있어야 성립하고, 그건 조직이 정할 문제라 코드로 남기지 않았다.
+- **앱 healthcheck 가 관리 포트에 의존한다.** `/actuator/health` 는 관리 포트로 옮겨갔으므로 healthcheck 도 8081 을 부른다. 관리 컨텍스트가 못 뜨면 애플리케이션 포트가 멀쩡히 요청을 처리하고 있어도 컨테이너는 unhealthy 가 되고, `depends_on: service_healthy` 를 건 것들이 줄줄이 막힌다. "관측 장치의 고장이 서비스의 고장으로 번지는" 구조인데, 관측 포트가 안 뜨면 어차피 사고를 못 보므로 그 상태를 정상으로 치지 않기로 했다.
+- **`scrape_interval: 5s` 는 비싸다.** 15초 대비 TSDB 쓰기와 저장량이 3배다. 지표 305개 × 12/분이면 로컬에서는 아무 문제가 없지만, 인스턴스가 수십 개인 환경에 그대로 옮기면 안 되는 값이다.
+- **비밀번호가 파일에 박혀 있다.** `application.yml` 의 `an902318` 을 compose 가 env 로 덮어쓰지만 그 env 도 평문이다. 로컬 실험 스택이라 그대로 뒀다 — 실제 배포라면 시크릿 관리가 별도로 필요하다.
+- **데이터가 휘발된다.** MySQL·Prometheus·Grafana 모두 명명 볼륨을 두지 않았다. `down -v` 하면 전부 사라지고, 매번 `seed.sh` 부터 다시 한다. 실험대로서는 오히려 이쪽이 낫다(상태가 남으면 이전 실행의 카운터가 다음 실험을 오염시킨다 — 실제로 위의 `rejected 9` 가 그 사례다).
+
+### 이 단계에서 남는 것
+
+- **지표가 처음으로 밖에 나갔다.** 긁는 주체(Prometheus), 저장하는 곳(TSDB), 그리는 곳(Grafana), 판단 기준(규칙 10개)이 전부 저장소 안의 파일이 됐다. 3단계에서 "노출은 되지만 아직 아무도 긁어가지 않는다"고 남긴 것이 여기서 닫힌다.
+- **하지만 전부 정상 상태에서만 봤다.** 위의 출력은 모두 "아무 사고도 없을 때 지표가 이렇게 보인다"이다. 알람 10개 중 실제로 fire 되는 것을 본 것은 하나도 없다. **규칙이 옳은지는 아직 모른다** — 문법이 맞고 로드된다는 것만 확인했다.
+- **L2 흐름은 여전히 비어 있다.** 상태별 job 수 분포와 단계별 소요 시간이 없어서, 대시보드는 "막혔다"까지만 말하고 "어디서 막혔는지"는 말하지 않는다.
+- **6단계는 장애 주입이다.** 이 스택 위에서 워커를 죽이고, 스케줄러를 멈추고, Redis 를 내리고, 원장을 손으로 깨서 **어느 지표가 반응하고 어느 지표가 침묵하는지** 본다. `oldest_pending_age` 가 300초를 넘어 `CreditPipelineStalled` 가 실제로 fire 되는 것, 원장을 깼을 때 `mismatch` 가 오르는 것, Redis 를 죽였을 때 `backstop` 회수가 오르는 것 — 여기까지 확인해야 이 규칙들이 종이가 아니라 장치가 된다. 그리고 침묵하는 지표를 찾는 것이 더 중요하다. 사고가 났는데 아무 값도 안 움직인다면, 그 자리가 다음에 만들어야 할 지표다.
+
+---
+
 ## 명령어
 
 ```
-# 이 브랜치에서 전체 테스트 실행 (Docker 필요 — MySQL + Redis Testcontainers, 164개 테스트)
+# 이 브랜치에서 전체 테스트 실행 (Docker 필요 — MySQL + Redis Testcontainers, 175개 테스트)
 ./gradlew test
 
 # 정적 분석
@@ -939,7 +1522,7 @@ credit_hold_outstanding_amount
 
 # 도메인/서비스/스케줄러 코드가 Micrometer 를 모르는지 직접 확인
 grep -rl "io.micrometer" src/main/kotlin
-# (observability/ 아래 세 파일만 나와야 한다)
+# (observability/ 아래 네 파일만 나와야 한다)
 
 # 지표 하나만 골라 실제 배선까지 확인
 ./gradlew test --tests "com.example.credit_system_kotlin.observability.PrometheusEndpointTest"
@@ -953,4 +1536,25 @@ grep -rl "io.micrometer" src/main/kotlin
 # 스냅샷 게이지 — 쿼리가 실제 DB 상태와 맞는지, 게이지 갱신이 맞는지
 ./gradlew test --tests "com.example.credit_system_kotlin.global.scheduling.DomainSnapshotTaskTest"
 ./gradlew test --tests "com.example.credit_system_kotlin.observability.DomainSnapshotMetricsTest"
+
+# 카디널리티 가드 — 식별자 태그 거부, 태그 값 상한, 실제 컨텍스트 배선
+./gradlew test --tests "com.example.credit_system_kotlin.observability.MetricsCardinalityConfigTest"
+./gradlew test --tests "com.example.credit_system_kotlin.observability.MetricsCardinalityWiringTest"
+
+# 노출 경계 — 애플리케이션 포트의 /actuator/prometheus 가 404 인지
+./gradlew test --tests "com.example.credit_system_kotlin.observability.ManagementPortBoundaryTest"
+
+# 대시보드 JSON 문법
+python3 -m json.tool deploy/observability/grafana/dashboards/credit-domain.json > /dev/null
+```
+
+관측 스택을 띄우고 내리는 명령은 [`deploy/observability/README.md`](../deploy/observability/README.md) 에 있다.
+
+```
+# 요약
+./gradlew bootJar
+docker compose -f deploy/observability/docker-compose.yml up -d --build
+./deploy/observability/scripts/seed.sh
+./deploy/observability/scripts/smoke.sh
+docker compose -f deploy/observability/docker-compose.yml down -v
 ```

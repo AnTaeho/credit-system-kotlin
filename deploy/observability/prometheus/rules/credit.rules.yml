@@ -1,0 +1,106 @@
+# 도메인 알람 규칙. 기준은 docs/step7-observability.md 1~3단계에서 정한 것 그대로다.
+#
+# Alertmanager 는 붙이지 않는다. 라우팅(Slack/PagerDuty)은 이번 범위 밖이고,
+# 규칙 자체를 코드로 남겨 Prometheus /alerts 에서 fire 되는 것까지가 목표다.
+
+groups:
+
+  # ── P1: 불변식이 깨졌다. 즉시 호출. for 를 두지 않는다 ──────────────────────────
+  # 이 넷은 SLO 가 아니라 등식이다. "1건 정도는 괜찮다"가 성립하지 않으므로 유예도 없다.
+  - name: credit-invariants
+    rules:
+      - alert: CreditLedgerReconciliationMismatch
+        expr: credit_ledger_reconciliation_mismatch > 0
+        for: 0m
+        labels:
+          severity: P1
+        annotations:
+          summary: "원장 대사 불일치 {{ $value }}건"
+          description: "잔액 = 최초 잔액 + 원장 합계 가 깨진 조직이 있다. LedgerReconciliationTask 의 ERROR 로그에서 organizationId 를 찾아라."
+
+      - alert: CreditNegativeBalanceOrgs
+        expr: credit_invariant_negative_balance_orgs > 0
+        for: 0m
+        labels:
+          severity: P1
+        annotations:
+          summary: "잔액이 음수인 조직 {{ $value }}개"
+          description: "조건부 UPDATE 의 잔액 가드가 뚫렸다는 뜻이다. 차감 경로 전부를 의심해야 한다."
+
+      - alert: CreditJobsWithoutHold
+        expr: credit_invariant_jobs_without_hold > 0
+        for: 0m
+        labels:
+          severity: P1
+        annotations:
+          summary: "HOLD 원장이 없는 job {{ $value }}건"
+          description: "job 은 만들어졌는데 돈이 묶이지 않았다. 무료로 처리되는 job 이 있다는 뜻이다."
+
+      - alert: CreditUnsettledTerminalJobs
+        expr: credit_invariant_unsettled_terminal_jobs > 0
+        for: 0m
+        labels:
+          severity: P1
+        annotations:
+          summary: "정산되지 않은 종결 job {{ $value }}건"
+          description: "종결됐는데 CONFIRM/REFUND 원장이 없다. 묶인 돈이 확정도 환불도 되지 않은 채 유실된 상태다."
+
+  # ── P2: 파이프라인 또는 관측 장치가 멈췄다 ──────────────────────────────────────
+  - name: credit-pipeline
+    rules:
+      - alert: CreditPipelineStalled
+        expr: credit_job_oldest_pending_age_seconds > 300
+        for: 1m
+        labels:
+          severity: P2
+        annotations:
+          summary: "가장 오래된 미결 job 이 {{ $value }}초째"
+          description: "정상 처리는 스텁 지연(3~7초)에 재시도를 더해도 300초를 넘지 않는다. 워커·스케줄러·Redis 중 하나가 멈췄을 가능성이 높다."
+
+      - alert: CreditReconciliationStale
+        expr: credit_ledger_reconciliation_staleness_seconds > 180
+        for: 0m
+        labels:
+          severity: P2
+        annotations:
+          summary: "원장 대사가 {{ $value }}초째 돌지 않았다"
+          description: "대사 주기(60초)의 3배를 넘었다. mismatch 가 0 인 것이 정상이어서가 아니라 아무도 안 세고 있어서일 수 있다."
+
+      - alert: CreditSnapshotStale
+        expr: credit_snapshot_staleness_seconds > 45
+        for: 0m
+        labels:
+          severity: P2
+        annotations:
+          summary: "도메인 스냅샷이 {{ $value }}초째 찍히지 않았다"
+          description: "스냅샷 주기(15초)의 3배를 넘었다. L0/L1 게이지 전부가 낡은 값에 얼어붙어 있다는 뜻이다."
+
+      - alert: CreditBackstopRecovery
+        expr: increase(credit_job_recovery_total{detector="backstop"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: P2
+        annotations:
+          summary: "backstop 회수 {{ $value }}건"
+          description: "heartbeat 가 잡았어야 할 죽은 job 을 최후 방어선이 잡았다. Redis 또는 heartbeat 갱신 경로가 새고 있다."
+
+      - alert: CreditSystemDown
+        expr: up{job="credit_system"} == 0
+        for: 30s
+        labels:
+          severity: P2
+        annotations:
+          summary: "credit_system 스크레이프 실패"
+          description: "관리 포트(app:8081)에 닿지 않는다. 앱이 죽었거나 관리 포트가 뜨지 않았다. 이때 다른 모든 지표는 침묵한다."
+
+  # ── P3: 추세. 호출하지 않고 다음 근무일에 본다 ──────────────────────────────────
+  - name: credit-trends
+    rules:
+      - alert: CreditRetryExhaustionRateHigh
+        expr: increase(credit_defense_total{point="final_refund",outcome="applied"}[1h]) / increase(credit_defense_total{point="hold_balance",outcome="applied"}[1h]) > 0.1
+        for: 10m
+        labels:
+          severity: P3
+        annotations:
+          summary: "재시도 소진율 {{ $value | humanizePercentage }}"
+          description: "hold 를 통과한 요청 중 10% 넘게 재시도를 다 쓰고 최종 환불로 끝났다. 스텁/외부 API 의 실패율이 올라갔을 가능성이 높다."
