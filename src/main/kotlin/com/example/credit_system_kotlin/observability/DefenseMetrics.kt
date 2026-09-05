@@ -91,7 +91,9 @@ class DefenseMetrics(
         val VALID_COMBINATIONS: Map<DefensePoint, Set<DefenseOutcome>> = mapOf(
             DefensePoint.HOLD_BALANCE to setOf(DefenseOutcome.APPLIED, DefenseOutcome.REJECTED),
             DefensePoint.IDEM_KEY to setOf(DefenseOutcome.APP_HIT, DefenseOutcome.DB_UNIQUE),
-            DefensePoint.WORKER_CLAIM to setOf(DefenseOutcome.APPLIED, DefenseOutcome.LOST),
+            DefensePoint.WORKER_CLAIM to setOf(
+                DefenseOutcome.APPLIED, DefenseOutcome.LOST, DefenseOutcome.ROLLED_BACK
+            ),
             DefensePoint.CONFIRM to setOf(DefenseOutcome.APPLIED, DefenseOutcome.STALE),
             DefensePoint.MARK_FAILED to setOf(DefenseOutcome.APPLIED, DefenseOutcome.STALE),
             DefensePoint.RETRY_CLAIM to setOf(DefenseOutcome.APPLIED, DefenseOutcome.LOST),

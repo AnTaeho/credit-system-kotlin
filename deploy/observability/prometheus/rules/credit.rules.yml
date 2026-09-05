@@ -123,3 +123,17 @@ groups:
         annotations:
           summary: "재시도 소진율 {{ $value | humanizePercentage }}"
           description: "hold 를 통과한 요청 중 10% 넘게 재시도를 다 쓰고 최종 환불로 끝났다. 스텁/외부 API 의 실패율이 올라갔을 가능성이 높다."
+
+  # ── 후속 2 가 남긴 전제의 감시 ──────────────────────────────────────────────────
+  # 빈 슬롯만큼만 선점하므로 executor 거부 → 롤백 경로는 더 이상 정상 경로가 아니다.
+  # 이 값이 0 이 아니면 슬롯 계산(maxPoolSize - activeCount)에 구멍이 있다는 뜻이다.
+  - name: credit-worker
+    rules:
+      - alert: CreditWorkerClaimRolledBack
+        expr: increase(credit_defense_total{point="worker_claim",outcome="rolled_back"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: P2
+        annotations:
+          summary: "선점 후 executor 거부로 롤백 {{ $value }}건"
+          description: "후속 2 이후 이 경로는 안전망일 뿐 정상 경로가 아니다. 디스패처가 둘 이상 겹쳤거나 슬롯 계산이 틀렸다. GenerationWorker.dispatchPendingJobs 를 의심하라."

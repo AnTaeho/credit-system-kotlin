@@ -53,7 +53,13 @@ enum class DefenseOutcome {
     STALE,
 
     /** 늦은 워커가 먼저 상태를 바꿔 버려 0행 */
-    RACED
+    RACED,
+
+    /**
+     * 선점했지만 executor 가 받지 못해 HOLDING 으로 되돌렸다.
+     * 후속 2 이후 이 값이 오르면 슬롯 계산에 구멍이 있다는 뜻이다.
+     */
+    ROLLED_BACK
 }
 
 /**

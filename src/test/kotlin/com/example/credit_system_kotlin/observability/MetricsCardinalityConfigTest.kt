@@ -84,7 +84,7 @@ class MetricsCardinalityConfigTest {
 /**
  * 필터가 실제 애플리케이션 컨텍스트에 배선되는지, 그리고 **정상 지표를 잡아먹지 않는지** 확인한다.
  *
- * 가드가 너무 세면 2단계가 사전 등록한 14개 방어 조합이 사라진다. 그러면 알람 규칙과 대시보드가
+ * 가드가 너무 세면 사전 등록한 15개 방어 조합이 사라진다. 그러면 알람 규칙과 대시보드가
  * 통째로 무너지는데 아무 에러도 안 난다 — 그래서 이 단언이 필요하다.
  */
 @ActiveProfiles("test")
@@ -100,11 +100,11 @@ class MetricsCardinalityWiringTest @Autowired constructor(
     }
 
     @Test
-    fun `가드가 걸린 실제 레지스트리에서도 방어 카운터 14개 조합이 그대로 보인다`() {
+    fun `가드가 걸린 실제 레지스트리에서도 방어 카운터 15개 조합이 그대로 보인다`() {
         val expected = DefenseMetrics.VALID_COMBINATIONS.values.sumOf { outcomes -> outcomes.size }
 
         assertThat(registry.find(DefenseMetrics.DEFENSE_METRIC).counters()).hasSize(expected)
-        assertThat(expected).isEqualTo(14)
+        assertThat(expected).isEqualTo(15)
     }
 
     @Test

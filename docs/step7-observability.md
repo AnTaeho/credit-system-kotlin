@@ -1948,6 +1948,8 @@ private fun recoverStalled(job: Job) {
 | 01 (워커 크래시) | job 6건 + 재시도 | **11** | 6 |
 
 07 에서 정확히 3 이 나온 것이 결정적이다. **경합이 없으면 선점 카운터는 job 수와 정확히 같다.** 즉 이 카운터는 "선점이라는 동작이 성공한 횟수"이고, 처리량으로 읽으면 안 된다. 대시보드의 `rate(credit_defense_total)` 패널에서 `worker_claim` 만 유난히 높은 것은 사고가 아니라 **executor 포화의 신호**로 읽어야 한다.
+
+> **→ 후속 2 에서 고쳤다.** 카운터의 해석을 바꾸는 대신 코드를 바꿨다 — 빈 슬롯 수만큼만 읽고 선점하니 헛선점 자체가 사라졌다. 아래 [후속 2](#후속-2--빈-슬롯만큼만-선점한다) 참고.
 ### 포트폴리오 스크린샷 가이드
 
 Grafana(<http://localhost:3000>, 대시보드 `credit-domain`)를 열어 둔 채 스크립트를 돌리면 곡선이 실시간으로 그려진다. 시간 범위는 **Last 15 minutes**, 자동 새로고침 **5s** 로 두면 된다.
@@ -1995,7 +1997,7 @@ step7 전체를 닫는다.
 |---|---|---|---|
 | 1 | staleness 규칙이 `-1`(한 번도 안 돎)을 못 잡는다 | 4번 시나리오 | **고쳤다** — `or (x < 0)`, `for: 1m` |
 | 2 | `updatedAt` 백스톱이 Redis 에 의존한다 | 2번 시나리오 B | **고쳤다 (후속 1)** — `HeartbeatState.UNKNOWN` + `backstop_blind` |
-| 3 | `worker_claim/applied` 가 처리량이 아니다 | 5단계, 6단계 07 에서 확정 | 기록만. 대시보드 해석 규칙으로 남긴다 |
+| 3 | `worker_claim/applied` 가 처리량이 아니다 | 5단계, 6단계 07 에서 확정 | **고쳤다 (후속 2)** — 빈 슬롯 수만큼만 선점 + `worker_claim/rolled_back` |
 
 1번은 **관측 장치 자신의 결함**이고 2번은 **복구 장치의 결함**이라는 점이 다르다. 1번이 더 무섭다 — 2번은 알람이 안 울려도 `oldest_pending_age` 가 오르지만, 1번은 그 게이지 자체가 0 에 얼어붙은 채 "정상"을 그린다. **관측 장치의 고장이 사고보다 나쁠 수 있다**는 것이 이 챕터의 마지막 교훈이다.
 
@@ -2004,7 +2006,7 @@ step7 전체를 닫는다.
 1. **L2 흐름 지표.** `credit_job_status_count{status}` 게이지와 HOLDING→PROCESSING→종결 단계별 소요 시간 Timer. 3번과 7번 시나리오를 구분할 수 있게 된다(지금 둘은 `oldest_pending_age` 만 보면 같은 그림이다).
 2. ~~**회수 시도 실패 카운터.**~~ **(후속 1 에서 처리)** — 만들지 않는 쪽으로 처리했다. 회수가 실패하지 않고 `backstop_blind` 로 성공하므로 셀 실패가 남지 않는다.
 3. ~~**백스톱 맹점 수정.**~~ **(후속 1 에서 처리)** — "알 수 없음"으로 다루기로 했고, 오탐은 감수하되 라벨로 드러내기로 했다. "멱등성 보강 선행"이라는 조건은 attemptNo CAS 를 빠뜨린 과대평가였다.
-4. **`worker_claim` churn 수정.** executor 가 거부할 것 같으면 애초에 선점하지 않게 하거나(풀 여유 확인), 큐를 두어 거부 자체를 없앤다. 카운터가 처리량으로 읽히게 만드는 것이 부수 효과다.
+4. ~~**`worker_claim` churn 수정.**~~ **(후속 2 에서 처리)** — 풀 여유를 확인하는 쪽을 택했다. 큐를 두는 안은 선점과 실행 사이의 창을 오히려 늘려서 버렸다.
 5. **Alertmanager 라우팅.** 규칙 10개는 코드로 남았지만 여전히 아무 데도 안 간다. 붙일 채널이 정해지면 컨테이너 하나로 끝난다.
 
 ---
@@ -2284,10 +2286,237 @@ WARN c.e.c.j.scheduling.DeadJobRecoveryTask : heartbeat 저장소에 닿지 않�
 
 ---
 
+## 후속 2 — 빈 슬롯만큼만 선점한다
+
+6단계 장애 주입이 찾아낸 결함 3번을 고친다. 이번에는 정정할 판단이 아니라 **관측 결함으로 분류한 것이 사실은 코드 결함이었다**는 재분류다.
+
+### 결함 — 카운터가 이상한 게 아니라 코드가 헛돌고 있었다
+
+`worker_claim/applied` 가 job 수와 안 맞는 것을 5단계에서 발견하고 6단계에서 재확인했다. 세 번의 실측이 같은 방향을 가리켰다.
+
+| 실측 | job 수 + 재시도 | `worker_claim/applied` | 배수 |
+|---|---|---|---|
+| 5단계 smoke | 10 + 3 = **13** | **44** | 3.4배 |
+| 6단계 05 (원장 훼손) | **5** | **19** | 3.8배 |
+| 6단계 07 (외부 API 무한 지연, 경합 없음) | **3** | **3** | 1.0배 |
+
+07 이 정확히 3 이었다는 것이 진단의 핵심이었다. **풀이 넘치지 않으면 배수가 1 이다.** 즉 초과분은 전부 executor 포화 구간에서 나온다.
+
+포화 구간의 한 주기는 이렇게 돌았다.
+
+```
+   findByStatusOrderByIdAsc(HOLDING, PageRequest.of(0, 3))   ← batchSize 만큼 읽고
+   startProcessingIfAttemptMatches(...)  → 1행                ← 선점 UPDATE (worker_claim/applied +1)
+   workerExecutor.execute { ... }        → TaskRejectedException
+   rollbackToHoldingIfProcessing(...)    → 1행                ← 롤백 UPDATE
+   return                                                     ← 이번 주기 중단
+   ... 500ms 뒤 같은 job 을 다시 선점
+```
+
+5단계 실측의 `44 = 13 + 31` 에서 31 이 이 헛선점 횟수였고, 그 31 은 `"executor 위임 실패"` WARN 로그 수와 정확히 같았다.
+
+### 왜 이걸 코드 결함으로 다시 분류했나
+
+6단계 문서는 이걸 "설계대로의 동작이지만 대시보드에서 처리량으로 읽으면 안 된다"고 정리하고 해석 규칙으로 남겼다. 다시 보니 그 결론은 **지표의 관점에서만 옳았다.**
+
+step6 이 만든 "거부되면 선점을 되돌린다"는 안전망 자체는 옳다. 되돌리지 않으면 job 이 PROCESSING 에 갇혀 timeout 회수를 기다려야 하니까. 문제는 그 안전망이 **예외 경로가 아니라 매 주기의 정상 경로**로 쓰이고 있었다는 것이다. 워커 풀이 꽉 찬 동안 500ms 마다 **DB UPDATE 두 번**(선점 + 롤백)이 아무 일도 하지 않고 돈다. 처리량이 높을수록 풀은 더 오래 꽉 차 있으므로, **부하가 클수록 헛도는 쓰기가 늘어나는** 모양이다. 지표가 이상하게 읽히는 것은 그 낭비의 **증상**이었지 원인이 아니었다.
+
+관측을 붙인 값이 여기 있다. 이 낭비는 HTTP 응답에도, ERROR 로그에도, 최종 상태에도 안 남는다. 카운터 하나가 예상과 어긋난 것이 유일한 흔적이었다.
+
+### 수정 — 받아 줄 만큼만 읽는다
+
+선점부터 하고 executor 가 받아 주길 기대하는 대신, **빈 슬롯을 먼저 세고 그만큼만 읽는다.**
+
+```kotlin
+fun interface WorkerSlots {
+    fun free(): Int
+}
+```
+
+풀 구현을 디스패처에 노출하지 않으려고 좁은 인터페이스로 끊었다. 구현은 한 줄이다 — `maxPoolSize - activeCount`.
+
+`free <= 0` 이면 **DB 조회조차 하지 않고 즉시 돌아온다.** 넘길 곳이 없으면 읽어도 쓸 데가 없으므로, 헛선점뿐 아니라 포화 구간의 폴링 SELECT 도 같이 사라진다. `free > 0` 이면 `PageRequest.of(0, minOf(batchSize, free))` 로 읽는다. `batchSize` 는 여전히 **상한**으로 의미가 있다 — 슬롯이 아무리 많아도 한 주기에 그 이상 읽지 않는다.
+
+### 경쟁 조건이 없는 이유
+
+`activeCount` 는 순간값이다. 읽고 나서 쓰는 사이에 값이 바뀔 수 있는데도 왜 안전한가.
+
+**이 풀에 task 를 넣는 스레드가 하나뿐이기 때문이다.** `@Scheduled` 디스패처만 `execute` 를 부르고, `fixedDelay` 는 이전 실행이 끝난 뒤 다음을 잡으므로 디스패처가 둘 겹치지도 않는다. 다른 스레드는 task 를 **끝내면서 `activeCount` 를 줄이기만** 한다.
+
+따라서 주기 시작에 읽은 `free` 는 그 주기 동안 **과소평가일 수는 있어도 과대평가일 수 없다.** 다른 스레드가 그 사이에 슬롯을 채가는 일이 없다. 한 주기에 `free` 개 이하만 넘기면 `maxPoolSize` 를 넘을 수 없다.
+
+`activeCount` 가 새 스레드 기동 직후 잠깐 낮게 읽히는 창이 있어도 결론은 같다. 우리가 제한하는 것은 "풀의 상태"가 아니라 **"이번 주기에 우리가 넘긴 수"** 자체이기 때문이다. 낮게 읽히면 `free` 가 커져 한 번 더 넘기려 하는데, 그 스레드는 이미 실행 중인 task 를 세고 있으므로 실제로는 더 적은 자리가 남은 상태다 — 이 경우가 유일하게 거부로 이어질 수 있는 창이고, 그래서 안전망을 지웠다면 안 됐다.
+
+### 안전망은 남기되, 타면 소리를 내게 했다
+
+거부 → 롤백 경로는 **지우지 않았다.** executor shutdown 중 거부처럼 슬롯 계산과 무관하게 거부가 나는 경우가 남아 있고, 안전망이 없으면 그때 job 이 PROCESSING 에 갇힌다.
+
+대신 의미가 바뀌었다. **이제 이 경로가 타는 것은 정상 동작이 아니라 "슬롯 계산이 틀렸다"는 신호다.** 신호는 지표로 나가야 한다.
+
+```kotlin
+/** 선점했지만 executor 가 받지 못해 HOLDING 으로 되돌렸다.
+ *  후속 2 이후 이 값이 오르면 슬롯 계산에 구멍이 있다는 뜻이다. */
+ROLLED_BACK
+```
+
+`DefenseOutcome` 에 값 하나를 더하고 `VALID_COMBINATIONS` 의 `WORKER_CLAIM` 에 얹었다. 유효 조합은 14개에서 **15개**가 됐다. 2단계가 "enum 이 카디널리티 가드다"라고 쓴 대로, 태그 값의 집합은 여전히 컴파일 타임에 닫혀 있다.
+
+**로그가 이미 있는데 왜 카운터를 더하나.** WARN 로그는 사람이 `grep` 을 칠 때만 존재한다. 5단계에서 31회를 세는 데 실제로 `grep -c` 가 필요했다. 이 값이 0 이 아닌 것은 알람이 걸릴 만한 사실이고, 알람은 시계열에만 걸린다.
+
+### 지표의 의미 변화
+
+| | 수정 전 | 수정 후 |
+|---|---|---|
+| `worker_claim/applied` 의 뜻 | 선점 UPDATE 가 성공한 횟수 (헛선점 포함) | **executor 에 실제로 넘긴 job 수 = 처리량** |
+| 기대값 | 없다. 풀 포화 정도에 따라 job 수의 1~4배 | **`hold_balance/applied` + `retry_claim/applied`** |
+| 대시보드에서 튈 때 | executor 포화의 간접 신호 | 처리량 증가 |
+| `worker_claim/rolled_back` | (없음) | 0 이어야 정상. 0 이 아니면 슬롯 계산 결함 |
+
+재시도된 job 은 다시 HOLDING 으로 돌아가 다시 선점되므로 "job 수 + 재시도 수"가 기댓값이다. 재시도 수는 `retry_claim/applied` 다 — `mark_failed/applied` 가 아니다. 최종 환불로 끝난 실패는 HOLDING 으로 돌아가지 않아 다시 선점되지 않기 때문이다(`mark_failed = retry_claim + final_refund`).
+
+### 파일별 변경 목록
+
+| 파일 | 변경 |
+|---|---|
+| `job/worker/WorkerExecutorConfig.kt` | `fun interface WorkerSlots` 추가. `workerSlots` 빈 = `maxPoolSize - activeCount` |
+| `job/worker/GenerationWorker.kt` | `free <= 0` 이면 조회 없이 return. `PageRequest.of(0, minOf(batchSize, free))`. 거부 시 `ROLLED_BACK` 발행 |
+| `global/event/DefenseTriggered.kt` | `DefenseOutcome.ROLLED_BACK` 추가 |
+| `observability/DefenseMetrics.kt` | `WORKER_CLAIM` 유효 조합에 `ROLLED_BACK` — 14개 → 15개 |
+| `GenerationWorkerUnitTest` / `WorkerSlotsTest` / `DefenseMetricsTest` / `MetricsCardinalityConfigTest` | 아래 참고 |
+| `deploy/observability/prometheus/rules/credit.rules.yml` | `CreditWorkerClaimRolledBack`(P2) 추가 — `rolled_back` 이 10분 안에 1건이라도 오르면 울린다. 규칙 11개 → 12개 |
+
+`WorkerProperties` 와 `application.yml` 은 **손대지 않았다.** `batchSize` 의 의미가 "한 주기에 읽는 수"에서 "한 주기에 읽는 수의 상한"으로 좁아졌을 뿐 설정 값은 그대로다. 대시보드 JSON 은 그대로다 — `sum by (point, outcome)` 이라 새 라벨이 알아서 그려진다. 알람 규칙은 하나 늘었다: "`rolled_back` 은 0 이어야 정상"이 이 수정의 전제이므로, 전제가 깨지는 순간을 사람이 대시보드에서 우연히 발견하게 두지 않고 `CreditWorkerClaimRolledBack` 이 울리게 했다.
+
+### 핵심 코드 읽기
+
+**전 — 선점하고 나서 받아 주길 기대한다**
+
+```kotlin
+@Scheduled(fixedDelayString = "...")
+fun dispatchPendingJobs() {
+    val jobs = jobRepository.findByStatusOrderByIdAsc(JobStatus.HOLDING, PageRequest.of(0, batchSize))
+    for (job in jobs) {
+        if (!claim(job)) continue          // ← 풀 상태와 무관하게 선점한다
+        if (!dispatch(job)) return         // ← 거부되면 롤백하고 이번 주기 중단
+    }
+}
+```
+
+**후 — 받아 줄 만큼만 읽는다**
+
+```kotlin
+@Scheduled(fixedDelayString = "...")
+fun dispatchPendingJobs() {
+    val free = workerSlots.free()
+    if (free <= 0) {
+        return                             // ← 넘길 곳이 없으면 조회조차 하지 않는다
+    }
+    val jobs = jobRepository.findByStatusOrderByIdAsc(
+        JobStatus.HOLDING, PageRequest.of(0, minOf(batchSize, free))
+    )
+    for (job in jobs) {
+        if (!claim(job)) continue
+        if (!dispatch(job)) return         // ← 안전망으로 남는다. 타면 ROLLED_BACK 이 오른다
+    }
+}
+```
+
+`for` 루프의 모양은 그대로다. 바뀐 것은 **루프에 들어가는 원소 수의 상한**뿐이고, 그 한 줄이 헛선점을 없앤다.
+
+```kotlin
+@Bean
+fun workerSlots(
+    @Qualifier("generationWorkerExecutor") executor: ThreadPoolTaskExecutor
+): WorkerSlots = WorkerSlots { executor.maxPoolSize - executor.activeCount }
+```
+
+### 테스트가 보장하는 것
+
+| 테스트 | 보장 |
+|---|---|
+| `GenerationWorkerUnitTest` | `free == 0` → `findByStatusOrderByIdAsc` 가 **호출되지 않는다**. 선점도 없다 |
+| 〃 | `free == 2, batchSize == 3` → `PageRequest` 의 `pageSize` 가 **2** (`argumentCaptor` 로 잡는다) |
+| 〃 | `free == 5, batchSize == 3` → `pageSize` 가 **3**. `batchSize` 가 상한으로 남는다 |
+| 〃 | 거부 → 롤백 경로가 `WORKER_CLAIM/ROLLED_BACK` 을 발행한다 |
+| 〃 | 기존 단언 전부 유지 — 슬롯 무제한을 넘겨 예전과 같은 조건에서 돌린다 |
+| `WorkerSlotsTest` | 실제 `ThreadPoolTaskExecutor`(concurrency 2)를 latch 로 막으면 `free() == 0`, 풀면 다시 2 |
+| `DefenseMetricsTest` | `worker_claim/rolled_back` 이 이벤트 없이도 0 으로 사전 등록돼 있다. 조합 15개 |
+| `MetricsCardinalityConfigTest` | 카디널리티 가드가 걸린 실제 컨텍스트에서도 15개가 그대로 보인다 |
+
+전체 181개(후속 1 의 177개 + 추가 4개), 전부 통과.
+
+`WorkerSlotsTest` 만 실제 스레드 풀을 쓴다. `maxPoolSize - activeCount` 는 한 줄이지만 틀리면 조용히 망가진다 — 항상 0 이면 워커가 아무것도 안 하고, 항상 양수면 수정 전으로 돌아간다. 타이밍 의존을 피하려고 `CountDownLatch` 로 task 를 붙잡고 `Awaitility` 로 기다린다.
+
+### 실측 — 헛선점이 사라졌다
+
+`./gradlew bootJar` 후 스택을 올려 `seed.sh` + `smoke.sh` 를 5단계와 똑같이 돌렸다.
+
+**1. smoke (5단계와 같은 트래픽)**
+
+```
+  point=hold_balance  outcome=applied      10
+  point=retry_claim   outcome=applied       1
+  point=worker_claim  outcome=applied      11
+  point=worker_claim  outcome=lost          0
+  point=worker_claim  outcome=rolled_back   0
+  point=confirm       outcome=applied      10
+  point=mark_failed   outcome=applied       1
+  point=final_refund  outcome=applied       0
+```
+
+```
+$ docker compose ... logs app | grep -c "executor 위임 실패"
+0
+```
+
+`10 + 1 = 11`. **기댓값과 정확히 같다.** 5단계 같은 자리는 13 이어야 할 것이 44 였고 위임 실패 로그가 31회였다. DB 최종 상태는 `COMPLETED 10`, 잔액 0, 불변식 4종 전부 0, fire 중인 알람 없음.
+
+**2. 포화 상황** — 2000 크레딧을 더 충전하고 job 20건을 동시에(백그라운드 20개 `curl`) 밀어 넣었다. 워커 동시성은 3 이므로 투입 직후 `HOLDING 20` 이 그대로 쌓였고, 풀은 처리 내내 꽉 차 있었다. 이게 5단계에서 헛선점 31회가 나온 바로 그 조건이다.
+
+```
+  point=hold_balance  outcome=applied      30      ← smoke 10 + burst 20
+  point=retry_claim   outcome=applied       9
+  point=worker_claim  outcome=applied      39
+  point=worker_claim  outcome=rolled_back   0
+  point=confirm       outcome=applied      30
+  point=mark_failed   outcome=applied       9
+```
+
+```
+$ docker compose ... logs app | grep -c "executor 위임 실패"
+0
+```
+
+`30 + 9 = 39`. **풀이 내내 포화였는데도 배수가 정확히 1 이다.**
+
+| 항목 | 수정 전 (5단계) | 수정 후 smoke | 수정 후 포화 |
+|---|---|---|---|
+| job 수 + 재시도 | 13 | 11 | 39 |
+| `worker_claim/applied` | **44** | **11** | **39** |
+| 배수 | 3.4배 | **1.0배** | **1.0배** |
+| `worker_claim/rolled_back` | (없던 지표) | **0** | **0** |
+| `"executor 위임 실패"` 로그 | **31회** | **0회** | **0회** |
+| 불변식 4종 / 대사 불일치 | 0 | 0 | 0 |
+| firing 알람 | 없음 | 없음 | 없음 |
+
+포화 구간에서 `free <= 0` 인 주기가 조회조차 하지 않았다는 것은 로그로 보이지 않는다. 그러나 위임 실패 0회는 **선점한 job 을 전부 executor 가 받았다**는 뜻이고, 동시성 3 인 풀이 20건을 처리하는 동안 매 주기 3건씩 읽었다면 위임 실패가 반드시 났을 것이다. 지표 하나가 두 사실을 같이 증명한다.
+
+끝나고 `down -v` 로 내렸다.
+
+### 남는 것
+
+**`batchSize` 가 `concurrency` 보다 크면 의미가 없다.** `min(batchSize, free)` 이고 `free <= concurrency` 이므로, `batchSize > concurrency` 인 설정은 아무 효과가 없는 값이다(지금 설정은 3, 3 이라 마침 같다). `WorkerProperties` 의 `init` 에 `require(batchSize <= concurrency)` 같은 불변식을 넣을 수 있는데 **넣지 않았다.** 두 값은 원래 다른 것을 뜻하고(한 번에 읽을 양 / 동시에 처리할 양), 지금은 우연히 상한 관계가 생겼을 뿐이다. 나중에 큐를 두면 다시 갈라진다. **의미가 겹치는 순간의 스냅샷을 설정 불변식으로 굳히면 나중에 푸는 비용이 더 크다.**
+
+**여러 인스턴스면 슬롯은 인스턴스별이다.** `WorkerSlots` 는 자기 JVM 의 풀만 본다. 인스턴스 A 와 B 가 각각 3자리를 비워 두고 같은 HOLDING job 을 읽으면 DB 에서 부딪히는데, 그건 이 수정이 없애려던 헛선점이 아니라 **원래 있어야 할 경쟁**이고 `startProcessingIfAttemptMatches` 의 CAS 가 그대로 처리한다. 진 쪽은 `worker_claim/lost` 로 남는다. 즉 이 수정 뒤에도 **`applied` 는 처리량, `lost` 는 인스턴스 간 경합**으로 각각 읽히고, 두 값이 섞이지 않는다는 것이 이번 수정이 만든 상태다. 단일 인스턴스인 지금 `lost` 는 계속 0 이다.
+
+**큐를 두는 안은 버렸다.** `queueCapacity` 를 늘리면 거부는 사라지지만, 선점(PROCESSING 전이)과 실제 실행 사이의 창이 큐 길이만큼 벌어진다. 그 창에서 프로세스가 죽으면 PROCESSING 인 채 아무도 처리하지 않는 job 이 큐 길이만큼 생기고, `processing.timeout-seconds` 회수를 기다려야 한다. **거부를 없애는 대신 회수 대상을 늘리는 거래**라서, 슬롯을 세는 쪽이 낫다.
+
+---
+
 ## 명령어
 
 ```
-# 이 브랜치에서 전체 테스트 실행 (Docker 필요 — MySQL + Redis Testcontainers, 177개 테스트)
+# 이 브랜치에서 전체 테스트 실행 (Docker 필요 — MySQL + Redis Testcontainers, 181개 테스트)
 ./gradlew test
 
 # 정적 분석

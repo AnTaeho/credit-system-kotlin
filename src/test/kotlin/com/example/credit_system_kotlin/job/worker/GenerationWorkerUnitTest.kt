@@ -15,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.Mock
 import org.mockito.junit.jupiter.MockitoExtension
 import org.mockito.kotlin.any
+import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.eq
@@ -25,6 +26,7 @@ import org.springframework.core.task.SyncTaskExecutor
 import org.springframework.core.task.TaskExecutor
 import org.springframework.core.task.TaskRejectedException
 import org.springframework.dao.QueryTimeoutException
+import org.springframework.data.domain.Pageable
 import org.springframework.test.util.ReflectionTestUtils
 import java.time.Instant
 
@@ -45,7 +47,7 @@ class GenerationWorkerUnitTest {
         eventPublisher.clear()
         worker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
-            WorkerProperties(true, 20, CONCURRENCY)
+            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
         )
         job = Job.hold(10L, 100L, "cat")
         ReflectionTestUtils.setField(job, "id", 1L)
@@ -95,7 +97,7 @@ class GenerationWorkerUnitTest {
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
             TaskExecutor { throw IllegalStateException("executor shutdown") }, eventPublisher,
-            WorkerProperties(true, 20, CONCURRENCY)
+            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
         )
         doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
@@ -128,7 +130,7 @@ class GenerationWorkerUnitTest {
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
             TaskExecutor { throw TaskRejectedException("pool exhausted") }, eventPublisher,
-            WorkerProperties(true, 20, CONCURRENCY)
+            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
         )
         doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
@@ -137,6 +139,9 @@ class GenerationWorkerUnitTest {
 
         verify(jobRepository).rollbackToHoldingIfProcessing(eq(1L), eq(0), any<Instant>())
         verify(jobRepository, never()).startProcessingIfAttemptMatches(eq(2L), any<Int>(), any<Instant>())
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.ROLLED_BACK))
+            .describedAs("슬롯을 세고 넘기므로 이 경로가 타면 계산에 구멍이 있다는 신호다")
+            .isEqualTo(1)
     }
 
     @Test
@@ -175,7 +180,57 @@ class GenerationWorkerUnitTest {
         assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isZero()
     }
 
+    @Test
+    fun `빈 슬롯이 없으면 DB 조회도 선점도 하지 않는다`() {
+        val fullWorker = GenerationWorker(
+            jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
+            WorkerSlots { 0 }, WorkerProperties(true, 3, CONCURRENCY)
+        )
+
+        fullWorker.dispatchPendingJobs()
+
+        verify(jobRepository, never()).findByStatusOrderByIdAsc(any(), any())
+        verify(jobRepository, never()).startProcessingIfAttemptMatches(any(), any(), any<Instant>())
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isZero()
+    }
+
+    @Test
+    fun `빈 슬롯이 batchSize보다 적으면 슬롯 수만큼만 읽는다`() {
+        val slotWorker = GenerationWorker(
+            jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
+            WorkerSlots { 2 }, WorkerProperties(true, 3, CONCURRENCY)
+        )
+        doReturn(emptyList<Job>()).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+
+        slotWorker.dispatchPendingJobs()
+
+        assertThat(capturedPageSize()).isEqualTo(2)
+    }
+
+    @Test
+    fun `빈 슬롯이 batchSize보다 많으면 batchSize가 상한이다`() {
+        val slotWorker = GenerationWorker(
+            jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
+            WorkerSlots { 5 }, WorkerProperties(true, 3, CONCURRENCY)
+        )
+        doReturn(emptyList<Job>()).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+
+        slotWorker.dispatchPendingJobs()
+
+        assertThat(capturedPageSize()).isEqualTo(3)
+    }
+
+    private fun capturedPageSize(): Int {
+        val captor = argumentCaptor<Pageable>()
+        verify(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), captor.capture())
+        assertThat(captor.firstValue.pageNumber).isZero()
+        return captor.firstValue.pageSize
+    }
+
     companion object {
         private const val CONCURRENCY = 3
+
+        /** 슬롯 계산과 무관한 기존 단언들이 예전과 똑같이 돌도록 슬롯을 무제한으로 둔다. */
+        private val UNLIMITED_SLOTS = WorkerSlots { Int.MAX_VALUE }
     }
 }

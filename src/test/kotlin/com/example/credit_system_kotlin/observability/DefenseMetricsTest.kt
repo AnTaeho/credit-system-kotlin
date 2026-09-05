@@ -62,7 +62,7 @@ class DefenseMetricsTest {
         val expected = mapOf(
             "hold_balance" to listOf("applied", "rejected"),
             "idem_key" to listOf("app_hit", "db_unique"),
-            "worker_claim" to listOf("applied", "lost"),
+            "worker_claim" to listOf("applied", "lost", "rolled_back"),
             "confirm" to listOf("applied", "stale"),
             "mark_failed" to listOf("applied", "stale"),
             "retry_claim" to listOf("applied", "lost"),
@@ -94,7 +94,7 @@ class DefenseMetricsTest {
             .toSet()
 
         assertThat(tagValues).allSatisfy { assertThat(it).isEqualTo(it.lowercase()) }
-        assertThat(tagValues).contains("hold_balance", "db_unique", "final_refund", "raced")
+        assertThat(tagValues).contains("hold_balance", "db_unique", "final_refund", "raced", "rolled_back")
     }
 
     /** 사전 등록 목록에 없는 조합이 와도 도메인 흐름을 죽이지 않고 세기만 한다. */
