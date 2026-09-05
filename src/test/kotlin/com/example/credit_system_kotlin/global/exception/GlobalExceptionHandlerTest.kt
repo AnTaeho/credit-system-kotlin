@@ -1,5 +1,8 @@
 package com.example.credit_system_kotlin.global.exception
 
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
+import com.example.credit_system_kotlin.support.RecordingEventPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.hibernate.exception.ConstraintViolationException
 import org.junit.jupiter.api.Test
@@ -9,7 +12,9 @@ import java.sql.SQLException
 
 class GlobalExceptionHandlerTest {
 
-    private val handler = GlobalExceptionHandler()
+    private val eventPublisher = RecordingEventPublisher()
+
+    private val handler = GlobalExceptionHandler(eventPublisher)
 
     @Test
     fun `잔액부족 예외는 409와 코드를 반환한다`() {
@@ -40,6 +45,7 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.CONFLICT)
         assertThat(response.body!!.code).isEqualTo("DUPLICATE_IN_PROGRESS")
+        assertThat(eventPublisher.countOf(DefensePoint.IDEM_KEY, DefenseOutcome.DB_UNIQUE)).isEqualTo(1)
     }
 
     @Test
@@ -55,6 +61,7 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR)
         assertThat(response.body!!.code).isEqualTo("DATA_INTEGRITY_VIOLATION")
+        assertThat(eventPublisher.defenseEvents()).isEmpty()
     }
 
     @Test

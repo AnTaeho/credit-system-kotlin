@@ -1,6 +1,9 @@
 package com.example.credit_system_kotlin.job.service
 
 import com.example.credit_system_kotlin.global.config.AppProperties
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
+import com.example.credit_system_kotlin.global.event.DefenseTriggered
 import com.example.credit_system_kotlin.global.exception.DuplicateRequestInProgressException
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
@@ -15,6 +18,7 @@ import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import com.example.credit_system_kotlin.organization.service.OrganizationFinder
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -28,7 +32,8 @@ class HoldService(
     private val organizationFinder: OrganizationFinder,
     private val jobRepository: JobRepository,
     private val ledgerRepository: LedgerRepository,
-    private val appProperties: AppProperties
+    private val appProperties: AppProperties,
+    private val eventPublisher: ApplicationEventPublisher
 ) {
 
     @Transactional
@@ -37,6 +42,7 @@ class HoldService(
 
         val existing = idempotencyKeyRepository.findByOrganizationIdAndIdemKey(organizationId, idemKey)
         if (existing != null) {
+            eventPublisher.publishEvent(DefenseTriggered(DefensePoint.IDEM_KEY, DefenseOutcome.APP_HIT))
             return resolveDuplicateRequest(existing)
         }
 
@@ -74,8 +80,10 @@ class HoldService(
     private fun deductBalance(organizationId: Long, cost: Long) {
         val updated = organizationRepository.deductBalance(organizationId, cost, Instant.now())
         if (updated == 1) {
+            eventPublisher.publishEvent(DefenseTriggered(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED))
             return
         }
+        eventPublisher.publishEvent(DefenseTriggered(DefensePoint.HOLD_BALANCE, DefenseOutcome.REJECTED))
 
         val organization = organizationFinder.getOrThrow(organizationId)
         throw InsufficientBalanceException(organization.balance, cost)

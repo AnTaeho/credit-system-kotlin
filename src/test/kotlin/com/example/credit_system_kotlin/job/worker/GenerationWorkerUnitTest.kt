@@ -1,9 +1,13 @@
 package com.example.credit_system_kotlin.job.worker
 
 import com.example.credit_system_kotlin.global.config.WorkerProperties
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
+import com.example.credit_system_kotlin.support.RecordingEventPublisher
+import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -34,10 +38,13 @@ class GenerationWorkerUnitTest {
     private lateinit var worker: GenerationWorker
     private lateinit var job: Job
 
+    private val eventPublisher = RecordingEventPublisher()
+
     @BeforeEach
     fun setUp() {
+        eventPublisher.clear()
         worker = GenerationWorker(
-            jobRepository, jobProcessor, SyncTaskExecutor(),
+            jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
             WorkerProperties(true, 20, CONCURRENCY)
         )
         job = Job.hold(10L, 100L, "cat")
@@ -87,7 +94,7 @@ class GenerationWorkerUnitTest {
     fun `executor 위임과 롤백이 모두 실패해도 예외가 새어나가지 않는다`() {
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
-            TaskExecutor { throw IllegalStateException("executor shutdown") },
+            TaskExecutor { throw IllegalStateException("executor shutdown") }, eventPublisher,
             WorkerProperties(true, 20, CONCURRENCY)
         )
         doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
@@ -120,7 +127,7 @@ class GenerationWorkerUnitTest {
         ReflectionTestUtils.setField(second, "id", 2L)
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
-            TaskExecutor { throw TaskRejectedException("pool exhausted") },
+            TaskExecutor { throw TaskRejectedException("pool exhausted") }, eventPublisher,
             WorkerProperties(true, 20, CONCURRENCY)
         )
         doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
@@ -144,6 +151,28 @@ class GenerationWorkerUnitTest {
 
         verify(jobProcessor).runGeneration(job)
         verify(jobProcessor).runGeneration(second)
+    }
+
+    @Test
+    fun `선점 성공은 WORKER_CLAIM APPLIED를 발행한다`() {
+        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+
+        worker.dispatchPendingJobs()
+
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.LOST)).isZero()
+    }
+
+    @Test
+    fun `이미 선점된 job의 claim은 WORKER_CLAIM LOST를 발행한다`() {
+        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(0).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+
+        worker.dispatchPendingJobs()
+
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.LOST)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isZero()
     }
 
     companion object {

@@ -1,7 +1,11 @@
 package com.example.credit_system_kotlin.global.exception
 
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
+import com.example.credit_system_kotlin.global.event.DefenseTriggered
 import org.hibernate.exception.ConstraintViolationException
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -12,7 +16,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 private val log = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
 
 @RestControllerAdvice
-class GlobalExceptionHandler {
+class GlobalExceptionHandler(
+    private val eventPublisher: ApplicationEventPublisher
+) {
 
     @ExceptionHandler(InsufficientBalanceException::class)
     fun handleInsufficientBalance(e: InsufficientBalanceException): ResponseEntity<ErrorResponse> =
@@ -35,6 +41,9 @@ class GlobalExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException::class)
     fun handleDataIntegrityViolation(e: DataIntegrityViolationException): ResponseEntity<ErrorResponse> {
         if (isUniqueConstraintViolation(e)) {
+            // 유니크 위반은 @Transactional 서비스 밖으로 예외가 나온 뒤 여기서 잡힌다.
+            // 즉 롤백이 이미 끝난 시점이라, AFTER_COMMIT 리스너였다면 이 이벤트는 버려졌을 것이다.
+            eventPublisher.publishEvent(DefenseTriggered(DefensePoint.IDEM_KEY, DefenseOutcome.DB_UNIQUE))
             return conflict("DUPLICATE_IN_PROGRESS", "동일한 요청이 동시에 처리 중입니다. 잠시 후 다시 시도해주세요.")
         }
 

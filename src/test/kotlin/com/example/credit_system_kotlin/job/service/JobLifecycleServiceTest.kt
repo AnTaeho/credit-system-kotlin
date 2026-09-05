@@ -1,5 +1,7 @@
 package com.example.credit_system_kotlin.job.service
 
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
@@ -7,6 +9,7 @@ import com.example.credit_system_kotlin.ledger.domain.LedgerType
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.domain.Organization
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.support.RecordingEventPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -23,8 +26,10 @@ class JobLifecycleServiceTest @Autowired constructor(
     private val ledgerRepository: LedgerRepository
 ) {
 
+    private val eventPublisher = RecordingEventPublisher()
+
     private val jobLifecycleService =
-        JobLifecycleService(jobRepository, organizationRepository, ledgerRepository)
+        JobLifecycleService(jobRepository, organizationRepository, ledgerRepository, eventPublisher)
 
     @Test
     fun `attemptNo가 일치하면 완료 처리되고 ledger가 남는다`() {
@@ -189,5 +194,71 @@ class JobLifecycleServiceTest @Autowired constructor(
             .isEqualTo(1000L)
         assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId))
             .hasSize(1)
+    }
+
+    @Test
+    fun `attemptNo가 일치하는 confirm은 CONFIRM APPLIED를 발행한다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+
+        jobLifecycleService.confirm(job, "https://stub/x.png")
+
+        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.STALE)).isZero()
+    }
+
+    @Test
+    fun `attemptNo가 어긋난 confirm은 CONFIRM STALE을 발행한다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        ReflectionTestUtils.setField(job, "attemptNo", 5)
+
+        jobLifecycleService.confirm(job, "https://stub/x.png")
+
+        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.STALE)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.APPLIED)).isZero()
+    }
+
+    @Test
+    fun `이미 완료된 job의 늦은 실패 처리는 MARK_FAILED STALE을 발행한다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.completeIfAttemptMatches(job.persistedId, "https://stub/done.png", 0, Instant.now())
+
+        jobLifecycleService.markFailed(job.persistedId, 0)
+
+        assertThat(eventPublisher.countOf(DefensePoint.MARK_FAILED, DefenseOutcome.STALE)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.MARK_FAILED, DefenseOutcome.APPLIED)).isZero()
+    }
+
+    @Test
+    fun `재시도 투입에 밀리면 RETRY_CLAIM LOST를 발행한다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.transitionIfStatusAndAttemptMatch(
+            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
+        )
+        val failed = jobRepository.findById(job.persistedId).orElseThrow()
+
+        jobLifecycleService.retry(failed)
+        jobLifecycleService.retry(failed)
+
+        assertThat(eventPublisher.countOf(DefensePoint.RETRY_CLAIM, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.RETRY_CLAIM, DefenseOutcome.LOST)).isEqualTo(1)
+    }
+
+    @Test
+    fun `이미 처리된 job의 최종 환불은 FINAL_REFUND RACED를 발행한다`() {
+        val organization = organizationRepository.save(Organization("acme", 700L))
+        val job = jobRepository.save(Job.hold(organization.persistedId, 300L, "cat"))
+        jobRepository.transitionIfStatusAndAttemptMatch(
+            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
+        )
+        val failed = jobRepository.findById(job.persistedId).orElseThrow()
+
+        jobLifecycleService.finalRefund(failed)
+        jobLifecycleService.finalRefund(failed)
+
+        assertThat(eventPublisher.countOf(DefensePoint.FINAL_REFUND, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.FINAL_REFUND, DefenseOutcome.RACED)).isEqualTo(1)
     }
 }

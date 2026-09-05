@@ -6,8 +6,10 @@ import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.heartbeat.JobAttempt
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
+import com.example.credit_system_kotlin.job.event.RecoveryDetector
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
+import com.example.credit_system_kotlin.support.RecordingEventPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -36,11 +38,15 @@ class DeadJobRecoveryTaskTest {
 
     private lateinit var task: DeadJobRecoveryTask
 
+    private val eventPublisher = RecordingEventPublisher()
+
     @BeforeEach
     fun setUp() {
+        eventPublisher.clear()
         task = DeadJobRecoveryTask(
             heartbeatRegistry, jobRepository, jobLifecycleService,
-            appProperties(processing = AppProperties.Processing(timeoutSeconds = 60))
+            appProperties(processing = AppProperties.Processing(timeoutSeconds = 60)),
+            eventPublisher
         )
         whenever(heartbeatRegistry.findExpiredAttempts()).thenReturn(emptySet())
     }
@@ -210,5 +216,56 @@ class DeadJobRecoveryTaskTest {
             eq(JobStatus.PROCESSING), any<Instant>(), pageableCaptor.capture()
         )
         assertThat(pageableCaptor.firstValue.pageSize).isEqualTo(100)
+    }
+
+    @Test
+    fun `heartbeat 만료 회수는 HEARTBEAT detector로 JobRecovered를 발행한다`() {
+        whenever(heartbeatRegistry.findExpiredAttempts()).thenReturn(setOf(JobAttempt(60L, 2)))
+        whenever(jobRepository.failIfProcessing(eq(60L), eq(2), any<Instant>())).thenReturn(1)
+
+        task.scan()
+
+        assertThat(eventPublisher.recoveryEvents())
+            .singleElement()
+            .satisfies({
+                assertThat(it.detector).isEqualTo(RecoveryDetector.HEARTBEAT)
+                assertThat(it.jobId).isEqualTo(60L)
+                assertThat(it.attemptNo).isEqualTo(2)
+            })
+    }
+
+    @Test
+    fun `updatedAt 정체 회수는 BACKSTOP detector로 JobRecovered를 발행한다`() {
+        val job = staleProcessingJob(61L)
+        whenever(
+            jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
+                eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
+            )
+        ).thenReturn(listOf(job))
+        whenever(heartbeatRegistry.hasLiveHeartbeat(61L, 0)).thenReturn(false)
+        whenever(jobRepository.failIfProcessing(eq(61L), eq(0), any<Instant>())).thenReturn(1)
+
+        task.scan()
+
+        assertThat(eventPublisher.recoveryEvents())
+            .singleElement()
+            .satisfies({ assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP) })
+    }
+
+    @Test
+    fun `회수 UPDATE가 0행이면 JobRecovered를 발행하지 않는다`() {
+        whenever(heartbeatRegistry.findExpiredAttempts()).thenReturn(setOf(JobAttempt(62L, 0)))
+        val job = staleProcessingJob(63L)
+        whenever(
+            jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
+                eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
+            )
+        ).thenReturn(listOf(job))
+        whenever(heartbeatRegistry.hasLiveHeartbeat(63L, 0)).thenReturn(false)
+        // failIfProcessing 은 스텁하지 않는다 — mock 의 Int 기본값 0이 곧 "회수 실패"다.
+
+        task.scan()
+
+        assertThat(eventPublisher.recoveryEvents()).isEmpty()
     }
 }

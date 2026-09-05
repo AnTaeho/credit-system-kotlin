@@ -1,11 +1,15 @@
 package com.example.credit_system_kotlin.job.service
 
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
+import com.example.credit_system_kotlin.global.event.DefenseTriggered
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -16,7 +20,8 @@ private val log = LoggerFactory.getLogger(JobLifecycleService::class.java)
 class JobLifecycleService(
     private val jobRepository: JobRepository,
     private val organizationRepository: OrganizationRepository,
-    private val ledgerRepository: LedgerRepository
+    private val ledgerRepository: LedgerRepository,
+    private val eventPublisher: ApplicationEventPublisher
 ) {
 
     @Transactional
@@ -25,8 +30,10 @@ class JobLifecycleService(
         val updated = jobRepository.completeIfAttemptMatches(jobId, resultUrl, job.attemptNo, Instant.now())
         if (updated == 0) {
             log.info("이미 무효화된 시도, confirm 무시: jobId={}, attemptNo={}", jobId, job.attemptNo)
+            eventPublisher.publishEvent(DefenseTriggered(DefensePoint.CONFIRM, DefenseOutcome.STALE))
             return
         }
+        eventPublisher.publishEvent(DefenseTriggered(DefensePoint.CONFIRM, DefenseOutcome.APPLIED))
         ledgerRepository.save(LedgerEntry.confirm(job.organizationId, jobId))
         log.info("confirm 완료: jobId={}, attemptNo={}", jobId, job.attemptNo)
     }
@@ -36,8 +43,10 @@ class JobLifecycleService(
         val updated = jobRepository.failIfProcessing(jobId, attemptNo, Instant.now())
         if (updated == 0) {
             log.info("이미 무효화된 시도, 실패 처리 무시: jobId={}, attemptNo={}", jobId, attemptNo)
+            eventPublisher.publishEvent(DefenseTriggered(DefensePoint.MARK_FAILED, DefenseOutcome.STALE))
             return
         }
+        eventPublisher.publishEvent(DefenseTriggered(DefensePoint.MARK_FAILED, DefenseOutcome.APPLIED))
         log.info("실패 처리: jobId={}, attemptNo={}", jobId, attemptNo)
     }
 
@@ -47,8 +56,10 @@ class JobLifecycleService(
         val updated = jobRepository.incrementAttemptForRetry(jobId, job.attemptNo, Instant.now())
         if (updated == 0) {
             log.info("재시도 투입 경쟁에서 밀림 또는 이미 처리됨: jobId={}, attemptNo={}", jobId, job.attemptNo)
+            eventPublisher.publishEvent(DefenseTriggered(DefensePoint.RETRY_CLAIM, DefenseOutcome.LOST))
             return
         }
+        eventPublisher.publishEvent(DefenseTriggered(DefensePoint.RETRY_CLAIM, DefenseOutcome.APPLIED))
         log.info("재시도 투입: jobId={}, newAttemptNo={}", jobId, job.attemptNo + 1)
     }
 
@@ -58,8 +69,10 @@ class JobLifecycleService(
         val updated = jobRepository.refundIfFailed(jobId, job.attemptNo, Instant.now())
         if (updated == 0) {
             log.info("이미 늦은 워커가 처리함, 환불 취소: jobId={}, attemptNo={}", jobId, job.attemptNo)
+            eventPublisher.publishEvent(DefenseTriggered(DefensePoint.FINAL_REFUND, DefenseOutcome.RACED))
             return
         }
+        eventPublisher.publishEvent(DefenseTriggered(DefensePoint.FINAL_REFUND, DefenseOutcome.APPLIED))
 
         val orgUpdated = organizationRepository.addBalance(job.organizationId, job.holdAmount, Instant.now())
         check(orgUpdated == 1) {

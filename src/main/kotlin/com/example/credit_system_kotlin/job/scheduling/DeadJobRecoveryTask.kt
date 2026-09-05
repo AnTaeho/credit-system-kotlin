@@ -5,10 +5,13 @@ import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.heartbeat.JobAttempt
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
+import com.example.credit_system_kotlin.job.event.JobRecovered
+import com.example.credit_system_kotlin.job.event.RecoveryDetector
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
@@ -22,7 +25,8 @@ class DeadJobRecoveryTask(
     private val heartbeatRegistry: HeartbeatRegistry,
     private val jobRepository: JobRepository,
     private val jobLifecycleService: JobLifecycleService,
-    private val appProperties: AppProperties
+    private val appProperties: AppProperties,
+    private val eventPublisher: ApplicationEventPublisher
 ) {
 
     @Scheduled(fixedDelayString = $$"${app.scheduling.dead-job-scan-interval-millis:5000}")
@@ -56,6 +60,9 @@ class DeadJobRecoveryTask(
             val updated = jobRepository.failIfProcessing(attempt.jobId, attempt.attemptNo, Instant.now())
             if (updated == 1) {
                 log.info("heartbeat 만료로 FAILED 전이: jobId={}, attemptNo={}", attempt.jobId, attempt.attemptNo)
+                eventPublisher.publishEvent(
+                    JobRecovered(attempt.jobId, attempt.attemptNo, RecoveryDetector.HEARTBEAT)
+                )
             }
             heartbeatRegistry.removeHeartbeat(attempt.jobId, attempt.attemptNo)
         } catch (e: RuntimeException) {
@@ -84,6 +91,9 @@ class DeadJobRecoveryTask(
             if (updated == 1) {
                 heartbeatRegistry.removeHeartbeat(jobId, job.attemptNo)
                 log.info("PROCESSING 정체 job 회수, FAILED 전이: jobId={}, attemptNo={}", jobId, job.attemptNo)
+                eventPublisher.publishEvent(
+                    JobRecovered(jobId, job.attemptNo, RecoveryDetector.BACKSTOP)
+                )
             }
         } catch (e: RuntimeException) {
             log.warn("PROCESSING 정체 job 회수 실패: jobId={}, attemptNo={}", job.id, job.attemptNo, e)

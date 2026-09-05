@@ -1,6 +1,8 @@
 package com.example.credit_system_kotlin.job.service
 
 import com.example.credit_system_kotlin.global.config.appProperties
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.exception.OrganizationNotFoundException
@@ -10,6 +12,7 @@ import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.organization.domain.Organization
 import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import com.example.credit_system_kotlin.organization.service.OrganizationFinder
+import com.example.credit_system_kotlin.support.RecordingEventPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
@@ -27,10 +30,12 @@ class HoldServiceTest @Autowired constructor(
     private val ledgerRepository: LedgerRepository
 ) {
 
+    private val eventPublisher = RecordingEventPublisher()
+
     private val holdService = HoldService(
         idempotencyKeyRepository, organizationRepository, OrganizationFinder(organizationRepository),
         jobRepository, ledgerRepository,
-        appProperties()
+        appProperties(), eventPublisher
     )
 
     /**
@@ -43,6 +48,7 @@ class HoldServiceTest @Autowired constructor(
     @BeforeEach
     fun setUp() {
         organization = organizationRepository.save(Organization("acme", 1000L))
+        eventPublisher.clear()
     }
 
     @Test
@@ -128,5 +134,33 @@ class HoldServiceTest @Autowired constructor(
 
         assertThat(jobRepository.count()).isZero()
         assertThat(ledgerRepository.count()).isZero()
+    }
+
+    @Test
+    fun `정상 hold는 HOLD_BALANCE APPLIED를 발행한다`() {
+        holdService.requestGeneration(organization.persistedId, "key-1", "a cat")
+
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.REJECTED)).isZero()
+    }
+
+    @Test
+    fun `잔액이 부족하면 HOLD_BALANCE REJECTED를 발행하고 예외를 던진다`() {
+        val poor = organizationRepository.save(Organization("poor", 50L))
+
+        assertThatThrownBy { holdService.requestGeneration(poor.persistedId, "key-2", "a cat") }
+            .isInstanceOf(InsufficientBalanceException::class.java)
+
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.REJECTED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isZero()
+    }
+
+    @Test
+    fun `같은 idemKey로 재요청하면 IDEM_KEY APP_HIT를 발행한다`() {
+        holdService.requestGeneration(organization.persistedId, "key-1", "a cat")
+        holdService.requestGeneration(organization.persistedId, "key-1", "a cat")
+
+        assertThat(eventPublisher.countOf(DefensePoint.IDEM_KEY, DefenseOutcome.APP_HIT)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isEqualTo(1)
     }
 }

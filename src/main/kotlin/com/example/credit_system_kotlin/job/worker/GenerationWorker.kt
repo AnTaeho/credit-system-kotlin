@@ -1,12 +1,16 @@
 package com.example.credit_system_kotlin.job.worker
 
 import com.example.credit_system_kotlin.global.config.WorkerProperties
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
+import com.example.credit_system_kotlin.global.event.DefenseTriggered
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.core.task.TaskExecutor
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
@@ -21,6 +25,7 @@ class GenerationWorker(
     private val jobRepository: JobRepository,
     private val jobProcessor: GenerationJobProcessor,
     @Qualifier("generationWorkerExecutor") private val workerExecutor: TaskExecutor,
+    private val eventPublisher: ApplicationEventPublisher,
     workerProperties: WorkerProperties
 ) {
 
@@ -46,8 +51,10 @@ class GenerationWorker(
             )
             if (updated == 0) {
                 log.info("다른 워커가 선점했거나 무효한 작업 무시: jobId={}, attemptNo={}", job.persistedId, job.attemptNo)
+                eventPublisher.publishEvent(DefenseTriggered(DefensePoint.WORKER_CLAIM, DefenseOutcome.LOST))
                 false
             } else {
+                eventPublisher.publishEvent(DefenseTriggered(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED))
                 true
             }
         } catch (e: RuntimeException) {
