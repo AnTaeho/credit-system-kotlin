@@ -26,7 +26,7 @@ L3 이 특히 서버 지표로 대체 불가능하다. attemptNo 가 낡은 세�
 | 3 | 상태 스냅샷 게이지 — 미결 hold 의 건수·금액·나이와 불변식 3종을 주기적으로 찍는다 | L0·L1 | 완료 |
 | 4 | 노출 경계와 카디널리티 가드 — 관리 포트 분리, `/actuator/prometheus` 를 누구에게 열지, 레지스트리 수준의 시계열 상한 | — | 완료 |
 | 5 | docker-compose 관측 스택 — Prometheus + Grafana 를 띄워 스크레이프·대시보드·알람 규칙(P1/P2)을 코드로 남긴다 | — | 완료 |
-| 6 | 장애 주입 — 워커·스케줄러·Redis 를 실제로 죽이고 원장을 손으로 깨서, 어느 지표가 반응하고 어느 지표가 침묵하는지 확인한다 | — | 예정 |
+| 6 | 장애 주입 — 워커·스케줄러·Redis 를 실제로 죽이고 원장을 손으로 깨서, 어느 지표가 반응하고 어느 지표가 침묵하는지 확인한다 | — | 완료 |
 
 ---
 
@@ -1510,6 +1510,503 @@ NAME   IMAGE   COMMAND   SERVICE   CREATED   STATUS   PORTS
 
 ---
 
+## 6단계 — 장애 주입
+
+여기까지 이 문서가 쓴 문장은 대부분 **주장**이었다. "워커가 죽으면 `oldest_pending_age` 가 오른다", "Redis 가 새면 `backstop` 이 오른다", "원장이 깨지면 `mismatch` 가 1 이 된다". 전부 코드를 읽고 낸 결론이고, 한 번도 확인한 적이 없다. 5단계는 규칙 10개가 **로드된다**는 것까지만 확인했다 — 문법이 맞고 `inactive` 라는 것. 규칙이 **옳은지**는 모른다.
+
+6단계는 사고를 실제로 심는다. 워커를 죽이고, 스케줄러를 끄고, Redis 를 내리고, 원장을 SQL 로 깨고, 같은 요청을 100건 동시에 던지고, 외부 API 를 영원히 안 돌아오게 만든다. 그리고 매번 세 가지를 잰다 — **어느 지표가 반응했나, 어느 지표가 침묵했나, 감지까지 몇 초 걸렸나.** 앞 챕터들이 TPS 와 P99 로 증명한 것과 같은 방식이다. 숫자가 없으면 주장이다.
+
+**침묵 쪽이 더 중요하다.** 3번(워커 정지)과 7번(외부 API 무한 지연) 시나리오에서는 HTTP 5xx 가 0, `up` 이 1, CPU 가 8.65%, 2단계의 방어 카운터 열넷이 전부 정지한 채로 사고가 진행된다. 인프라 대시보드를 아무리 들여다봐도 그 화면에서는 아무 일도 일어나지 않는다. 이 두 장면이 이 챕터 전체가 존재하는 이유고, 그래서 각 시나리오마다 **침묵해야 할 지표 목록**을 반응해야 할 지표 목록과 같은 비중으로 검증한다.
+
+### 파일별 변경 목록
+
+| 파일 | 변경 |
+|---|---|
+| `deploy/observability/docker-compose.yml` | `APP_SCHEDULING_ENABLED`·`APP_WORKER_ENABLED`·`APP_STUB_*` 5개 env 통과 추가. 기본값은 `application.yml` 과 같다 |
+| `deploy/observability/prometheus/rules/credit.rules.yml` | `CreditSnapshotStale`·`CreditReconciliationStale` 수정 — `or (x < 0)` 추가, `for: 1m`. **장애 주입이 찾은 구멍이다** |
+| `deploy/observability/scenarios/lib.sh` | 공용 함수 — `prom`/`alerts`/`wait_until`/`fresh_stack`/`restart_app_with`/`kill_app`/`report` |
+| `deploy/observability/scenarios/01`~`07-*.sh` | 시나리오 7개. 각각 독립 실행 가능하고 끝에 기대 vs 관측 표를 낸다 |
+| `deploy/observability/scenarios/run-all.sh` | 7개를 순서대로 돌리고 마지막에 `down -v` |
+| `deploy/observability/README.md` | 시나리오 실행법 한 절 |
+
+**애플리케이션 코드는 한 줄도 건드리지 않았다.** `git diff --stat -- src` 가 비어 있다. 사고를 심는 손잡이는 전부 이미 있던 설정(`app.worker.enabled`, `app.scheduling.enabled`, `app.stub.*`)이고, compose 가 그걸 env 로 통과시켜 줄 뿐이다.
+
+### 사고를 심는 방법 — 손잡이가 이미 있었다
+
+```yaml
+      APP_SCHEDULING_ENABLED: ${APP_SCHEDULING_ENABLED:-true}
+      APP_WORKER_ENABLED: ${APP_WORKER_ENABLED:-true}
+      APP_STUB_FAILURE_RATE: ${APP_STUB_FAILURE_RATE:-0.3}
+      APP_STUB_MIN_DELAY_MILLIS: ${APP_STUB_MIN_DELAY_MILLIS:-3000}
+      APP_STUB_MAX_DELAY_MILLIS: ${APP_STUB_MAX_DELAY_MILLIS:-7000}
+```
+
+Spring 의 relaxed binding 이 `APP_WORKER_ENABLED` 를 `app.worker.enabled` 로 받는다. `${VAR:-기본값}` 형태라 아무것도 지정하지 않으면 5단계까지와 완전히 같은 스택이 뜬다 — **장애 주입 장치가 평상시 동작을 바꾸지 않는 것**이 조건이었다.
+
+한 가지 제약이 있다. `GenerationWorker` 는 `@ConditionalOnExpression`, 스케줄러·스냅샷·대사 태스크는 `@ConditionalOnProperty` 로 걸려 있다. **이건 빈 등록 시점의 판정이라 런타임에 끌 수 없다.** 워커만 죽이려면 프로세스를 다시 띄워야 하고, 그래서 `restart_app_with` 는 `docker compose up -d --force-recreate app` 을 한다. 부수 효과로 **모든 카운터가 0 으로 리셋된다**(Micrometer 카운터는 프로세스 메모리에 산다). 각 시나리오는 재기동 이후에 기준선을 잡는다.
+
+`@ConditionalOnExpression("${app.scheduling.enabled:true} and ${app.worker.enabled:true}")` 때문에 **스케줄러를 끄면 워커도 같이 사라진다.** 4번 시나리오가 3번보다 강한 사고인 이유다.
+
+### 실측 방법
+
+```bash
+# wait_until "설명" 타임아웃초 'shell 조건'
+#   조건이 참이 될 때까지 2초 간격으로 폴링하고 걸린 초를 출력한다.
+#   이 초가 곧 감지 지연 실측값이다.
+wait_until "recovery{heartbeat} >= 1" 120 \
+  '[ "$(prom_num "credit_job_recovery_total{detector=\"heartbeat\"}")" != "0" ]'
+```
+
+감지 지연은 사람이 스톱워치를 누르는 것이 아니라 **Prometheus 에 그 값이 실제로 보이기까지**를 잰다. 즉 도메인 주기(스냅샷 15초 / 대사 60초 / 회수 스캔 5초) + 스크레이프 지연(최대 5초) + 알람 `for` 가 전부 포함된 숫자다. 운영자가 실제로 알게 되는 시각이 그거라서 그렇게 쟀다.
+### 결과 매트릭스
+
+아래는 `run-all.sh` 한 번의 실행에서 나온 값이다. 감지 초는 **사고를 심은 시각부터 Prometheus 에 그 값이 보일 때까지**, 알람 초는 거기서 `firing` 이 될 때까지 더 걸린 시간이다.
+
+| # | 심은 사고 | 반응한 지표 (값 / 감지) | fire 된 알람 | 침묵한 지표 |
+|---|---|---|---|---|
+| 1 | PROCESSING 중 SIGKILL → 즉시 재기동 | `recovery{heartbeat}` **3** / SIGKILL 후 **11초**, 재기동 후 6초. `oldest_pending_age` 6 → 0 | 없음 (회수가 알람 임계 전에 끝났다) | `recovery{backstop}` 0, 불변식 4종 0, 5xx 0 |
+| 2 A | 앱 SIGKILL + Redis 컨테이너/익명 볼륨 교체 | `recovery{backstop}` **3** / SIGKILL 후 **70초**, 재기동 후 60초 | `CreditBackstopRecovery` (+4초) | **`recovery{heartbeat}` 0** — 잡을 엔트리가 사라졌다. 불변식 4종 0 |
+| 2 B | 앱 생존, Redis 90초 정지 (PROCESSING 3건 심음) | **아무것도 반응하지 않았다.** 로그만: 단계 ERROR 7회, 항목 WARN 21회 | 없음 | **`recovery{heartbeat}` 0 AND `recovery{backstop}` 0** ← 설계 결함. Redis 복구 2초 후 backstop 3 |
+| 3 | 워커만 정지 (`APP_WORKER_ENABLED=false`) | `outstanding_count` **5**, `amount` **500**, `oldest_pending_age` 13→374 단조 증가 | `CreditPipelineStalled` / job 생성 후 **385초** | 방어 카운터 14종 중 사고 관련 **전부 0**(`worker_claim` 0, `confirm` 0), `recovery` 0, 5xx 0, `up` 1, 불변식 0 |
+| 4 (수정 전) | 스케줄러 정지 (`APP_SCHEDULING_ENABLED=false`) | 없음. staleness 두 개가 **-1 에 고정** | **없음 — 2분 동안 하나도 안 울렸다** | `oldest_pending_age` **0 에 얼어붙음**(DB 실제 121초), `outstanding_count` 0(실제 3) |
+| 4 (수정 후) | 같은 사고 | staleness 두 개 -1 | `CreditSnapshotStale` + `CreditReconciliationStale` / 재기동 후 **76초** | 위와 동일 |
+| 5 (a) | `balance = balance - 1` | `ledger_reconciliation_mismatch` 0 → **1** / **25초** | `CreditLedgerReconciliationMismatch` (+6초) | 방어 카운터 합 31 → **31**(증가 0), `up` 1, 5xx 0 |
+| 5 (b) | `balance = -1` | `invariant_negative_balance_orgs` 0 → **1** / **11초** | `CreditNegativeBalanceOrgs` (+0초) | 같음 |
+| 5 (c) | HOLD 원장 1행 DELETE | `invariant_jobs_without_hold` 0 → **1** / **14초** | `CreditJobsWithoutHold` (+0초) | `unsettled_terminal_jobs` 0 (CONFIRM 은 남아 있다) |
+| 5 원복 | 전부 되돌림 | 불변식 3종 14초, mismatch 14초 만에 0 복귀 | 전부 resolve (+0초) | — |
+| 6 | 같은 idemKey 100건 동시 | `idem_key{app_hit}` **90** + `{db_unique}` **9** = **99**, `hold_balance{applied}` **+1**, 잔액 정확히 **-100** | 없음 | `hold_balance{rejected}` 0, 불변식 4종 0 |
+| 7 | 스텁 지연 600초 | `oldest_pending_age` 28→373 단조 증가, `outstanding_count` 3 | `CreditPipelineStalled` / job 생성 후 **379초** | **`recovery{heartbeat}` 0 AND `{backstop}` 0(옳다)**, `confirm` 0, `mark_failed` 0, `worker_claim` **정확히 3**, 5xx 0, CPU 8.65%, `up` 1 |
+
+**기대와 달랐던 것 넷.**
+
+1. **2 A 에서 `docker compose restart redis` 로는 ZSET 이 안 지워졌다.** `redis:7` 이 종료 시 RDB 를 저장하고, 그 `/data` 가 이미지의 `VOLUME` 선언 때문에 익명 볼륨에 붙어 있어서 `--force-recreate` 로도 남는다. `--renew-anon-volumes` 까지 줘야 지워졌다. 5단계 문서의 "명명 볼륨이 없으니 데이터가 휘발된다"는 문장이 Redis 에 대해서는 틀렸다.
+2. **4번에서 알람이 하나도 안 울렸다.** 예상은 `CreditSnapshotStale` 이 45초 뒤 울리는 것이었다. staleness 초깃값이 -1 이라 `> 45` 가 영원히 거짓이다. **규칙을 고쳤다.**
+3. **1번에서 `retry_claim/applied 6` 인데 `mark_failed/applied 3` 이었다.** heartbeat 회수는 `mark_failed` 를 거치지 않고 `failIfProcessing` 을 직접 부르기 때문이다. 재시도 횟수를 `mark_failed` 로 세면 크래시로 인한 재시도를 놓친다.
+4. **6번에서 `db_unique` 9건이 200 이 아니라 409 를 받았다.** 유니크 위반이 트랜잭션 밖으로 나온 뒤 `GlobalExceptionHandler` 에서 `DUPLICATE_IN_PROGRESS` 로 변환되는 설계대로의 동작이다. 멱등성이 "항상 같은 응답"이 아니라 "부작용이 한 번만"으로 구현돼 있다는 뜻이고, 카운터 두 개가 그 경계를 보여준다.
+
+### 시나리오별 상세
+#### 1번 — 워커 크래시 (`01-worker-crash.sh`)
+
+```
+# job 6건 → PROCESSING 확인 → SIGKILL → 즉시 재기동
+create_jobs 6
+docker compose -f deploy/observability/docker-compose.yml kill -s SIGKILL app
+docker compose -f deploy/observability/docker-compose.yml start app
+```
+
+```
+   T+0    job 6건 생성
+   T+3    PROCESSING = 1:0,2:0,3:0  (전체: HOLDING=3 PROCESSING=3)
+   T+3    앱 SIGKILL
+   T+8    앱 UP — 크래시로부터 5초
+   T+14   heartbeat 회수 감지 — 앱 UP 이후 6초 / SIGKILL 이후 11초
+   T+14   회수 직후 지표: recovery{heartbeat}=3 backstop=0 oldest_pending_age=6
+   T+39   전부 종결 — COMPLETED=6, 잔액 9400
+```
+
+**SIGKILL 부터 회수까지 11초.** heartbeat timeout 이 10초이므로 이론적 하한에 거의 붙었다. 앱이 죽어 있는 동안에도 Redis 의 만료 시각은 흐르고 있어서, 재기동한 앱의 첫 스캔이 그 자리에서 세 건을 다 집어냈다.
+
+`backstop` 은 0 이다. 이게 정상이다 — 백스톱은 `updatedAt` 이 60초 넘게 안 움직인 PROCESSING 을 잡는데, heartbeat 가 11초 만에 처리했으므로 60초에 닿을 일이 없다. **두 탐지기의 순서가 실측으로 확인된 셈이다.**
+
+`retry_claim/applied 6` 인데 `mark_failed/applied 3` 이다. 6 = heartbeat 로 회수된 3건 + 스텁이 실패시킨 3건이고, `mark_failed` 3 은 뒤쪽만 센 것이다. **heartbeat 회수는 `mark_failed` 를 거치지 않고 `failIfProcessing` 을 직접 부르기 때문**이다. 재시도 횟수를 `mark_failed` 로 세면 크래시로 인한 재시도를 빠뜨린다.
+
+`hold_balance/applied 0` 도 눈여겨볼 값이다. hold 는 재기동 **전에** 다 잡혔고 카운터는 프로세스와 함께 죽었다. 사고 조사에서 절대값을 믿으면 안 되는 이유가 이거다.
+
+#### 2번 — heartbeat 소실 (`02-heartbeat-lost.sh`)
+
+**A. ZSET 을 날린다.**
+
+```
+create_jobs 4                        # PROCESSING 3건 확보
+docker compose kill -s SIGKILL app
+docker compose up -d --force-recreate --renew-anon-volumes redis
+docker compose start app
+```
+
+`--renew-anon-volumes` 가 필요했던 것이 첫 번째 예상 밖이다. 처음에는 `docker compose restart redis` 로 썼는데 ZSET 이 그대로 3개였다. 두 겹의 이유가 있었다.
+
+1. `redis:7` 은 SIGTERM 을 받으면 RDB 를 `/data` 에 저장하고, 재기동 때 그대로 로드한다.
+2. 그 `/data` 는 이미지가 `VOLUME` 으로 선언한 경로여서 Docker 가 **익명 볼륨**을 만들어 붙인다. `--force-recreate` 로 컨테이너를 새로 만들어도 익명 볼륨은 물려받는다.
+
+5단계 문서에 "명명 볼륨을 두지 않았으니 데이터가 휘발된다"고 썼는데, **Redis 에 대해서는 그 문장이 틀렸다.** 익명 볼륨까지 갈아엎어야 비로소 기억을 잃는다.
+
+```
+   T+0    Redis ZSET: 3 개
+   T+0    앱 SIGKILL
+   T+4    Redis ZSET: 0 개 (소실 확인)
+   T+10   앱 UP — SIGKILL 이후 10초
+   T+70   backstop 회수 감지 — 앱 UP 이후 60초 (backstop=3, heartbeat=0)
+   T+74   firing 알람: [CreditBackstopRecovery]
+```
+
+**heartbeat 는 0, backstop 이 3.** 1번 시나리오와 정확히 반대다. 탐지기가 잡을 엔트리 자체가 사라졌으므로 `findExpiredAttempts` 는 빈 집합을 돌려주고, 아무 일도 없었다는 듯이 지나간다. 회수는 `updatedAt` 이 60초를 넘긴 뒤에야 일어났고, **1번의 11초 대비 여섯 배 가까이 느리다.** 이 차이가 `CreditBackstopRecovery` 를 P2 알람으로 둔 이유다 — 백스톱이 도는 것은 결과적으로 복구가 됐다는 뜻이면서 동시에 **탐지가 여섯 배 느려졌다**는 뜻이다.
+
+**B. Redis 가 죽어 있는 동안.** 여기가 이 시나리오의 본론이다.
+
+```
+restart_app_with APP_WORKER_ENABLED=false          # 회수 경로만 남긴다
+create_jobs 3
+UPDATE jobs SET status='PROCESSING', updated_at = NOW(6) - INTERVAL 120 SECOND WHERE status='HOLDING';
+docker compose stop redis                          # 90초
+```
+
+```
+   T+8    PROCESSING 행 3건을 updated_at=120초 전으로 심었다 (백스톱 대상)
+   T+8    Redis 정지
+   T+19   backstop=0 heartbeat=0 PROCESSING=3
+   ... (10초 간격으로 9회, 전부 같은 값)
+   T+100  backstop=0 heartbeat=0 PROCESSING=3
+   T+101  로그 'heartbeat 만료 회수 단계 실패' 7회 / 'PROCESSING 정체 job 회수 실패' 21회
+   T+101  Redis 재시작
+   T+103  Redis 복구 2초 만에 backstop=3
+```
+
+**회수 대상이 눈앞에 세 건 있는데 90초 동안 한 건도 회수하지 못했다.** 로그 수가 정확히 맞아떨어진다 — 회수 주기 7번 × job 3건 = WARN 21회. 매 주기마다 세 건을 전부 시도했고 전부 예외로 끝났다.
+
+```
+WARN c.e.c.j.scheduling.DeadJobRecoveryTask : PROCESSING 정체 job 회수 실패: jobId=6, attemptNo=0
+```
+
+그리고 Redis 를 되살리자 **2초** 만에 3건이 회수됐다. 심어 둔 행은 처음부터 유효한 회수 대상이었다는 뜻이고, 막고 있던 것은 오직 Redis 였다는 뜻이다.
+
+90초 동안 `credit_job_recovery_total` 은 두 라벨 모두 0 이었다. **지표만 보는 사람에게 이 90초는 "회수할 것이 없는 평온한 시간"과 똑같이 생겼다.** 자세한 것은 아래 "장애 주입이 찾은 것"에 적는다.
+#### 3번 — 워커 정지 (`03-worker-stopped.sh`)
+
+```
+restart_app_with APP_WORKER_ENABLED=false   # API·스케줄러·회수는 그대로 산다
+create_jobs 5
+```
+
+```
+   T+30   count=5 amount=500 age=13  pending알람=[ ]                     firing=[ ]
+   T+121  count=5 amount=500 age=103 pending알람=[ ]                     firing=[ ]
+   T+211  count=5 amount=500 age=209 pending알람=[ ]                     firing=[ ]
+   T+302  count=5 amount=500 age=299 pending알람=[ ]                     firing=[ ]
+   T+332  count=5 amount=500 age=329 pending알람=[CreditPipelineStalled] firing=[ ]
+   T+385  CreditPipelineStalled firing — job 생성 이후 385초
+```
+
+**곡선이 이보다 깨끗할 수 없다.** `age` 가 30초마다 30씩 오르고 `count` 는 5에 고정이다. 300초를 넘긴 T+332 에 알람이 `pending` 으로 들어가고, `for: 1m` 을 채운 T+385 에 `firing` 이 됐다. 실측 385초 = 임계 300초 + 유예 60초 + 스냅샷/스크레이프 지연 25초. **설계값과 실측이 25초 안에 맞는다.**
+
+같은 시각의 침묵 쪽이 이 시나리오의 본론이다.
+
+```
+     credit_defense_total{point=worker_claim, outcome=applied} 0
+     credit_defense_total{point=confirm,      outcome=applied} 0
+     credit_defense_total{point=mark_failed,  outcome=applied} 0
+     credit_defense_total{point=retry_claim,  outcome=applied} 0
+     credit_job_recovery_total{detector=heartbeat} 0
+     credit_job_recovery_total{detector=backstop}  0
+     invariant negative=0 jobs_without_hold=0 unsettled=0 mismatch=0
+     up=1  5xx=0
+```
+
+2단계가 만든 카운터 열넷 중 움직인 것은 `hold_balance/applied 5` 하나뿐이고, 그건 job **생성** 때 오른 것이라 사고와 무관하다. **사고가 6분 넘게 진행되는 동안 방어 카운터는 트래픽이 없는 새벽 시간대와 구분되지 않았다.** 불변식 넷도 전부 0 이다 — 돈이 잘못된 것이 아니라 **아무 일도 일어나지 않고 있을 뿐**이므로 당연하다. 등식은 여전히 참이다.
+
+`up` 은 1 이고 5xx 는 0 이다. API 는 계속 200 을 돌려주고 있었다. **인프라 대시보드에서 이 6분은 완벽하게 건강하다.**
+
+3단계 문서가 "`oldest_pending_age` 는 원리상 카운터로 만들 수 없다 — 일어나지 않은 일에는 증가시킬 지점이 없다"고 쓴 문장이 여기서 실측으로 바뀐다. 카운터 열넷이 전부 0 인 화면과 게이지 하나가 385초까지 오른 화면이 같은 시각의 같은 시스템이다.
+#### 4번 — 스케줄러 정지 (`04-scheduler-stopped.sh`)
+
+```
+restart_app_with APP_SCHEDULING_ENABLED=false
+create_jobs 3
+```
+
+`@ConditionalOnExpression("${app.scheduling.enabled:true} and ${app.worker.enabled:true}")` 때문에 **워커까지 같이 사라진다.** 스냅샷·대사·회수·워커가 한꺼번에 없어지는, 3번보다 한 단계 위의 사고다.
+
+**규칙 수정 전 — 2분 동안 알람이 하나도 울리지 않았다.**
+
+```
+     CreditSnapshotStale        expr=credit_snapshot_staleness_seconds > 45   for=0s
+     CreditReconciliationStale  expr=credit_ledger_reconciliation_staleness_seconds > 180  for=0s
+
+   T+16   snapshot_staleness=-1 recon_staleness=-1 age=0 count=0 firing=[ ]
+   T+31   snapshot_staleness=-1 recon_staleness=-1 age=0 count=0 firing=[ ]
+   ...
+   T+122  snapshot_staleness=-1 recon_staleness=-1 age=0 count=0 firing=[ ]
+```
+
+**규칙 수정 후 — 같은 사고, 76초 만에 두 개가 firing.**
+
+```
+     CreditSnapshotStale        expr=(credit_snapshot_staleness_seconds > 45) or (credit_snapshot_staleness_seconds < 0)   for=60s
+     CreditReconciliationStale  expr=(... > 180) or (... < 0)                                                             for=60s
+
+   T+61   snapshot_staleness=-1 ... firing=[ ]
+   T+76   snapshot_staleness=-1 ... firing=[CreditReconciliationStale CreditSnapshotStale]
+```
+
+76초 = `for: 60s` + 평가 주기와 기동 시간 16초. 자세한 것은 아래 "장애 주입이 찾은 것"에 적는다.
+
+**게이지가 얼어붙는다는 것이 무슨 뜻인지가 이 시나리오의 나머지 절반이다.**
+
+```
+   게이지 oldest_pending_age = 0초  /  DB 실제 미결 나이 = 121초
+   게이지 outstanding_count  = 0    /  DB 실제 미결      = 3
+   snapshot_cycles_total = 0
+```
+
+**대시보드는 "미결 0건, 최고 나이 0초"를 그리고 있었다.** 실제로는 3건이 121초째 묶여 있었다. 3번 시나리오에서는 같은 게이지가 사고를 잡아냈는데, 4번에서는 그 게이지가 사고의 일부가 됐다 — **게이지를 갱신하는 주체가 사고에 같이 죽었기 때문**이다. 이게 5단계에서 "4행(메타)이 나머지 세 행의 초록을 두 가지로 구분한다"고 쓴 것의 실물이다. 정말 정상인가, 지표가 얼어붙었나. 그 판단은 오직 staleness 만 할 수 있고, staleness 규칙이 틀리면 아무도 못 한다.
+#### 5번 — 원장 훼손 (`05-ledger-corruption.sh`)
+
+앞의 넷은 프로세스를 죽였다. 이번에는 **아무것도 죽이지 않고 데이터만 깬다.** job 5건이 정상적으로 끝난 뒤(COMPLETED 4, REFUNDED 1, 잔액 9600) DB 에 직접 세 가지를 심는다.
+
+```sql
+-- (a) 원장 없이 1 크레딧을 증발시킨다
+UPDATE organizations SET balance = balance - 1 WHERE id = 1;
+-- (b) 잔액 가드가 뚫린 상태를 만든다
+UPDATE organizations SET balance = -1 WHERE id = 1;
+-- (c) 어떤 job 의 HOLD 원장을 지운다 — 돈을 안 묶고 처리된 job 이 된다
+DELETE FROM ledger_entries WHERE type = 'HOLD' AND job_id = 1;
+```
+
+| 훼손 | 반응한 지표 | 감지 | fire 된 알람 |
+|---|---|---|---|
+| (a) balance −1 | `credit_ledger_reconciliation_mismatch` 0 → **1** | **25초** | `CreditLedgerReconciliationMismatch` (+6초) |
+| (b) balance = −1 | `credit_invariant_negative_balance_orgs` 0 → **1** | **11초** | `CreditNegativeBalanceOrgs` (+0초) |
+| (c) HOLD 1행 삭제 | `credit_invariant_jobs_without_hold` 0 → **1** | **14초** | `CreditJobsWithoutHold` (+0초) |
+
+감지 시간이 셋 다 그 지표를 만드는 주기와 정확히 일치한다. (a)는 대사 주기 60초의 한복판에 떨어져 25초, (b)(c)는 스냅샷 주기 15초 안쪽이라 11·14초다. **주기가 곧 감지 지연의 상한이라는 것이 실측으로 확인된다** — (a)를 15초 안에 잡고 싶으면 대사 주기를 줄이는 것 외에 방법이 없고, 그건 전체 스캔 쿼리의 비용과 맞바꾸는 결정이다.
+
+`unsettled_terminal_jobs` 만 0 으로 남았다. (c)로 지운 것은 HOLD 이고 CONFIRM 은 그대로 있어서, "종결됐는데 정산 원장이 없다"는 조건에는 걸리지 않는다. **네 불변식이 서로 다른 것을 재고 있다는 증거**이고, 하나로 합치면 안 되는 이유다.
+
+침묵 쪽:
+
+```
+     credit_job_recovery_total{detector=heartbeat} 0
+     credit_job_recovery_total{detector=backstop}  0
+     up=1  5xx=0
+   방어 카운터 합 (훼손 전 → 후)   31 → 31
+```
+
+**방어 카운터 열넷의 합이 31 에서 31 로, 정확히 하나도 움직이지 않았다.** 당연하다 — 방어 장치는 조건부 UPDATE 를 통과하지 못한 쓰기를 세는데, 여기서는 SQL 이 그 장치를 우회해서 들어갔다. 애플리케이션은 이 세 사건을 **겪지 않았다.** 겪지 않은 일은 셀 수 없다.
+
+그래서 이 사고에는 **주기적으로 등식을 확인하는 장치가 반드시 따로 있어야 한다.** 2단계의 카운터(사건 기반)와 1·3단계의 게이지(상태 기반)를 둘 다 만든 이유가 여기서 갈린다. 이벤트 기반 관측만으로는 이 화면을 절대 만들 수 없다.
+
+**원복까지 확인했다.**
+
+```
+   T+0    HOLD 원장 재삽입 + balance=9600 복구
+   [ 14s] 불변식 3종이 전부 0 — 참
+   [ 14s] mismatch 가 0 — 참
+   [  0s] firing 알람 0개 — 참
+```
+
+알람이 뜨는 것만큼 **꺼지는 것**도 확인 항목이다. 게이지 기반 알람은 상태가 돌아오면 스스로 resolve 되어야 하고(카운터 기반인 `CreditBackstopRecovery` 는 `increase(...[10m])` 이라 10분을 기다려야 한다), 실제로 그렇게 동작했다.
+#### 6번 — 중복 폭풍 (`06-duplicate-storm.sh`)
+
+```
+seq 1 100 | xargs -P 100 -I{} curl -s -X POST localhost:8080/api/jobs \
+  -H 'X-Organization-Id: 1' -H 'Content-Type: application/json' \
+  -d '{"idemKey":"storm-...","prompt":"duplicate storm"}'
+```
+
+같은 idemKey 로 100건을 진짜 동시에 던진다. 클라이언트 재시도 폭주나 버튼 연타의 극단이다.
+
+```
+     HTTP   91 200
+     HTTP    9 409
+   잔액 20000 → 19900 (차이 100)
+   job 행 1건, HOLD 원장 1건
+
+     credit_defense_total{point=idem_key,     outcome=app_hit}   90
+     credit_defense_total{point=idem_key,     outcome=db_unique}  9
+     credit_defense_total{point=hold_balance, outcome=applied}    1
+     credit_defense_total{point=hold_balance, outcome=rejected}   0
+```
+
+**90 + 9 = 99.** 100건 중 하나만 job 을 만들었고 나머지 99건은 전부 막혔다. 잔액은 정확히 100 만 줄었고, job 행도 HOLD 원장도 1건씩이다. 두 번 돌려도 90/9 로 같았다.
+
+이 시나리오의 값은 **`app_hit` 과 `db_unique` 의 비율**에 있다. 2단계 문서가 "이 두 쌍은 비율 자체가 신호"라고 쓴 것이 여기서 숫자가 된다.
+
+- `app_hit 90` — 애플리케이션 레벨 조회에서 이미 있는 것을 발견해 막았다. 값싼 방어다.
+- `db_unique 9` — **애플리케이션 조회를 통과한 9건**이 유니크 제약에서 부딪혔다. 조회와 INSERT 사이의 창에 다른 요청이 들어온 경우다.
+
+정상 트래픽에서는 `db_unique` 가 0 이었다(5단계 smoke, 1~5번 시나리오 전부). 이 카운터가 오르는 것은 **동시성이 애플리케이션 레벨 체크의 창을 실제로 뚫고 있다**는 뜻이고, 그 비율이 커지면 낙관적 체크만으로는 부족하다는 신호다. 100건 동시에서 9%였다.
+
+`db_unique` 9건이 받은 응답은 200(duplicate=true)이 아니라 **409 `DUPLICATE_IN_PROGRESS`** 다. 설계대로다 — 유니크 위반은 `@Transactional` 밖으로 나온 뒤 `GlobalExceptionHandler` 가 잡으므로 이미 롤백이 끝난 시점이고, 그 자리에서 "성공"인 척할 수 없다. 클라이언트는 재시도하면 되고, 그때는 `app_hit` 경로로 200 을 받는다. **멱등성이 "항상 같은 응답"이 아니라 "부작용이 한 번만"으로 구현돼 있다는 사실이 카운터 두 개로 드러난다.**
+
+`hold_balance/rejected` 는 0 이다. 잔액이 충분했으므로 이 폭풍은 돈 방어선까지 가지도 않았다. 불변식 넷도 전부 0 — 100건이 동시에 부딪혔는데 등식은 한 번도 깨지지 않았다.
+#### 7번 — 외부 생성 API 무한 지연 (`07-external-api-hang.sh`)
+
+```
+restart_app_with APP_STUB_MIN_DELAY_MILLIS=600000 APP_STUB_MAX_DELAY_MILLIS=600000
+create_jobs 3
+```
+
+워커는 살아 있고, job 을 정상적으로 선점했고, heartbeat 도 5초마다 정확히 갱신하고 있다. 그저 외부 API 가 돌아오지 않는다.
+
+```
+   T+30   age=28  count=3 hb=0 bs=0 zset=3 firing=[ ]
+   T+121  age=118 count=3 hb=0 bs=0 zset=3 firing=[ ]
+   T+212  age=208 count=3 hb=0 bs=0 zset=3 firing=[ ]
+   T+302  age=298 count=3 hb=0 bs=0 zset=3 firing=[ ]
+   T+363  age=358 count=3 hb=0 bs=0 zset=3 firing=[ ]
+   T+379  CreditPipelineStalled firing — job 생성 이후 379초
+
+   DB: PROCESSING=3  |  Redis heartbeats ZSET: 3 개
+   observability-app-1  CPU 8.65%  MEM 17.49%
+```
+
+**`zset=3` 이 6분 내내 유지된다.** 이게 이 시나리오의 핵심이다. 회수 장치는 두 탐지기 모두 조용한데, **그게 옳다.** heartbeat 가 살아 있다는 것은 이 job 의 소유자가 살아 있다는 뜻이고, 소유자가 살아 있는 job 을 회수하면 같은 요청을 두 번 처리하게 된다. `recovery{heartbeat}=0`, `recovery{backstop}=0` 은 회수 장치가 **정확히 설계대로 판단한 결과**다.
+
+`markStalledJobsAsFailed` 는 60초가 지난 T+60 이후 매 5초마다 이 세 건을 후보로 집어 올렸고, `hasLiveHeartbeat` 가 매번 `true` 를 돌려줘 그냥 넘어갔다. **2번 시나리오 B 와 정확히 같은 코드 경로인데 결과가 반대다** — 거기서는 이 호출이 예외를 던져 넘어갔고, 여기서는 참을 돌려줘서 넘어갔다. 지표만 보면 두 상황이 **똑같이 0** 이다. 이 두 시나리오를 나란히 놓는 것이 "회수 시도 실패 카운터가 필요하다"는 결론의 근거다.
+
+침묵의 목록이 이 시스템에서 가장 긴 시나리오이기도 하다.
+
+| 무엇 | 값 | 왜 침묵하는가 |
+|---|---|---|
+| `confirm/applied` | 0 | 확정할 job 이 없다. 아직 안 끝났으니까 |
+| `mark_failed/applied` | 0 | 실패도 안 했다. 스텁이 아직 판정을 안 내렸다 |
+| `retry_claim`, `final_refund` | 0 | 실패가 없으니 재시도도 환불도 없다 |
+| `recovery{heartbeat/backstop}` | 0 | heartbeat 가 살아 있다. 회수하지 않는 것이 옳다 |
+| `http 5xx` | 0 | 요청은 이미 200 으로 끝났다. 지연은 워커 스레드 안에 있다 |
+| `up` | 1 | 관리 포트도 healthcheck 도 정상이다 |
+| CPU / MEM | 8.65% / 17.49% | 스레드 3개가 잠들어 있을 뿐이다. 부하가 없다 |
+| 불변식 4종 | 0 | 등식은 참이다. 돈은 정확히 묶여 있다 |
+
+**서버 지표로 볼 수 있는 모든 칸이 정상이다.** CPU 도, 메모리도, 에러율도, 응답 시간도, 프로세스 생존도. 그런데 300 크레딧이 6분째 묶여 있고 아무도 그걸 풀 예정이 없다.
+
+움직인 것은 딱 하나, `credit_job_oldest_pending_age_seconds` 다. 30초마다 30씩, 흔들림 없이. **이 시나리오가 3단계에서 "지표를 하나만 남기고 다 지워야 한다면 이걸 남긴다"고 쓴 문장의 증명이다.**
+
+`worker_claim/applied` 가 정확히 **3** 인 것도 함께 확인됐다. job 3건 = 워커 동시성 3 이라 executor 가 한 번도 거부하지 않았고, 5단계에서 발견한 churn 이 사라졌다. 이 카운터가 job 수와 같아지는 조건이 실측으로 확인된 셈이다.
+### 장애 주입이 찾은 것
+
+주장을 실측으로 바꾸는 것이 목적이었는데, 실제로 돌려 보니 **주장 자체가 틀린 자리가 세 군데** 나왔다. 이게 6단계를 하는 이유다.
+
+#### 1. staleness 규칙의 구멍 — `-1` 에서는 `> 45` 가 절대 참이 되지 않는다 (고쳤다)
+
+4번 시나리오의 규칙 수정 전 실행이 이 구멍의 전부다. **스케줄러가 꺼진 채로 기동하면 관측 장치가 통째로 없는 상태인데, 알람은 2분 동안 하나도 울리지 않았다.**
+
+```
+   T+16   snapshot_staleness=-1 recon_staleness=-1 age=0 count=0 firing=[ ]
+   ...
+   T+122  snapshot_staleness=-1 recon_staleness=-1 age=0 count=0 firing=[ ]
+```
+
+3단계에서 staleness 초깃값을 0 이 아니라 **-1** 로 둔 것은 옳은 결정이었다. "아직 한 번도 안 돌았다"와 "방금 돌았다"는 다른 상태이고, 0 은 그 둘을 구분하지 못한다. 문제는 그 결정을 **알람 식이 따라가지 않았다**는 것이다. `credit_snapshot_staleness_seconds > 45` 는 -1 에서 거짓이다. 즉 이 규칙은 "스냅샷이 돌다가 멈춘" 경우만 잡고, **"스냅샷이 한 번도 안 돈" 더 나쁜 경우는 놓친다.**
+
+같은 시점의 게이지는 이렇게 보였다:
+
+```
+   게이지 oldest_pending_age = 0초 / DB 실제 미결 나이 = 121초
+   게이지 outstanding_count  = 0 / DB 실제 미결 = 3
+   snapshot_cycles_total = 0
+```
+
+**대시보드는 "미결 0건, 최고 나이 0초"라는, 존재하지 않는 완벽한 정상 화면을 그리고 있었다.** 3단계 문서가 "반쯤 채운 스냅샷은 관측이 없는 것보다 나쁘다 — 없으면 아무도 안 믿지만, 있으면 사람들이 믿는다"고 쓴 그 상황이 실제로 재현됐고, 그걸 막으라고 만든 staleness 알람이 침묵했다.
+
+고친 식은 이렇다:
+
+```yaml
+      - alert: CreditSnapshotStale
+        expr: (credit_snapshot_staleness_seconds > 45) or (credit_snapshot_staleness_seconds < 0)
+        for: 1m
+```
+
+`for: 1m` 은 기동 유예다. 정상 기동에서도 첫 스냅샷이 찍히기 전까지 잠깐 -1 이므로, 유예가 없으면 재배포마다 알람이 깜빡인다. 스냅샷 주기가 15초라 1분이면 네 번의 기회를 준 셈이다. `CreditReconciliationStale` 도 같은 모양으로 고쳤다(`> 180 or < 0`, `for: 1m`).
+
+> 5단계의 알람 규칙 표에는 이 둘이 `for: 0m` 으로 적혀 있다. 그건 그 시점의 기록이고, 이 단계에서 바뀌었다.
+
+#### 2. Redis 가 죽어 있는 동안 백스톱도 죽는다 (고치지 않았다 — 기록만)
+
+step6 이 "Redis 장애에 대비한 최후 방어선"으로 만든 것이 `updatedAt` 백스톱이다. 문서에도 코드 주석에도 그렇게 써 있다. 2번 시나리오 B 가 그 문장이 틀렸음을 보여준다.
+
+```kotlin
+private fun recoverStalled(job: Job) {
+    try {
+        val jobId = job.persistedId
+        if (heartbeatRegistry.hasLiveHeartbeat(jobId, job.attemptNo)) {   // ← Redis 를 부른다
+            return
+        }
+        ...
+    } catch (e: RuntimeException) {
+        log.warn("PROCESSING 정체 job 회수 실패: ...", e)                  // ← 여기로 삼켜진다
+    }
+}
+```
+
+`hasLiveHeartbeat` 은 `refreshHeartbeat` 과 달리 예외를 삼키지 않는다. Redis 가 없으면 던지고, 항목 단위 `catch` 가 그걸 받아 WARN 한 줄을 남기고 넘어간다. 같은 주기의 `markExpiredJobsAsFailed` 는 `findExpiredAttempts` 에서 이미 던져 단계 단위 `catch` 로 빠진다. **결과적으로 Redis 가 죽으면 두 탐지기가 동시에 죽는다.** 백스톱은 Redis 장애를 대비한 것이 아니라 **Redis 에 의존하는** 장치였다.
+
+실측이 이걸 딱 잘라 보여준다 — 90초 동안 18번 스캔했고, 회수는 0건이었으며, Redis 를 되살리자 4초 만에 3건이 회수됐다.
+
+**고치지 않았다.** 관측이 코드 결함을 드러내는 것까지가 이번 단계의 범위고, 고치는 방향에는 트레이드오프가 있어서 따로 판단해야 한다. 가능한 수정은 `hasLiveHeartbeat` 의 예외를 "살아 있음"이 아니라 **"알 수 없음"**으로 다뤄 `updatedAt` 만으로 회수를 결정하는 것인데, 그러면 **Redis 순단 중에 멀쩡히 일하고 있는 job 을 죽은 것으로 오판**할 수 있다(60초 넘게 걸리는 정상 job 이 있으면 실제로 그렇게 된다). 지금 코드는 "회수를 놓치는 쪽"으로, 수정안은 "멀쩡한 job 을 죽이는 쪽"으로 기운다. 어느 쪽이 나은지는 확정/환불의 멱등성이 어디까지 보장되는지에 달렸고, 그건 다음 챕터의 문제다.
+
+지표 관점에서 중요한 것은 따로 있다. **이 사고에서 `credit_job_recovery_total` 은 어느 라벨도 오르지 않는다.** `backstop` 이 오르면 "heartbeat 가 샜다"를 알 수 있지만, 둘 다 0 인 것은 "사고가 없었다"와 구분되지 않는다. 이 사고를 지표로 잡으려면 **회수 시도 실패 카운터**(`credit_job_recovery_failed_total{reason="heartbeat_unavailable"}` 같은)가 있어야 하고, 지금은 없다. `oldest_pending_age` 가 오르는 것만이 유일한 간접 흔적이다. 없는 지표를 찾는 것이 이 단계의 절반이었고, 이게 그 답이다.
+
+#### 3. `worker_claim/applied` 는 처리량이 아니다 (5단계에서 발견, 여기서 재확인)
+
+5단계에서 `worker_claim/applied` 가 job 수의 3~4배로 나온 이유를 밝혔다 — executor 풀이 꽉 차면 `execute` 가 거부되고, `rollbackToHolding` 으로 HOLDING 으로 되돌린 뒤 다음 폴링(500ms)에서 같은 job 을 다시 선점한다. 6단계 실측이 이 해석을 두 방향에서 확인했다.
+
+| 시나리오 | 상황 | `worker_claim/applied` | job 수 |
+|---|---|---|---|
+| 07 (외부 API 무한 지연) | job 3건, 워커 동시성 3 — 풀이 넘치지 않는다 | **3** | 3 |
+| 05 (원장 훼손) | job 5건이 3~7초짜리 스텁을 통과 | **19** | 5 |
+| 01 (워커 크래시) | job 6건 + 재시도 | **11** | 6 |
+
+07 에서 정확히 3 이 나온 것이 결정적이다. **경합이 없으면 선점 카운터는 job 수와 정확히 같다.** 즉 이 카운터는 "선점이라는 동작이 성공한 횟수"이고, 처리량으로 읽으면 안 된다. 대시보드의 `rate(credit_defense_total)` 패널에서 `worker_claim` 만 유난히 높은 것은 사고가 아니라 **executor 포화의 신호**로 읽어야 한다.
+### 포트폴리오 스크린샷 가이드
+
+Grafana(<http://localhost:3000>, 대시보드 `credit-domain`)를 열어 둔 채 스크립트를 돌리면 곡선이 실시간으로 그려진다. 시간 범위는 **Last 15 minutes**, 자동 새로고침 **5s** 로 두면 된다.
+
+| 시나리오 | 언제 찍나 | 어느 패널 | 무엇이 보여야 하나 |
+|---|---|---|---|
+| 01 | SIGKILL 후 20~40초 | 3행 "죽은 job 회수 (heartbeat vs backstop)" | `heartbeat` 만 한 번 튀고 `backstop` 은 바닥에 붙어 있다 |
+| 02 A | 앱 재기동 후 60~90초 | 같은 패널 | 이번에는 **`backstop` 만** 튄다. 01 과 나란히 놓으면 두 탐지기의 역할이 보인다 |
+| 02 B | Redis 정지 후 60~90초 | 같은 패널 + 2행 나이 | 두 선 모두 바닥. 그런데 사고는 진행 중이다 |
+| 03 | job 생성 후 6~7분 | 2행 전체 + 3행 전체 | 나이 곡선만 우상향, 방어 발동율 패널은 완전히 평평 |
+| 04 (수정 전) | 재기동 후 2분 | 4행 "staleness" + 1행 stat | staleness 두 선이 **-1 에 붙어 있고** 알람은 하나도 없다 |
+| 04 (수정 후) | 재기동 후 90초 | Prometheus `/alerts` | `CreditSnapshotStale`, `CreditReconciliationStale` 이 빨갛게 firing |
+| 05 | (b)(c) 주입 후 15초 | 1행 stat 4칸 | 세 칸이 빨강, 한 칸(정산 안 된 종결 job)만 초록 |
+| 06 | 폭풍 직후 | 3행 "멱등 방어의 역할 분담" | `app_hit` 과 `db_unique` 두 선이 같이 튄다 |
+| 07 | job 생성 후 6~7분 | 2행 나이 + 3행 방어 발동율 | 위는 직선 상승, 아래는 완전히 평평 |
+
+포트폴리오에 넣기 좋은 장면 셋을 고른다면 이렇다.
+
+**(a) 05 의 1행 stat 패널이 빨갛게 바뀌는 순간, 나머지 전부 정상.** `05-ledger-corruption.sh` 를 돌리고 `(c)` 단계가 지난 직후에 대시보드 전체가 한 화면에 들어오게 찍는다. 위 네 칸 중 셋이 빨강인데, 3행 방어 발동율은 평평하고 4행 `up` 은 1 이다.
+> 이 장면이 증명하는 문장: **"에러율 0%, 응답 시간 정상, HTTP 200 인 채로 돈이 사라진다. 인프라 대시보드로는 이 화면을 만들 수 없다."**
+
+**(b) 07 의 `oldest_pending_age` 우상향 곡선과 그 아래 방어 발동율 패널의 평평함.** `07-external-api-hang.sh` 를 돌리고 6분쯤 지난 시점에 2행과 3행이 세로로 함께 보이게 찍는다. 위 패널의 빨간 300초 임계선을 곡선이 통과하는 순간이 들어가면 가장 좋다.
+> 이 장면이 증명하는 문장: **"카운터 다섯 개가 전부 침묵하는 사고를, 게이지 하나가 단조 증가로 잡아낸다. 일어나지 않은 일에는 증가시킬 지점이 없기 때문이다."**
+
+**(c) 02 의 회수 패널에서 `backstop` 만 튀는 장면.** `02-heartbeat-lost.sh` 의 A 구간, 앱 재기동 후 60~90초. 01 을 돌려 찍은 같은 패널(=`heartbeat` 만 튄다)과 나란히 두면 한 쌍이 된다.
+> 이 장면이 증명하는 문장: **"같은 회수 지표를 detector 라벨로 쪼갠 이유가 여기 있다. 합쳐 그렸다면 두 사고가 같은 그림이 됐을 것이다."**
+
+### 트레이드오프
+
+- **재기동이 곧 카운터 리셋이다.** `credit_defense_total` 은 프로세스 메모리에 산다. 워커·스케줄러를 끄고 켜는 시나리오는 전부 재기동을 수반하므로, 사고 전후의 카운터를 직접 비교할 수 없다. 그래서 스크립트는 재기동 **이후**에 기준선을 잡는다. 프로덕션에서 `rate()`/`increase()` 를 쓰면 Prometheus 가 리셋을 알아서 처리하지만, 이 실험에서는 절대값을 봐야 할 때가 있어 문서에 리셋 시점을 같이 적었다.
+- **시나리오 2번 B 는 PROCESSING 행을 SQL 로 심는다.** 앱이 살아 있는 채로 Redis 만 죽이면 워커 스레드도 살아 있어서 회수 대상이 자연히 생기지 않는다. "소유자가 사라진 job" 을 재현하려면 심는 수밖에 없었다. 이건 5번 시나리오와 같은 종류의 인위성이고, 대신 Redis 를 되살렸을 때 같은 행이 4초 만에 회수되는 것으로 심은 상태가 유효했음을 확인한다.
+- **알람은 여전히 아무 데도 안 간다.** Alertmanager 가 없으므로 `firing` 은 Prometheus `/alerts` 페이지에서만 보인다. 스크립트가 API 로 폴링해 확인하는 것이 사람이 그 페이지를 보고 있는 것을 대신한다.
+- **한 대짜리 실험이다.** `worker_claim/lost`, `confirm/stale`, `retry_claim/lost` 는 이번에도 전부 0 이었다. 이 칸들은 **두 인스턴스가 같은 job 을 두고 경쟁해야** 움직인다. compose 에 앱을 두 개 띄우는 것은 이번 범위 밖으로 뒀다 — 포트와 heartbeat 키를 나누는 설정이 더 필요하다.
+- **전체 실행에 45분 걸린다.** `for: 1m` 을 채우고 300초 임계를 넘기려면 실제로 그만큼 기다려야 한다. 시간을 줄이려면 임계값을 낮춘 별도 규칙 파일이 필요한데, 그러면 "운영에 쓸 규칙을 그대로 검증한다"는 성질을 잃는다. 기다리는 쪽을 택했다.
+
+### 이 챕터가 남기는 것
+
+step7 전체를 닫는다.
+
+**네 계층 중 L2 는 여전히 비어 있다.** L0(묶인 돈), L1(불변식), L3(방어 발동)은 지표·대시보드·알람이 다 있는데, L2(흐름)에는 상태별 job 수 분포도, 단계별 소요 시간 히스토그램도 없다. 그래도 이 단계를 닫는 이유는 **`oldest_pending_age` 하나가 L2 가 답해야 할 질문의 절반을 이미 답하기 때문**이다. 3번과 7번 시나리오에서 확인했듯 파이프라인이 어디서 막히든 이 게이지는 같은 방향으로 오른다. L2 가 추가로 주는 것은 **"어디서"** 이고, 그건 사고를 **감지**한 다음에 필요한 정보다. 감지가 먼저고 진단이 다음이다. 지금 대시보드는 "막혔다"까지 말하고, "HOLDING 에서 막혔는지 PROCESSING 에서 막혔는지"는 `docker compose exec mysql` 한 줄이 답한다 — 새벽 세 시에 그 한 줄을 치는 것이 나쁘긴 하지만, 지표가 없어서 사고를 **놓치는** 것과는 급이 다르다.
+
+**관측이 드러낸 기존 코드의 결함 세 개.** 전부 관측 장치를 붙이고 실제로 흔들어 봤기 때문에 나왔다.
+
+| # | 무엇 | 어디서 나왔나 | 상태 |
+|---|---|---|---|
+| 1 | staleness 규칙이 `-1`(한 번도 안 돎)을 못 잡는다 | 4번 시나리오 | **고쳤다** — `or (x < 0)`, `for: 1m` |
+| 2 | `updatedAt` 백스톱이 Redis 에 의존한다 | 2번 시나리오 B | 기록만. 수정안은 오탐 위험을 안는다 |
+| 3 | `worker_claim/applied` 가 처리량이 아니다 | 5단계, 6단계 07 에서 확정 | 기록만. 대시보드 해석 규칙으로 남긴다 |
+
+1번은 **관측 장치 자신의 결함**이고 2번은 **복구 장치의 결함**이라는 점이 다르다. 1번이 더 무섭다 — 2번은 알람이 안 울려도 `oldest_pending_age` 가 오르지만, 1번은 그 게이지 자체가 0 에 얼어붙은 채 "정상"을 그린다. **관측 장치의 고장이 사고보다 나쁠 수 있다**는 것이 이 챕터의 마지막 교훈이다.
+
+**다음에 할 것.**
+
+1. **L2 흐름 지표.** `credit_job_status_count{status}` 게이지와 HOLDING→PROCESSING→종결 단계별 소요 시간 Timer. 3번과 7번 시나리오를 구분할 수 있게 된다(지금 둘은 `oldest_pending_age` 만 보면 같은 그림이다).
+2. **회수 시도 실패 카운터.** 2번 시나리오 B 의 사고를 잡을 지표가 지금 없다. `credit_job_recovery_failed_total{reason}` 이 있으면 "회수가 필요 없었다"와 "회수를 시도했는데 못 했다"가 갈린다.
+3. **백스톱 맹점 수정.** `hasLiveHeartbeat` 의 예외를 "알 수 없음"으로 다룰지, 그때 오탐을 어디까지 감수할지. 확정/환불의 멱등성 보강이 선행돼야 한다.
+4. **`worker_claim` churn 수정.** executor 가 거부할 것 같으면 애초에 선점하지 않게 하거나(풀 여유 확인), 큐를 두어 거부 자체를 없앤다. 카운터가 처리량으로 읽히게 만드는 것이 부수 효과다.
+5. **Alertmanager 라우팅.** 규칙 10개는 코드로 남았지만 여전히 아무 데도 안 간다. 붙일 채널이 정해지면 컨테이너 하나로 끝난다.
+
+---
+
 ## 명령어
 
 ```
@@ -1546,6 +2043,13 @@ grep -rl "io.micrometer" src/main/kotlin
 
 # 대시보드 JSON 문법
 python3 -m json.tool deploy/observability/grafana/dashboards/credit-domain.json > /dev/null
+
+# 알람 규칙 문법 (스택이 떠 있을 때)
+docker compose -f deploy/observability/docker-compose.yml exec prometheus \
+  promtool check rules /etc/prometheus/rules/credit.rules.yml
+
+# 장애 주입 시나리오 문법
+bash -n deploy/observability/scenarios/*.sh
 ```
 
 관측 스택을 띄우고 내리는 명령은 [`deploy/observability/README.md`](../deploy/observability/README.md) 에 있다.
@@ -1557,4 +2061,15 @@ docker compose -f deploy/observability/docker-compose.yml up -d --build
 ./deploy/observability/scripts/seed.sh
 ./deploy/observability/scripts/smoke.sh
 docker compose -f deploy/observability/docker-compose.yml down -v
+```
+
+6단계의 장애 주입은 스크립트가 스택을 올리고 내리는 것까지 한다.
+
+```
+# 7개 전부 (30~50분, 마지막에 down -v 까지)
+./gradlew bootJar
+./deploy/observability/scenarios/run-all.sh
+
+# 하나만
+./deploy/observability/scenarios/03-worker-stopped.sh
 ```

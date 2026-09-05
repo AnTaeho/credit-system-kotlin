@@ -64,3 +64,36 @@ docker compose -f deploy/observability/docker-compose.yml exec mysql \
 # 앱 로그
 docker compose -f deploy/observability/docker-compose.yml logs -f app
 ```
+
+## 장애 주입 시나리오 (step7 6단계)
+
+`scenarios/` 의 7개 스크립트는 사고를 실제로 심고, **어느 지표가 반응하고 어느 지표가
+침묵하는지, 감지까지 몇 초 걸리는지**를 실측한다. 해석과 실측값은
+[`docs/step7-observability.md`](../../docs/step7-observability.md) 의 6단계에 있다.
+
+```
+# 전체 (30~50분, 마지막에 down -v 까지 한다)
+./gradlew bootJar
+./deploy/observability/scenarios/run-all.sh
+
+# 하나만 (각 스크립트가 시작할 때 down -v → up 을 하므로 단독 실행된다)
+./deploy/observability/scenarios/03-worker-stopped.sh
+```
+
+| 스크립트 | 심는 사고 | 걸리는 시간 |
+|---|---|---|
+| `01-worker-crash.sh` | PROCESSING 중인 앱을 SIGKILL 하고 즉시 재기동 | ~2분 |
+| `02-heartbeat-lost.sh` | heartbeat ZSET 소실 / Redis 다운 중 회수 시도 | ~9분 |
+| `03-worker-stopped.sh` | 워커만 정지(`APP_WORKER_ENABLED=false`) | ~9분 |
+| `04-scheduler-stopped.sh` | 스케줄러 정지(`APP_SCHEDULING_ENABLED=false`) | ~4분 |
+| `05-ledger-corruption.sh` | SQL 로 잔액·원장을 직접 훼손하고 원복 | ~5분 |
+| `06-duplicate-storm.sh` | 같은 idemKey 로 100건 동시 요청 | ~2분 |
+| `07-external-api-hang.sh` | 외부 생성 API 무한 지연(스텁 600초) | ~9분 |
+
+각 스크립트는 끝에 **기대 vs 관측** 표를 stdout 으로 낸다. 사고 주입에 쓰는 env 는
+`docker-compose.yml` 의 `APP_*` 통과 항목이고, 전부 스크립트 안(`restart_app_with`)에서만
+export 되므로 호출한 셸에는 남지 않는다.
+
+Grafana 로 곡선을 보려면 스크립트를 돌리는 동안 <http://localhost:3000> 의
+`credit-domain` 대시보드를 열어 둔다. 어느 시점에 어느 패널을 봐야 하는지는 문서 6단계의
+"포트폴리오 스크린샷 가이드" 절에 있다.

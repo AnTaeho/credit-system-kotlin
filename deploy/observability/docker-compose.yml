@@ -41,6 +41,14 @@ services:
       # 노출 경계의 실물. 관리 포트를 애플리케이션 포트에서 떼어낸다.
       # application.yml 에 쓰지 않고 여기서 주는 이유는 docs/step7-observability.md 4단계 참고.
       MANAGEMENT_SERVER_PORT: 8081
+      # 6단계 장애 주입용 손잡이. 기본값은 application.yml 과 같으므로,
+      # 아무것도 지정하지 않고 올리면 5단계까지와 동일한 스택이다.
+      # 스케줄러·워커는 런타임 토글이 불가능하므로(@ConditionalOnProperty) 재기동으로 바꾼다.
+      APP_SCHEDULING_ENABLED: ${APP_SCHEDULING_ENABLED:-true}
+      APP_WORKER_ENABLED: ${APP_WORKER_ENABLED:-true}
+      APP_STUB_FAILURE_RATE: ${APP_STUB_FAILURE_RATE:-0.3}
+      APP_STUB_MIN_DELAY_MILLIS: ${APP_STUB_MIN_DELAY_MILLIS:-3000}
+      APP_STUB_MAX_DELAY_MILLIS: ${APP_STUB_MAX_DELAY_MILLIS:-7000}
     ports:
       # 8080 만 호스트로 나간다. 8081 은 compose 네트워크 안에서만 보이고,
       # Prometheus 가 app:8081 로 긁는다. 호스트에서는 /actuator/* 에 닿을 수 없다.
