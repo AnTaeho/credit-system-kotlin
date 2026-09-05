@@ -1909,7 +1909,7 @@ create_jobs 3
 
 > 5단계의 알람 규칙 표에는 이 둘이 `for: 0m` 으로 적혀 있다. 그건 그 시점의 기록이고, 이 단계에서 바뀌었다.
 
-#### 2. Redis 가 죽어 있는 동안 백스톱도 죽는다 (고치지 않았다 — 기록만)
+#### 2. Redis 가 죽어 있는 동안 백스톱도 죽는다 (기록만 했다 → 후속 1 에서 고쳤다)
 
 step6 이 "Redis 장애에 대비한 최후 방어선"으로 만든 것이 `updatedAt` 백스톱이다. 문서에도 코드 주석에도 그렇게 써 있다. 2번 시나리오 B 가 그 문장이 틀렸음을 보여준다.
 
@@ -1934,6 +1934,8 @@ private fun recoverStalled(job: Job) {
 **고치지 않았다.** 관측이 코드 결함을 드러내는 것까지가 이번 단계의 범위고, 고치는 방향에는 트레이드오프가 있어서 따로 판단해야 한다. 가능한 수정은 `hasLiveHeartbeat` 의 예외를 "살아 있음"이 아니라 **"알 수 없음"**으로 다뤄 `updatedAt` 만으로 회수를 결정하는 것인데, 그러면 **Redis 순단 중에 멀쩡히 일하고 있는 job 을 죽은 것으로 오판**할 수 있다(60초 넘게 걸리는 정상 job 이 있으면 실제로 그렇게 된다). 지금 코드는 "회수를 놓치는 쪽"으로, 수정안은 "멀쩡한 job 을 죽이는 쪽"으로 기운다. 어느 쪽이 나은지는 확정/환불의 멱등성이 어디까지 보장되는지에 달렸고, 그건 다음 챕터의 문제다.
 
 지표 관점에서 중요한 것은 따로 있다. **이 사고에서 `credit_job_recovery_total` 은 어느 라벨도 오르지 않는다.** `backstop` 이 오르면 "heartbeat 가 샜다"를 알 수 있지만, 둘 다 0 인 것은 "사고가 없었다"와 구분되지 않는다. 이 사고를 지표로 잡으려면 **회수 시도 실패 카운터**(`credit_job_recovery_failed_total{reason="heartbeat_unavailable"}` 같은)가 있어야 하고, 지금은 없다. `oldest_pending_age` 가 오르는 것만이 유일한 간접 흔적이다. 없는 지표를 찾는 것이 이 단계의 절반이었고, 이게 그 답이다.
+
+> **→ 후속 1 에서 고쳤다.** 회수 시도 실패 카운터는 결국 만들지 않았다 — 회수가 실패하는 대신 `backstop_blind` 로 **성공하면서** 기록되기 때문에 불필요해졌다. 아래 [후속 1](#후속-1--백스톱을-redis-없이도-돌게-한다) 참고.
 
 #### 3. `worker_claim/applied` 는 처리량이 아니다 (5단계에서 발견, 여기서 재확인)
 
@@ -1992,7 +1994,7 @@ step7 전체를 닫는다.
 | # | 무엇 | 어디서 나왔나 | 상태 |
 |---|---|---|---|
 | 1 | staleness 규칙이 `-1`(한 번도 안 돎)을 못 잡는다 | 4번 시나리오 | **고쳤다** — `or (x < 0)`, `for: 1m` |
-| 2 | `updatedAt` 백스톱이 Redis 에 의존한다 | 2번 시나리오 B | 기록만. 수정안은 오탐 위험을 안는다 |
+| 2 | `updatedAt` 백스톱이 Redis 에 의존한다 | 2번 시나리오 B | **고쳤다 (후속 1)** — `HeartbeatState.UNKNOWN` + `backstop_blind` |
 | 3 | `worker_claim/applied` 가 처리량이 아니다 | 5단계, 6단계 07 에서 확정 | 기록만. 대시보드 해석 규칙으로 남긴다 |
 
 1번은 **관측 장치 자신의 결함**이고 2번은 **복구 장치의 결함**이라는 점이 다르다. 1번이 더 무섭다 — 2번은 알람이 안 울려도 `oldest_pending_age` 가 오르지만, 1번은 그 게이지 자체가 0 에 얼어붙은 채 "정상"을 그린다. **관측 장치의 고장이 사고보다 나쁠 수 있다**는 것이 이 챕터의 마지막 교훈이다.
@@ -2000,17 +2002,292 @@ step7 전체를 닫는다.
 **다음에 할 것.**
 
 1. **L2 흐름 지표.** `credit_job_status_count{status}` 게이지와 HOLDING→PROCESSING→종결 단계별 소요 시간 Timer. 3번과 7번 시나리오를 구분할 수 있게 된다(지금 둘은 `oldest_pending_age` 만 보면 같은 그림이다).
-2. **회수 시도 실패 카운터.** 2번 시나리오 B 의 사고를 잡을 지표가 지금 없다. `credit_job_recovery_failed_total{reason}` 이 있으면 "회수가 필요 없었다"와 "회수를 시도했는데 못 했다"가 갈린다.
-3. **백스톱 맹점 수정.** `hasLiveHeartbeat` 의 예외를 "알 수 없음"으로 다룰지, 그때 오탐을 어디까지 감수할지. 확정/환불의 멱등성 보강이 선행돼야 한다.
+2. ~~**회수 시도 실패 카운터.**~~ **(후속 1 에서 처리)** — 만들지 않는 쪽으로 처리했다. 회수가 실패하지 않고 `backstop_blind` 로 성공하므로 셀 실패가 남지 않는다.
+3. ~~**백스톱 맹점 수정.**~~ **(후속 1 에서 처리)** — "알 수 없음"으로 다루기로 했고, 오탐은 감수하되 라벨로 드러내기로 했다. "멱등성 보강 선행"이라는 조건은 attemptNo CAS 를 빠뜨린 과대평가였다.
 4. **`worker_claim` churn 수정.** executor 가 거부할 것 같으면 애초에 선점하지 않게 하거나(풀 여유 확인), 큐를 두어 거부 자체를 없앤다. 카운터가 처리량으로 읽히게 만드는 것이 부수 효과다.
 5. **Alertmanager 라우팅.** 규칙 10개는 코드로 남았지만 여전히 아무 데도 안 간다. 붙일 채널이 정해지면 컨테이너 하나로 끝난다.
+
+---
+
+## 후속 1 — 백스톱을 Redis 없이도 돌게 한다
+
+6단계 장애 주입이 찾아낸 결함 2번을 고친다. 6단계에서는 "고치지 않았다 — 기록만"이라고 썼는데, 그때 미룬 이유가 다시 보니 틀렸다. 정정도 같이 한다.
+
+### 결함 — 최후 방어선이 자기가 방어하려던 것에 의존했다
+
+step6 이 `updatedAt` 백스톱을 만든 명분은 "Redis 장애를 대비해 DB 로 한 번 더 스캔한다"였다. 코드는 그렇지 않았다.
+
+`DeadJobRecoveryTask.recoverStalled` 는 PROCESSING 이 60초 넘게 정체된 job 을 회수하기 전에 `heartbeatRegistry.hasLiveHeartbeat(jobId, attemptNo)` 로 "혹시 살아 있나"를 물었다. 그 조회가 Redis 를 부르고, `hasLiveHeartbeat` 는 `refreshHeartbeat` 와 달리 예외를 삼키지 않았다. Redis 가 없으면 던지고, 항목 단위 `catch` 가 WARN 한 줄을 남기고 넘어간다. 같은 주기의 heartbeat 스캔은 `findExpiredAttempts` 에서 이미 던져 단계 단위 `catch` 로 빠진다. **Redis 가 죽으면 두 겹의 탐지기가 동시에 죽었다.**
+
+2번 시나리오 B 의 실측이 그대로 보여준다.
+
+```
+   T+8    PROCESSING 행 3건을 updated_at=120초 전으로 심었다 (백스톱 대상)
+   T+8    Redis 정지
+   T+19   backstop=0 heartbeat=0 PROCESSING=3
+   ... (10초 간격 9회, 전부 같은 값)
+   T+100  backstop=0 heartbeat=0 PROCESSING=3
+   T+101  로그 'heartbeat 만료 회수 단계 실패' 7회 / 'PROCESSING 정체 job 회수 실패' 21회
+   T+103  Redis 복구 2초 만에 backstop=3
+```
+
+회수 대상 세 건이 눈앞에 있는데 90초 동안 0건. Redis 를 되살리자 곧바로 3건. **막고 있던 것은 오직 Redis 였다.** 그리고 그 90초 동안 `credit_job_recovery_total` 은 두 라벨 모두 0 이어서, 지표만 보는 사람에게는 "회수할 것이 없는 평온한 시간"과 똑같이 생겼다.
+
+### 수정 — `Boolean` 을 3상태로 바꾼다
+
+핵심은 **"heartbeat 가 없다"와 "heartbeat 저장소를 못 봤다"는 다른 사실**이라는 것이다. `Boolean` 은 둘을 표현할 수 없다.
+
+```kotlin
+enum class HeartbeatState { LIVE, ABSENT, UNKNOWN }
+```
+
+- `LIVE` — 조회에 성공했고 만료되지 않은 score 가 있다
+- `ABSENT` — 조회에 성공했고 없거나 이미 만료됐다
+- `UNKNOWN` — Redis 에 닿지 못했다. 살아 있는지 아닌지 알 수 없다
+
+`false` 하나로 뭉치면 Redis 장애가 heartbeat 부재로 둔갑하고, 예외로 뭉치면 Redis 장애가 회수 자체를 막는다. **판단은 조회하는 쪽이 아니라 호출자가 한다.** 그래서 `heartbeatState` 는 Redis 예외를 삼키되 삼킨 사실을 값으로 돌려준다.
+
+회수 판정은 이렇게 갈린다.
+
+| heartbeat | 회수 | detector | 뜻 |
+|---|---|---|---|
+| `LIVE` | 하지 않는다 | — | 워커가 살아 있다 |
+| `ABSENT` | 한다 | `backstop` | heartbeat 가 있어야 했는데 없었다 — heartbeat 누수 신호 |
+| `UNKNOWN` | **한다** | `backstop_blind` | 저장소가 안 보여 `updatedAt` 만 믿었다 — Redis 장애 신호, **오탐 가능** |
+
+`UNKNOWN` 에서 회수하는 쪽을 택한 이유는 단순하다. 이 백스톱의 존재 이유가 "heartbeat 저장소가 죽어도 돈이 묶인 채 방치되지 않는다"인데, 저장소가 안 보인다고 회수를 멈추면 **장치가 스스로를 부정한다.**
+
+### 왜 오탐을 감수해도 되는가 — 6단계 판단의 정정
+
+6단계 문서는 이렇게 썼다.
+
+> 수정안은 "멀쩡한 job 을 죽이는 쪽"으로 기운다. 어느 쪽이 나은지는 확정/환불의 멱등성이 어디까지 보장되는지에 달렸고, 그건 다음 챕터의 문제다.
+
+**이 문장은 과대평가였다.** step4 의 attemptNo CAS 가 이미 오탐의 비용을 돈에서 분리해 놓았는데, 그걸 계산에 넣지 않았다.
+
+오탐이 실제로 일어나는 경로를 끝까지 따라가 보면 이렇다.
+
+1. Redis 순단 중, 60초 넘게 진행 중인 **살아 있는** job(attempt N)이 정체 스캔에 걸린다
+2. `heartbeatState` 가 `UNKNOWN` → `failIfProcessing(N)` 이 1행 → FAILED
+3. 재시도로 attempt N+1 이 되고 워커 B 가 새로 처리한다
+4. 원래 워커 A 가 뒤늦게 끝나 `confirm` 을 부른다 → `completeIfAttemptMatches` 의 `WHERE status = PROCESSING AND attemptNo = :N` 이 어긋나 **0행**
+5. A 는 `credit_defense_total{point="confirm",outcome="stale"}` 을 올리고 물러난다
+
+돈의 관점에서 hold 는 1회, confirm 은 1회(N+1). **잔액 불변식은 깨지지 않는다.** 남는 비용은 워커 A 가 이미 태워 버린 **외부 생성 API 호출 1회**와 결과가 한 세대 늦어지는 지연이다.
+
+두 선택지를 나란히 놓으면 이렇게 된다.
+
+| | 수정 전 (`UNKNOWN` = 회수 안 함) | 수정 후 (`UNKNOWN` = 회수) |
+|---|---|---|
+| Redis 장애 중 죽은 job | **방치된다.** 돈이 묶인 채 Redis 복구까지 대기 | 60초 안에 회수되고 재시도로 넘어간다 |
+| Redis 장애 중 살아 있는 job | 영향 없음 | **오탐 가능.** FAILED 로 내려가고 재시도된다 |
+| 오탐의 돈 비용 | — | **없다.** attemptNo CAS 가 뒤늦은 confirm 을 0행으로 막는다 |
+| 오탐의 실제 비용 | — | 외부 API 호출 1회 낭비 + 결과 지연 |
+| 지표에 남는가 | **안 남는다.** 두 라벨 모두 0 = "평온"과 구분 불가 | `backstop_blind` 가 오르고, 오탐이면 `confirm/stale` 이 함께 오른다 |
+
+**"돈이 묶인 채 아무도 모른다" 와 "외부 호출 1회를 낭비하고 그 사실이 지표에 남는다" 의 비교다.** 후자가 낫다. "확정/환불 멱등성 보강이 선행돼야 한다"던 조건은 이미 step4 에서 충족돼 있었다 — 그 챕터를 쓰고도 6단계에서 그걸 세지 못한 것이 이번에 바로잡은 판단이다.
+
+### `removeHeartbeat` 도 예외를 삼킨다
+
+같은 수정에서 `removeHeartbeat` 의 예외도 삼키게 바꿨다(WARN 만 남긴다). 회수가 끝난 **뒤의 뒷정리**라 실패해도 상태 전이는 이미 일어났고, 지우지 못하고 남은 ZSET 엔트리는 나중에 `findExpiredAttempts` 가 다시 집어 온다. 그때 `failIfProcessing` 이 0행을 돌려주므로 아무 일도 일어나지 않고 조용히 소거된다. **무해한 잔여물**이지 재시도해야 할 실패가 아니다.
+
+`findExpiredAttempts` 는 **그대로 던지게 뒀다.** 그 단계는 본질적으로 Redis 단계다 — Redis 가 없으면 할 수 있는 일이 없고, 단계 단위 `catch` 가 받아 이번 주기만 건너뛰는 것이 정확한 동작이다.
+
+### 파일별 변경 목록
+
+| 파일 | 변경 |
+|---|---|
+| `heartbeat/HeartbeatRegistry.kt` | `HeartbeatState` enum 추가. `hasLiveHeartbeat` → `heartbeatState` (Redis 예외를 `UNKNOWN` 으로). `removeHeartbeat` 가 예외를 삼킨다 |
+| `job/event/JobRecovered.kt` | `RecoveryDetector.BACKSTOP_BLIND` 추가. 세 값의 뜻을 KDoc 으로 |
+| `job/scheduling/DeadJobRecoveryTask.kt` | `recoverStalled` 가 3상태로 분기. `UNKNOWN` 이면 WARN 을 남기고 회수 |
+| `prometheus/rules/credit.rules.yml` | `CreditBackstopBlindRecovery` (P2) 추가 — 규칙 10개 → 11개 |
+| `scenarios/02-heartbeat-lost.sh` | B 구간 기대를 "0건(결함)" 에서 "`backstop_blind` ≥ 1" 로 뒤집음 |
+| `HeartbeatRegistryTest` / `DeadJobRecoveryTaskTest` / `DefenseMetricsTest` | 아래 참고 |
+
+`DefenseMetrics` 는 **손대지 않았다.** 사전 등록이 `RecoveryDetector.entries` 를 도니 새 값이 자동으로 0 으로 깔린다. 대시보드 JSON 도 `sum by (detector) (...)` 라 새 라벨을 알아서 그린다. **enum 하나 추가에 관측 코드가 따라오지 않는 것**이 2단계에서 "enum 이 카디널리티 가드다"라고 쓴 설계가 실제로 값을 낸 자리다.
+
+### 핵심 코드 읽기
+
+**전 — 조회가 판단까지 해 버린다**
+
+```kotlin
+fun hasLiveHeartbeat(jobId: Long, attemptNo: Int): Boolean {
+    val member = JobAttempt(jobId, attemptNo).toMember()
+    val score = redisTemplate.opsForZSet().score(KEY, member)   // Redis 가 없으면 던진다
+    return score != null && score > Instant.now().epochSecond
+}
+```
+
+**후 — 조회는 사실만 돌려주고, 판단은 호출자가 한다**
+
+```kotlin
+fun heartbeatState(jobId: Long, attemptNo: Int): HeartbeatState {
+    val member = JobAttempt(jobId, attemptNo).toMember()
+    val score = try {
+        redisTemplate.opsForZSet().score(KEY, member)
+    } catch (e: RuntimeException) {
+        log.warn("heartbeat 조회 실패, UNKNOWN 으로 처리: jobId={}, attemptNo={}", jobId, attemptNo, e)
+        return HeartbeatState.UNKNOWN
+    }
+    return if (score != null && score > Instant.now().epochSecond) {
+        HeartbeatState.LIVE
+    } else {
+        HeartbeatState.ABSENT
+    }
+}
+```
+
+**전 — `true` 면 물러나고, 예외면 통째로 건너뛴다**
+
+```kotlin
+private fun recoverStalled(job: Job) {
+    try {
+        val jobId = job.persistedId
+        if (heartbeatRegistry.hasLiveHeartbeat(jobId, job.attemptNo)) return
+        ...
+    } catch (e: RuntimeException) {
+        log.warn("PROCESSING 정체 job 회수 실패: ...", e)   // ← Redis 장애가 여기로 삼켜졌다
+    }
+}
+```
+
+**후 — `LIVE` 에서만 물러난다**
+
+```kotlin
+val state = heartbeatRegistry.heartbeatState(jobId, job.attemptNo)
+if (state == HeartbeatState.LIVE) {
+    return
+}
+if (state == HeartbeatState.UNKNOWN) {
+    log.warn("heartbeat 저장소에 닿지 않아 updatedAt 만으로 회수: jobId={}, attemptNo={}", jobId, job.attemptNo)
+}
+val updated = jobRepository.failIfProcessing(jobId, job.attemptNo, Instant.now())
+if (updated == 1) {
+    log.info("PROCESSING 정체 job 회수, FAILED 전이: jobId={}, attemptNo={}", jobId, job.attemptNo)
+    eventPublisher.publishEvent(JobRecovered(jobId, job.attemptNo, detectorFor(state)))
+    heartbeatRegistry.removeHeartbeat(jobId, job.attemptNo)   // ← 이벤트 발행 뒤로 옮겼다
+}
+```
+
+`removeHeartbeat` 를 이벤트 발행 **뒤로** 옮긴 것은 사소해 보이지만 의도가 있다. 뒷정리가 이벤트 발행을 막으면 안 된다 — 지금은 예외를 삼키니 순서가 무의미하지만, 순서 자체가 "회수 사실을 알리는 것이 먼저고 청소는 나중"이라는 우선순위를 코드로 적어 둔 것이다.
+
+### 새 알람 규칙
+
+```yaml
+      - alert: CreditBackstopBlindRecovery
+        expr: increase(credit_job_recovery_total{detector="backstop_blind"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: P2
+        annotations:
+          summary: "blind backstop 회수 {{ $value }}건"
+          description: "heartbeat 저장소에 닿지 않아 updatedAt 만으로 회수했다. Redis 를 확인하라. 이 회수는 오탐일 수 있으며, 오탐이면 credit_defense_total{point=\"confirm\",outcome=\"stale\"} 이 함께 오른다."
+```
+
+`CreditBackstopRecovery` 와 굳이 나눈 이유는 **원인이 다르기 때문**이다. `backstop` 은 "heartbeat 가 샜다"(Redis 는 살아 있는데 엔트리가 없다), `backstop_blind` 는 "Redis 가 죽었다". 대응이 다르므로 라벨도 알람도 갈라야 한다. description 에 `confirm/stale` 을 같이 보라고 적은 것은 **오탐 여부를 확인하는 방법**이 그것뿐이기 때문이다.
+
+그리고 6단계가 "이 사고를 잡을 지표가 없다, `credit_job_recovery_failed_total{reason}` 이 필요하다"고 썼던 항목은 **만들지 않았다.** 이 수정 뒤로는 회수가 **실패하지 않는다** — Redis 가 안 보여도 `backstop_blind` 로 성공하고, 그 성공이 곧 사고의 기록이다. **없는 지표를 추가하는 대신 실패를 성공으로 바꾸는 것이 답이었다.**
+
+### 테스트가 보장하는 것
+
+| 테스트 | 보장 |
+|---|---|
+| `HeartbeatRegistryTest` | 미래 score → `LIVE`, 없음/만료 → `ABSENT`, Redis 예외 → **`UNKNOWN` 이고 예외가 새지 않는다** |
+| 〃 | `removeHeartbeat` 와 `stopHeartbeat` 이 Redis 예외를 삼킨다 |
+| 〃 | `findExpiredAttempts` 는 여전히 **전파한다** (의도적으로 다르다) |
+| `DeadJobRecoveryTaskTest` | `LIVE` → `failIfProcessing` 호출 안 됨 / `ABSENT` → `BACKSTOP` / `UNKNOWN` → `BACKSTOP_BLIND` |
+| 〃 | `removeHeartbeat` 가 던져도 `JobRecovered` 는 발행된다 |
+| `DefenseMetricsTest` | `backstop_blind` 가 이벤트 없이도 0 으로 사전 등록돼 있다 |
+
+전체 177개(6단계의 175개 + 추가 2개), 전부 통과.
+
+### 02 재실행 실측
+
+`./gradlew bootJar` 후 `02-heartbeat-lost.sh` 를 그대로 다시 돌렸다. A 구간은 회귀 확인, B 구간이 이번 수정의 실증이다.
+
+**B — Redis 정지 11초 만에 3건 회수.**
+
+```
+   T+9    PROCESSING 행 3건을 updated_at=120초 전으로 심었다 (백스톱 대상)
+   T+9    Redis 정지
+   [ 11s] recovery{backstop_blind} >= 1 — 참
+   T+20   blind 회수 감지 — Redis 정지 이후 11초
+   [  8s] CreditBackstopBlindRecovery firing — 참
+   T+28   firing 알람: [CreditBackstopBlindRecovery CreditBackstopRecovery]
+   T+38   blind=3 backstop=0 heartbeat=0 PROCESSING=0 HOLDING=3
+   ... (10초 간격 6회, 전부 같은 값)
+   T+90   Redis 다운 90초 결산: blind=3 backstop=0 heartbeat=0
+   T+90     로그 'heartbeat 만료 회수 단계 실패' 10회 / 'updatedAt 만으로 회수' 3회
+   T+120  Redis 복구 30초 후: blind=3 backstop=0 heartbeat=0 — COMPLETED=4 HOLDING=3
+   [  6s] 미결 job(HOLDING+PROCESSING) 0건 — 참
+   T+132  B 종료 — COMPLETED=7
+```
+
+**11초.** 같은 사고, 같은 심은 행, 같은 90초인데 수정 전에는 0건이었다. 11초의 내역은 스캔 주기 5초 + Prometheus 스크레이프 5초이고, `updatedAt` 이 이미 타임아웃(60초)을 넘긴 행을 심었으므로 실질 감지는 **다음 스캔 주기 한 번**이다. 자연 발생 사고라면 여기에 `processing.timeout-seconds`(60초)가 더 붙는다.
+
+```
+WARN c.e.c.j.scheduling.DeadJobRecoveryTask : heartbeat 저장소에 닿지 않아 updatedAt 만으로 회수: jobId=6, attemptNo=0
+```
+
+읽어야 할 숫자가 셋 더 있다.
+
+- **`backstop=0`, `heartbeat=0`.** 회수는 전부 `backstop_blind` 로만 기록됐다. 라벨이 원인을 정확히 가리킨다 — heartbeat 가 샌 것이 아니라 Redis 가 죽었다.
+- **`'updatedAt 만으로 회수'` WARN 이 정확히 3회.** 심은 행 수와 같다. 수정 전 같은 자리의 WARN 은 21회(주기 7번 × 3건)였다 — **매 주기 재시도하며 실패하던 것이, 한 번에 성공하고 끝났다.** `'단계 실패'` ERROR 10회는 여전히 남는데, 그건 `findExpiredAttempts` 를 일부러 던지게 둔 heartbeat 스캔 쪽이고 의도한 동작이다.
+- **Redis 복구 후 추가 회수 0건.** 수정 전에는 복구 직후 3건이 몰렸다(=그때까지 못 하고 있었다는 증거). 이번에는 복구해도 아무 일이 없다 — **이미 다 했기 때문이다.** 회수된 job 은 HOLDING 으로 돌아가 있었고, 워커를 켜자 6초 만에 전부 COMPLETED 로 종결됐다(`COMPLETED=7`, 불변식 4종 합 0).
+
+한 가지 함정을 여기서 또 밟았다. 워커를 켠 뒤 종결을 `credit_hold_outstanding_count == 0` 으로 확인했더니 **재기동 직후 0초 만에 "참"** 이 나왔다. 실제로는 PROCESSING 3건이 돌고 있었고, 게이지가 첫 스냅샷 전의 초깃값 0 이었을 뿐이다. 4번 시나리오가 찾은 그 구멍과 정확히 같은 모양이라 스크립트를 DB 직접 조회로 바꿨다. **"재기동 직후의 0 은 값이 아니다"** 는 규칙은 알람뿐 아니라 검증 스크립트에도 적용된다.
+
+**A — 회귀 없음.** ZSET 을 날린 A 구간은 Redis 가 살아 있으므로 `heartbeatState` 가 `ABSENT` 를 돌려주고, 이전과 똑같이 `backstop` 으로 잡힌다.
+
+| 항목 | 기대 | 관측 |
+|---|---|---|
+| A `recovery{backstop}` | ≥ 1 | **3** (앱 UP 이후 55초) |
+| A `recovery{heartbeat}` | 0 | 0 |
+| A `recovery{backstop_blind}` | **0 (회귀 확인)** | **0** |
+| B Redis 다운 `recovery{backstop_blind}` | ≥ 1 | **3 (+11초)** |
+| B Redis 다운 `recovery{backstop}` / `{heartbeat}` | 0 | 0 / 0 |
+| B `CreditBackstopBlindRecovery` | firing | firing (+8초) |
+| B `'updatedAt 만으로 회수'` WARN | 3회 | 3회 |
+| B Redis 복구 후 추가 회수 | 없음 | blind=3 backstop=0 (변화 없음) |
+| B 워커 재개 후 종결 | 종결 | 6초 / `COMPLETED=7` |
+| invariant 4종 합 | 0 | 0 |
+
+**01 도 함께 돌려 회귀를 봤다.** 워커 크래시는 Redis 가 멀쩡한 사고이므로 heartbeat 탐지기가 그대로 잡아야 한다.
+
+```
+   recovery{detector=heartbeat}     >= 1      3   (앱 UP 이후 8초 / SIGKILL 이후 13초)
+   recovery{detector=backstop}      0         0
+   credit_job_recovery_total{'detector': 'backstop_blind'}   0
+   firing 알람                      없음      [ ]
+```
+
+`backstop_blind` 는 0 으로 깔린 채 한 번도 오르지 않았고, 알람도 침묵했다. **새 라벨이 정상 경로를 오염시키지 않는다**는 것이 이 줄의 뜻이다.
+
+### 남는 것
+
+**`UNKNOWN` 이 길게 지속되면 정상 job 이 재시도 루프에 들어간다.** Redis 가 오래 죽어 있고 `processing.timeout-seconds`(60초)를 넘기는 job 이 많으면, 살아 있는 job 들이 매 주기 회수 대상이 된다. `generation.max-attempts`(3)가 있어 무한하지는 않지만 **소진하면 최종 환불로 끝난다** — 즉 Redis 장기 장애 + 긴 job 조합에서는 정상 처리될 job 이 환불로 종결될 수 있다. 이건 이번 수정이 **감수하기로 한** 위험이지 놓친 것이 아니다. 완화책 둘을 예고만 해 둔다.
+
+1. **`UNKNOWN` 연속 주기 상한.** N주기 연속 `UNKNOWN` 이면 blind 회수를 중단하고 별도 알람만 올린다 — "Redis 순단"과 "Redis 장기 장애"를 다르게 다루는 것이다.
+2. **`processing.timeout-seconds` 를 실제 분포에 맞춘다.** 지금 60초는 스텁(3~7초) 기준이고, 실제 생성 API 의 p99 를 재서 다시 잡아야 오탐 확률 자체가 내려간다.
+
+### 포트폴리오 서술 정정
+
+포트폴리오 7페이지에 이렇게 써 있다.
+
+> 저장소 장애를 대비해 DB 의 `updatedAt` 으로 한 번 더 스캔한다
+
+**이 문장은 이 수정 뒤에야 참이 된다.** 6단계 이전 코드에서는 백스톱이 Redis 를 참조했으므로 "저장소 장애를 대비해"가 성립하지 않았다. 고쳐 쓴다면 이렇게 쓰는 편이 정확하고, 이 프로젝트에서 실제로 배운 것도 그쪽이다.
+
+> heartbeat 저장소가 죽으면 조회 결과를 `UNKNOWN` 으로 다루고, DB 의 `updatedAt` 만으로 회수한다. 살아 있는 job 을 오판할 수 있지만 시도 번호 CAS 가 잔액 불변식을 지키므로 비용은 외부 호출 1회이며, 그 오판은 `backstop_blind` 카운터에 남는다.
+
+**"장애를 대비했다"보다 "장애 때 무엇을 포기하고 무엇을 지키는지"가 설계를 말한다.**
 
 ---
 
 ## 명령어
 
 ```
-# 이 브랜치에서 전체 테스트 실행 (Docker 필요 — MySQL + Redis Testcontainers, 175개 테스트)
+# 이 브랜치에서 전체 테스트 실행 (Docker 필요 — MySQL + Redis Testcontainers, 177개 테스트)
 ./gradlew test
 
 # 정적 분석

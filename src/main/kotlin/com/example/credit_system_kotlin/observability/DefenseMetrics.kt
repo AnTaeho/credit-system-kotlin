@@ -76,7 +76,10 @@ class DefenseMetrics(
 
     private fun registerRecoveryCounter(detector: RecoveryDetector): Counter =
         Counter.builder(RECOVERY_METRIC)
-            .description("죽은 job 을 FAILED 로 회수한 횟수. detector=backstop 이 0이 아니면 heartbeat 누수다")
+            .description(
+                "죽은 job 을 FAILED 로 회수한 횟수. detector=backstop 이 0이 아니면 heartbeat 누수, " +
+                    "backstop_blind 는 heartbeat 저장소 장애 중 updatedAt 만으로 회수한 것이다"
+            )
             .tag("detector", detector.name.lowercase())
             .register(registry)
 

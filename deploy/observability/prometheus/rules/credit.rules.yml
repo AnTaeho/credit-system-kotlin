@@ -91,6 +91,18 @@ groups:
           summary: "backstop 회수 {{ $value }}건"
           description: "heartbeat 가 잡았어야 할 죽은 job 을 최후 방어선이 잡았다. Redis 또는 heartbeat 갱신 경로가 새고 있다."
 
+      # 6단계 02B 가 찾은 결함의 수정(후속 1)이 만든 라벨이다.
+      # backstop 과 굳이 나눈 이유는 원인이 다르기 때문이다 — backstop 은 heartbeat 누수,
+      # 이쪽은 heartbeat 저장소 자체의 장애다. 그리고 이 회수만 오탐일 수 있다.
+      - alert: CreditBackstopBlindRecovery
+        expr: increase(credit_job_recovery_total{detector="backstop_blind"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: P2
+        annotations:
+          summary: "blind backstop 회수 {{ $value }}건"
+          description: "heartbeat 저장소에 닿지 않아 updatedAt 만으로 회수했다. Redis 를 확인하라. 이 회수는 오탐일 수 있으며, 오탐이면 credit_defense_total{point=\"confirm\",outcome=\"stale\"} 이 함께 오른다."
+
       - alert: CreditSystemDown
         expr: up{job="credit_system"} == 0
         for: 30s

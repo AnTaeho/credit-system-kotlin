@@ -70,27 +70,27 @@ class HeartbeatRegistryTest {
     }
 
     @Test
-    fun `hasLiveHeartbeat는 Redis 예외를 전파한다`() {
+    fun `heartbeatState는 Redis 예외를 삼키고 UNKNOWN을 돌려준다`() {
         whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
         whenever(zSetOperations.score(KEY, "5:0"))
             .thenThrow(RedisConnectionFailureException("redis down"))
 
-        assertThatThrownBy { registry.hasLiveHeartbeat(5L, 0) }
-            .isInstanceOf(RedisConnectionFailureException::class.java)
+        assertThat(registry.heartbeatState(5L, 0)).isEqualTo(HeartbeatState.UNKNOWN)
     }
 
     @Test
-    fun `removeHeartbeat는 Redis 예외를 전파한다`() {
+    fun `removeHeartbeat는 Redis 예외를 삼킨다`() {
         whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
         whenever(zSetOperations.remove(KEY, "7:0"))
             .thenThrow(RedisConnectionFailureException("redis down"))
 
-        assertThatThrownBy { registry.removeHeartbeat(7L, 0) }
-            .isInstanceOf(RedisConnectionFailureException::class.java)
+        registry.removeHeartbeat(7L, 0)
+
+        verify(zSetOperations).remove(KEY, "7:0")
     }
 
     @Test
-    fun `stopHeartbeat은 removeHeartbeat가 Redis 예외를 던지면 전파한다`() {
+    fun `stopHeartbeat은 removeHeartbeat가 Redis 예외를 던져도 전파하지 않는다`() {
         whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
         whenever(zSetOperations.add(any<String>(), any<String>(), any<Double>()))
             .thenThrow(RedisConnectionFailureException("redis down"))
@@ -99,8 +99,8 @@ class HeartbeatRegistryTest {
 
         val future = registry.startHeartbeat(3L, 0)
 
-        assertThatThrownBy { registry.stopHeartbeat(3L, 0, future) }
-            .isInstanceOf(RedisConnectionFailureException::class.java)
+        registry.stopHeartbeat(3L, 0, future)
+
         assertThat(future.isCancelled).isTrue()
     }
 
@@ -143,15 +143,15 @@ class HeartbeatRegistryTest {
     }
 
     @Test
-    fun `정상 상황에서 hasLiveHeartbeat는 score 만료 여부로 판정한다`() {
+    fun `정상 상황에서 heartbeatState는 score 만료 여부로 LIVE와 ABSENT를 가른다`() {
         whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
         whenever(zSetOperations.score(KEY, "13:0")).thenReturn((Instant.now().epochSecond + 30).toDouble())
         whenever(zSetOperations.score(KEY, "14:0")).thenReturn((Instant.now().epochSecond - 30).toDouble())
         whenever(zSetOperations.score(KEY, "15:0")).thenReturn(null)
 
-        assertThat(registry.hasLiveHeartbeat(13L, 0)).isTrue()
-        assertThat(registry.hasLiveHeartbeat(14L, 0)).isFalse()
-        assertThat(registry.hasLiveHeartbeat(15L, 0)).isFalse()
+        assertThat(registry.heartbeatState(13L, 0)).isEqualTo(HeartbeatState.LIVE)
+        assertThat(registry.heartbeatState(14L, 0)).isEqualTo(HeartbeatState.ABSENT)
+        assertThat(registry.heartbeatState(15L, 0)).isEqualTo(HeartbeatState.ABSENT)
     }
 
     @Test

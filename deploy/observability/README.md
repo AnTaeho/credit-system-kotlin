@@ -83,7 +83,7 @@ docker compose -f deploy/observability/docker-compose.yml logs -f app
 | 스크립트 | 심는 사고 | 걸리는 시간 |
 |---|---|---|
 | `01-worker-crash.sh` | PROCESSING 중인 앱을 SIGKILL 하고 즉시 재기동 | ~2분 |
-| `02-heartbeat-lost.sh` | heartbeat ZSET 소실 / Redis 다운 중 회수 시도 | ~9분 |
+| `02-heartbeat-lost.sh` | heartbeat ZSET 소실(→`backstop`) / Redis 다운 중 회수(→`backstop_blind`) | ~9분 |
 | `03-worker-stopped.sh` | 워커만 정지(`APP_WORKER_ENABLED=false`) | ~9분 |
 | `04-scheduler-stopped.sh` | 스케줄러 정지(`APP_SCHEDULING_ENABLED=false`) | ~4분 |
 | `05-ledger-corruption.sh` | SQL 로 잔액·원장을 직접 훼손하고 원복 | ~5분 |

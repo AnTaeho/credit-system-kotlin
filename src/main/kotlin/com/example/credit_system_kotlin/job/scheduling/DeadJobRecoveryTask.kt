@@ -2,6 +2,7 @@ package com.example.credit_system_kotlin.job.scheduling
 
 import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
+import com.example.credit_system_kotlin.heartbeat.HeartbeatState
 import com.example.credit_system_kotlin.heartbeat.JobAttempt
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
@@ -80,24 +81,42 @@ class DeadJobRecoveryTask(
         }
     }
 
-    /** 한 건의 실패가 같은 주기의 나머지를 막지 않도록 항목 단위로 격리한다. */
+    /**
+     * 한 건의 실패가 같은 주기의 나머지를 막지 않도록 항목 단위로 격리한다.
+     *
+     * heartbeat 를 못 본 경우([HeartbeatState.UNKNOWN])에도 회수한다. 이 백스톱의 존재 이유가
+     * "heartbeat 저장소가 죽어도 돈이 묶인 채 방치되지 않는다"이므로, 저장소가 안 보인다고
+     * 회수를 멈추면 장치가 스스로를 부정한다. 대신 오탐 가능성을 라벨로 남긴다 —
+     * 살아 있는 job 을 잘못 내려도 attemptNo CAS 가 돈을 지키고(원래 워커의 confirm 은 0행),
+     * 비용은 낭비된 외부 호출 1회다.
+     */
     private fun recoverStalled(job: Job) {
         try {
             val jobId = job.persistedId
-            if (heartbeatRegistry.hasLiveHeartbeat(jobId, job.attemptNo)) {
+            val state = heartbeatRegistry.heartbeatState(jobId, job.attemptNo)
+            if (state == HeartbeatState.LIVE) {
                 return
+            }
+            if (state == HeartbeatState.UNKNOWN) {
+                log.warn(
+                    "heartbeat 저장소에 닿지 않아 updatedAt 만으로 회수: jobId={}, attemptNo={}",
+                    jobId, job.attemptNo
+                )
             }
             val updated = jobRepository.failIfProcessing(jobId, job.attemptNo, Instant.now())
             if (updated == 1) {
-                heartbeatRegistry.removeHeartbeat(jobId, job.attemptNo)
                 log.info("PROCESSING 정체 job 회수, FAILED 전이: jobId={}, attemptNo={}", jobId, job.attemptNo)
-                eventPublisher.publishEvent(
-                    JobRecovered(jobId, job.attemptNo, RecoveryDetector.BACKSTOP)
-                )
+                eventPublisher.publishEvent(JobRecovered(jobId, job.attemptNo, detectorFor(state)))
+                heartbeatRegistry.removeHeartbeat(jobId, job.attemptNo)
             }
         } catch (e: RuntimeException) {
             log.warn("PROCESSING 정체 job 회수 실패: jobId={}, attemptNo={}", job.id, job.attemptNo, e)
         }
+    }
+
+    private fun detectorFor(state: HeartbeatState): RecoveryDetector = when (state) {
+        HeartbeatState.UNKNOWN -> RecoveryDetector.BACKSTOP_BLIND
+        else -> RecoveryDetector.BACKSTOP
     }
 
     private fun retryOrRefundFailedJobs() {

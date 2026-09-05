@@ -3,6 +3,7 @@ package com.example.credit_system_kotlin.job.scheduling
 import com.example.credit_system_kotlin.global.config.AppProperties
 import com.example.credit_system_kotlin.global.config.appProperties
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
+import com.example.credit_system_kotlin.heartbeat.HeartbeatState
 import com.example.credit_system_kotlin.heartbeat.JobAttempt
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
@@ -74,7 +75,7 @@ class DeadJobRecoveryTaskTest {
                 eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
             )
         ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.hasLiveHeartbeat(20L, 0)).thenReturn(false)
+        whenever(heartbeatRegistry.heartbeatState(20L, 0)).thenReturn(HeartbeatState.ABSENT)
         whenever(
             jobRepository.failIfProcessing(eq(20L), any(), any<Instant>())
         ).thenReturn(1)
@@ -93,7 +94,7 @@ class DeadJobRecoveryTaskTest {
                 eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
             )
         ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.hasLiveHeartbeat(21L, 0)).thenReturn(true)
+        whenever(heartbeatRegistry.heartbeatState(21L, 0)).thenReturn(HeartbeatState.LIVE)
 
         task.scan()
 
@@ -242,7 +243,7 @@ class DeadJobRecoveryTaskTest {
                 eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
             )
         ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.hasLiveHeartbeat(61L, 0)).thenReturn(false)
+        whenever(heartbeatRegistry.heartbeatState(61L, 0)).thenReturn(HeartbeatState.ABSENT)
         whenever(jobRepository.failIfProcessing(eq(61L), eq(0), any<Instant>())).thenReturn(1)
 
         task.scan()
@@ -250,6 +251,47 @@ class DeadJobRecoveryTaskTest {
         assertThat(eventPublisher.recoveryEvents())
             .singleElement()
             .satisfies({ assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP) })
+    }
+
+    @Test
+    fun `heartbeat 저장소를 못 보면 updatedAt 만으로 회수하고 BACKSTOP_BLIND로 발행한다`() {
+        val job = staleProcessingJob(64L)
+        whenever(
+            jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
+                eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
+            )
+        ).thenReturn(listOf(job))
+        whenever(heartbeatRegistry.heartbeatState(64L, 0)).thenReturn(HeartbeatState.UNKNOWN)
+        whenever(jobRepository.failIfProcessing(eq(64L), eq(0), any<Instant>())).thenReturn(1)
+
+        task.scan()
+
+        verify(jobRepository).failIfProcessing(eq(64L), eq(0), any<Instant>())
+        assertThat(eventPublisher.recoveryEvents())
+            .singleElement()
+            .satisfies({
+                assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP_BLIND)
+                assertThat(it.jobId).isEqualTo(64L)
+            })
+    }
+
+    @Test
+    fun `heartbeat 제거가 실패해도 JobRecovered 발행은 막히지 않는다`() {
+        val job = staleProcessingJob(65L)
+        whenever(
+            jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
+                eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
+            )
+        ).thenReturn(listOf(job))
+        whenever(heartbeatRegistry.heartbeatState(65L, 0)).thenReturn(HeartbeatState.UNKNOWN)
+        whenever(jobRepository.failIfProcessing(eq(65L), eq(0), any<Instant>())).thenReturn(1)
+        doThrow(RuntimeException("redis down")).whenever(heartbeatRegistry).removeHeartbeat(65L, 0)
+
+        task.scan()
+
+        assertThat(eventPublisher.recoveryEvents())
+            .singleElement()
+            .satisfies({ assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP_BLIND) })
     }
 
     @Test
@@ -261,7 +303,7 @@ class DeadJobRecoveryTaskTest {
                 eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
             )
         ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.hasLiveHeartbeat(63L, 0)).thenReturn(false)
+        whenever(heartbeatRegistry.heartbeatState(63L, 0)).thenReturn(HeartbeatState.ABSENT)
         // failIfProcessing 은 스텁하지 않는다 — mock 의 Int 기본값 0이 곧 "회수 실패"다.
 
         task.scan()

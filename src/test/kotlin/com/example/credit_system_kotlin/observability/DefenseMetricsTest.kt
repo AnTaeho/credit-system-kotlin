@@ -49,6 +49,7 @@ class DefenseMetricsTest {
 
         assertThat(recoveryCount("backstop")).isEqualTo(1.0)
         assertThat(recoveryCount("heartbeat")).isZero()
+        assertThat(recoveryCount("backstop_blind")).isZero()
     }
 
     /**
@@ -77,6 +78,9 @@ class DefenseMetricsTest {
         }
         assertThat(recoveryCount("heartbeat")).isZero()
         assertThat(recoveryCount("backstop")).isZero()
+        assertThat(recoveryCount("backstop_blind"))
+            .describedAs("backstop_blind 도 RecoveryDetector.entries 를 따라 0으로 깔려 있어야 한다")
+            .isZero()
 
         val registeredCombinations = registry.get(DefenseMetrics.DEFENSE_METRIC).counters().size
         assertThat(registeredCombinations).isEqualTo(expected.values.sumOf { it.size })
