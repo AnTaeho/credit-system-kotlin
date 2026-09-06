@@ -2513,6 +2513,229 @@ $ docker compose ... logs app | grep -c "executor 위임 실패"
 
 ---
 
+## 후속 3 — 장애 주입 버튼 패드
+
+### 왜 만들었나 — 가만히 있으면 아무 지표도 안 쌓인다
+
+스택을 올리고 Grafana 를 열면 빈 화면이 나온다. 이 챕터의 지표는 전부 **도메인이 움직여야
+생기는 것**이라, 트래픽도 사고도 없으면 볼 것이 없다. 6단계에서 만든 시나리오 스크립트가
+그 문제를 푼 방식은 "사고를 심고 끝까지 달린 다음 표를 내는 것"이었다. 실측에는 그게 맞다.
+
+그런데 대시보드를 앞에 두고 곡선이 꺾이는 걸 보고 싶을 때는 그 형태가 안 맞는다. 스크립트는
+`fresh_stack` 으로 시작해서 정해진 초만큼 기다리고 끝난다 — **중간에 멈춰서 들여다볼 자리가
+없다.** 사고를 심은 상태로 3분이든 10분이든 두고 보다가 원할 때 되돌리고 싶은데, 그러려면
+`docker compose kill`, `restart_app_with`, `mysql -e "UPDATE ..."` 를 매번 손으로 쳐야 한다.
+
+그래서 **버튼 하나 = 사고 하나**인 패드를 만들었다. 누르면 즉시 심고, 원하는 만큼 두고 보다가,
+짝이 되는 복구 버튼을 누른다. 그리고 화면이 **그 사고에 반응해야 할 지표와 침묵해야 할 지표를
+같이 보여준다** — 6단계 결과 매트릭스를 문서에서 꺼내 버튼 옆에 놓은 것이다. 이 챕터에서
+매번 반복한 문장이 "무엇이 안 울렸는지가 무엇이 울렸는지만큼 중요하다"인데, 그 문장은 표에
+있을 때보다 버튼 옆에 있을 때 훨씬 잘 읽힌다.
+
+### 왜 앱 밖인가
+
+패드를 앱 안의 엔드포인트로 만드는 안이 먼저 떠오른다. 버렸다. 이유가 둘이다.
+
+1. **사고 대부분이 앱이 자기 자신에게 할 수 없는 일이다.** SIGKILL, env 를 바꿔 재기동,
+   Redis 컨테이너 교체, SQL 로 원장 훼손 — 전부 프로세스 밖의 손이 필요하다. 앱 안에 두면
+   "재기동" 버튼이 자기가 실행 중인 프로세스를 갈아엎어야 한다.
+2. **앱이 죽은 상태에서도 패드는 살아 있어야 한다.** 09 카드(앱 정지)의 요점이 `up == 0` 과
+   "다른 모든 지표의 침묵"인데, 패드가 앱 안에 있으면 그 화면을 볼 수가 없다.
+
+그리고 앱 안에 두면 장애 주입 코드가 프로덕션 아티팩트에 들어간다. 4단계에서 노출 경계를
+`application.yml` 이 아니라 배포 쪽에서 정한 것과 같은 판단이다 — **운영 도구는 운영 쪽에 둔다.**
+
+### 설계
+
+**버튼 하나 = 사고 하나(원자적).** 시나리오 통째 실행 버튼은 만들지 않았다. `02-heartbeat-lost.sh`
+는 A(ZSET 소실)와 B(Redis 다운 중 회수) 두 사고를 순서대로 심는 9분짜리 스크립트인데, 패드에서는
+`SIGKILL → 기억 소거 → 재기동` 하나와 `Redis 정지` / `죽은 PROCESSING 심기` / `Redis 복구` 셋으로
+갈라져 있다. 한 버튼 안에서 여러 사고가 겹치면 어느 지표가 무엇에 반응한 건지 화면에서 읽을 수 없다.
+
+**사고 버튼은 복구 버튼을 가진다.** 워커 정지 ↔ 재개, Redis 정지 ↔ 복구, 지연 600초 ↔ 기본값,
+실패율 100% ↔ 0.3, 원장 훼손 ↔ 원복. 05 만 원복이 까다로운데, 훼손 전 잔액과 지운 HOLD 행을
+`.state/` 에 남기고 원복 버튼이 그걸 읽는다. 패드는 스크립트와 달리 **눌러 놓고 오래 두는 물건**
+이라 원복 정보를 셸 변수에 들고 있을 수가 없다. 상태 파일이 없으면 잔액을
+`initial_balance + SUM(ledger)` 로 재계산한다 — 대사가 검사하는 등식 그 자체다.
+
+**한 소스 원칙.** docker·mysql·curl 조작은 전부 `faultpad/actions.sh` 가 하고, 그 파일은
+시나리오와 같은 `scenarios/lib.sh` 를 source 한다. 파이썬은 HTTP 서빙·프로세스 관리·프록시만
+한다. 스크립트와 버튼이 다른 코드로 같은 사고를 심으면 둘 중 하나는 반드시 낡는다. 02A 의
+`--renew-anon-volumes` 함정 같은 것이 두 군데에 적혀 있으면 한 군데는 언젠가 틀린다.
+
+**허용 목록.** `/api/run` 은 `catalog.json` 의 버튼에 선언된 액션만 받는다. 숫자 파라미터는
+정수와 범위를 검증하고, env 는 catalog 에 선언된 **조합 전체가 일치할 때만** 통과한다.
+브라우저가 보낸 문자열이 셸에 닿는 경로는 없다. `catalog.json` 이 화면의 데이터이면서 동시에
+서버의 허용 목록이라는 게 이 설계의 핵심이다 — 화면에 없는 버튼은 누를 수도 없다.
+
+**env 집합 추적.** `restart_app_with` 는 넘긴 env 만 export 한다. 즉 워커를 끈 뒤 스텁 지연을
+걸면 워커가 다시 켜진다. 그래서 서버가 현재 `APP_*` 다섯 개의 집합을 메모리에 들고 있다가,
+env 를 바꾸는 액션마다 **집합 전체**를 `actions.sh restart_app KEY=VAL ...` 로 넘긴다. 초깃값은
+compose 기본값이다. 그리고 `state` 가 컨테이너의 실제 env(`$DC exec -T app env | grep ^APP_`)도
+읽어 와서, 서버 메모리와 다르면 상태 띠에 그 차이를 표시한다 — 패드 밖에서 누가 손댔다는 뜻이다.
+
+**null 과 0 을 구분한다.** `/api/query` 는 결과가 없는 쿼리에 `null` 을 돌려주고, 화면은 그걸
+`없음(시계열 없음)` 으로 그린다. 0 으로 뭉개면 "그 시계열이 아예 없다"와 "값이 0 이다"가 같아진다.
+4번 시나리오가 찾은 함정("스냅샷이 안 돌면 게이지가 0 에 얼어붙는다")이 정확히 그 구분의 문제였다.
+같은 이유로 상태 띠는 게이지가 아니라 **DB 를 직접 읽은 미결 수와 최고 나이**를 같이 보여준다.
+
+### 파일별 변경 목록
+
+| 파일 | 변경 | 내용 |
+|---|---|---|
+| `deploy/observability/faultpad/server.py` | 신규 | python3 표준 라이브러리만. 정적 서빙, `actions.sh` 실행(동시 1개), Prometheus 프록시, env 집합 추적, 허용 목록 검증 |
+| `deploy/observability/faultpad/actions.sh` | 신규 | `scenarios/lib.sh` 를 source. 19개 액션. `state` 는 JSON 한 줄을 낸다 |
+| `deploy/observability/faultpad/catalog.json` | 신규 | 카드 12개. 서버의 허용 목록이자 화면의 데이터 |
+| `deploy/observability/faultpad/index.html` | 신규 | 단일 파일(인라인 CSS/JS). 외부 리소스 0 — 오프라인에서도 뜬다 |
+| `deploy/observability/faultpad/README.md` | 신규 | 띄우는 법 한 페이지 |
+| `deploy/observability/README.md` | 수정 | "장애 주입 버튼 패드" 절 추가 |
+| `.gitignore` | 수정 | `deploy/observability/faultpad/.state/` |
+
+### 카드표
+
+기댓값은 전부 6단계 결과 매트릭스와 후속 1 실측에서 그대로 옮겼다. **근거 없는 칸은 08 하나뿐이고,
+화면과 이 표에 "예상(미실측)" 이라고 적혀 있다.**
+
+| 카드 | 심는 사고 | 반응해야 할 지표 | 침묵해야 할 지표 | 알람 | 근거 |
+|---|---|---|---|---|---|
+| 준비/트래픽 | (사고 아님) 스택·충전·job N건·잔액부족 N건·smoke | `hold_balance{applied}` / `{rejected}` | 불변식 4종 | 없음 | 5단계 smoke |
+| 01 | SIGKILL → 즉시 재기동 | `recovery{heartbeat}` = 죽을 때 PROCESSING 수, SIGKILL 후 11초 | `recovery{backstop}` 0, 불변식, 5xx | 없음(임계 전에 끝난다) | 매트릭스 1 |
+| 02A | SIGKILL → Redis 기억 소거 → 재기동 | `recovery{backstop}` 3, SIGKILL 후 70초 | `recovery{heartbeat}` 0 — 잡을 엔트리가 없다 | `CreditBackstopRecovery` +4초 | 매트릭스 2A |
+| 02B | Redis 정지 / 죽은 PROCESSING 심기 / 복구 | `recovery{backstop_blind}` 심은 뒤 ~11초 + WARN 로그 | `backstop` 0, `heartbeat` 0 | `CreditBackstopBlindRecovery`, 오탐이면 `confirm{stale}` | 후속 1 재실행 |
+| 03 | 워커 정지 (`APP_WORKER_ENABLED`) | `outstanding_count` 고정, `oldest_pending_age` 단조 증가 | 방어 카운터 전부, `recovery`, 5xx 0, `up` 1 | `CreditPipelineStalled` job 생성 후 385초 | 매트릭스 3 |
+| 04 | 스케줄러 정지 (`APP_SCHEDULING_ENABLED`) | staleness 둘 **-1 고정** | `oldest_pending_age`·`outstanding_count` **0 에 얼어붙는다** | `CreditSnapshotStale` + `CreditReconciliationStale` 재기동 후 76초 | 매트릭스 4(수정 후) |
+| 05 | (a) balance −1 (b) balance = −1 (c) HOLD 원장 1행 삭제 | mismatch 25초 / negative 11초 / jobs_without_hold 14초 | 방어 카운터 합 불변(31→31), `up` 1, 5xx 0 | P1 셋, `for: 0m` 이라 즉시 | 매트릭스 5 |
+| 06 | 같은 idemKey N건 동시 | `idem_key{app_hit}` + `{db_unique}` = N−1, `hold_balance{applied}` +1, 잔액 −100 | `hold_balance{rejected}` 0 | 없음(방어가 동작한 것이다) | 매트릭스 6 |
+| 07 | 스텁 지연 600초 | `oldest_pending_age` 단조 증가, `worker_claim{applied}` = job 수 | `recovery{heartbeat}` 0 **그리고** `{backstop}` 0 — 회수하지 않는 게 옳다 | `CreditPipelineStalled` 379초 | 매트릭스 7 |
+| 08 | 스텁 실패율 1.0 | **예상(미실측)** `mark_failed` = job 수 × 3, `retry_claim` = job 수 × 2, `final_refund` = job 수, 잔액 원복 | 예상(미실측) 불변식 0, 5xx 0 | `CreditRetryExhaustionRateHigh`(P3, 비율 > 0.1 이 10분) | **없음.** `application.yml` 의 `max-attempts=3` 에서 유추 |
+| 09 | 앱 SIGKILL 후 방치 | `up{credit_system}` 0 | 다른 모든 지표 — 스크레이프 자체가 없다 | `CreditSystemDown` `for: 30s` | 5단계 알람 규칙 |
+
+### 구현하며 만난 함정
+
+**`restart_app_with` 는 넘긴 env 만 export 한다.** 스크립트에서는 한 시나리오가 손잡이 하나만
+쓰니까 문제가 안 됐는데, 패드는 워커 정지와 스텁 지연을 겹쳐 걸 수 있어야 한다. 서버가 집합
+전체를 들고 있게 만든 것이 이 함정의 값이다. 실행 로그에 매번 다섯 개가 전부 찍히는 것도 그래서다.
+
+**게이지를 상태 띠에 그대로 쓸 수 없다.** 4번 시나리오의 함정이 패드에서 그대로 재현된다 —
+재기동 직후 `credit_hold_outstanding_count` 는 0 인데 그건 "미결이 없다"가 아니라 "아직 아무도
+안 셌다"이다. 그래서 상태 띠의 미결 수는 게이지가 아니라 `mysql_q` 로 직접 센 값이고, 04 카드는
+게이지와 DB 값을 나란히 놓는다.
+
+**Redis 가 죽으면 앱의 헬스체크도 DOWN 이 된다.** 02B 검증 중 `state` 가 `app_up: false` 를
+냈다. 앱 프로세스는 멀쩡히 살아서 blind 회수를 돌리고 있었는데, `/actuator/health` 의 Redis
+헬스 인디케이터가 DOWN 이라 종합 상태가 DOWN 이 된 것이다. 5단계에서 "헬스체크가 관리 포트에
+의존한다"는 트레이드오프를 적어 뒀는데, **의존성 헬스 인디케이터까지 묶여 있다**는 건 그때
+안 적었다. 패드 화면에서는 `app` 점이 빨간데 `recovery{backstop_blind}` 는 오르는 그림이 되고,
+그 조합 자체가 정보다 — "앱이 죽은 게 아니라 Redis 가 죽었다"를 두 칸이 같이 말한다.
+
+**동시에 하나만 실행해야 한다.** `stack_up` 이 도는 중에 `charge` 를 누르면 seed 도 안 끝난
+DB 에 요청이 간다. 서버가 실행 중이면 409 를 내고 화면은 버튼을 전부 잠근다.
+
+### 검증에서 실제로 본 값
+
+`./gradlew bootJar` 후 패드만 띄우고, 브라우저 대신 curl 로 전 과정을 돌렸다. 아래는 그 실행의 값이다.
+
+**허용 목록.** 없는 액션(`rm -rf /`) 400, 버튼이 아닌 `state` 400, 선언 안 된 env 조합
+(`APP_WORKER_ENABLED=false; rm -rf /`) 400, 정수 아닌 파라미터(`"5; ls"`) 400, 범위 밖(`n=9999`) 400.
+`stack_up` 실행 중 `charge` 는 **409**.
+
+**스택이 안 떠 있을 때의 `/api/state`** — 세 컨테이너 전부 `false`, 나머지 값은 `null`. JSON 은 나온다.
+`/api/query` 와 `/api/alerts` 는 Prometheus 가 없을 때 502 가 아니라 `{"error": ...}` 200 을 냈다.
+
+**06 중복 폭풍 100건.**
+
+```
+   HTTP   97 200
+   HTTP    3 409
+   T+0    잔액 9400 → 9300 (차이 100)
+   T+0    job 행 총 7건, HOLD 원장 총 7건
+   T+12   idem_key app_hit=96 db_unique=3 (합 99 — 기대 99)
+   T+12   hold_balance rejected=0 (기대 0)
+```
+
+합 99 는 6단계와 같고, 내역은 90+9 가 아니라 **96+3** 이었다. 매트릭스에 "둘의 비율은 매번
+다르다"고 적어 둔 그대로다. 409 의 수(3)와 `db_unique`(3)가 정확히 같은 것도 다시 확인됐다.
+
+**05 (b) 음수 잔액 → 원복.**
+
+```
+   훼손 전 balance=9400 를 .state/balance.txt 에 저장했다
+   T+5s   negative_balance_orgs=1   firing=[]
+   T+10s  negative_balance_orgs=1   firing=[CreditLedgerReconciliationMismatch, CreditNegativeBalanceOrgs]
+   (원복)
+   T+10s  negative=0 mismatch=1     firing=[Mismatch, NegativeBalanceOrgs]
+   T+15s  negative=0 mismatch=1     firing=[Mismatch]
+   T+55s  negative=0 mismatch=0     firing=[Mismatch]
+   T+60s  negative=0 mismatch=0     firing=[]
+```
+
+감지 5초 이내, 알람 10초 이내. 원복은 불변식 10초 / mismatch 55초(대사 주기 60초) / 알람
+resolve 60초. 6단계의 11초·25초와 같은 크기다. `balance = -1` 하나가 mismatch 도 같이 깨는데,
+등식(`잔액 = 최초 잔액 + 원장 합계`)이 함께 무너지므로 맞는 동작이다.
+
+**env 토글.** `restart_app APP_WORKER_ENABLED=false` 를 누르자 로그에 다섯 개가 전부 찍혔고
+(`APP_SCHEDULING_ENABLED=true APP_STUB_FAILURE_RATE=0.3 APP_STUB_MAX_DELAY_MILLIS=7000
+APP_STUB_MIN_DELAY_MILLIS=3000 APP_WORKER_ENABLED=false`), `state` 의 `container_env` 가
+`APP_WORKER_ENABLED: "false"` 로 바뀌었으며 `env_drift` 는 비어 있었다. 되돌리는 것도 같았다.
+
+**02B blind 회수.**
+
+```
+   HOLDING 3건을 updated_at=120초 전의 PROCESSING 으로 바꿨다 (현재 PROCESSING=3)
+   T+5s   blind=2 backstop=0 heartbeat=0  firing=[]
+   T+10s  blind=3 backstop=0 heartbeat=0  firing=[CreditBackstopBlindRecovery]
+```
+
+심은 뒤 **10초**에 3건 전부. 후속 1 의 11초와 같다. `backstop` 과 `heartbeat` 는 끝까지 0 —
+라벨이 원인을 정확히 가리킨다. 이 구간에서 `state` 는 `redis_up: false`, `heartbeat_zset: null`,
+`app_up: false`(위의 헬스 인디케이터 함정)를 냈다.
+
+**01 크래시 회수.**
+
+```
+   T+0    PROCESSING = 8:2,12:0,13:0
+   T+0    Redis ZSET: 3 개
+   앱 SIGKILL (15:15:08)
+   T+6    앱 UP
+   T+5s   heartbeat=0 backstop=0 age=89
+   T+10s  heartbeat=3 backstop=0 age=89
+   T+20s  heartbeat=3 backstop=0 age=0
+```
+
+죽을 때 PROCESSING 3건 → `recovery{heartbeat}` **정확히 3**, `backstop` 0.
+SIGKILL 로부터 감지까지 약 16초(재기동 6초 포함), `oldest_pending_age` 는 89 로 튀었다가 0 으로.
+
+**09 앱 정지.** `up` 0, `CreditSystemDown` 이 **pending 25초 → firing 35초**(`for: 30s`).
+상태 띠의 pending 칸이 그동안 노란색으로 차 있었다.
+
+**null 과 0.** 같은 응답 안에서 `credit_job_recovery_total{detector="backstop"}` 은 `"0"`,
+없는 지표는 `null` 로 나왔다. 화면은 후자만 `없음(시계열 없음)` 으로 그린다.
+
+끝나고 `stack_down`(= `down -v`)으로 내리고 패드 서버도 껐다. `.state/` 는 원복 버튼이
+소비해서 비어 있다.
+
+### 남는 것
+
+**08 은 미실측이다.** 스텁 실패율 100% 시나리오는 6단계에 스크립트가 없었고 이번에도 재지
+않았다. 카드의 숫자는 `application.yml` 의 `generation.max-attempts=3` 과 재시도 경로에서
+유추한 값이라 화면·문서 양쪽에 "예상(미실측)" 이라고 적어 뒀다. 배수의 근거는 `DeadJobRecoveryTask.retryOrRefund` 의
+`attemptNo + 1 < maxAttempts` 조건이다 — attemptNo 0, 1 에서 실패하면 재시도(2회), 2 에서 실패하면 최종 환불(1회)이고,
+실패 보고 자체는 세 번 다 `mark_failed` 를 지난다. `CreditRetryExhaustionRateHigh`
+는 `for: 10m` 이라 실측하려면 최소 10분을 버려야 해서, 다음에 스크립트로 만들 때 같이 잰다.
+
+**03·07 의 385초/379초는 이번에 다시 재지 않았다.** env 토글이 컨테이너에 반영되는 것까지만
+확인했다. 알람 임계가 300초 + `for: 60s` 라 검증 한 번에 7분 가까이 드는데, 이 값들은 6단계에서
+이미 두 번 잰 것이고 패드가 바꾼 것은 사고를 심는 손잡이뿐이라 다시 재지 않았다.
+
+**패드는 조직 id=1 만 안다.** `lib.sh` 의 `ORG_HEADER` 가 고정이고 `state` 의 잔액도 id=1 이다.
+멀티 조직 사고(한 조직의 훼손이 다른 조직 지표에 안 섞이는지)는 이 패드로 못 만든다.
+
+**되돌릴 수 없는 버튼이 하나 있다.** 02A(기억 소거)는 Redis 익명 볼륨을 갈아엎으므로 복구
+버튼이 없다. 사고 자체가 "기억이 사라졌다"라서 되돌릴 것이 없는 게 맞지만, 다른 카드와 달리
+짝이 없다는 점은 화면에서 보이지 않는다.
+
+---
+
 ## 명령어
 
 ```
@@ -2556,6 +2779,11 @@ docker compose -f deploy/observability/docker-compose.yml exec prometheus \
 
 # 장애 주입 시나리오 문법
 bash -n deploy/observability/scenarios/*.sh
+
+# 장애 주입 버튼 패드 문법 (후속 3)
+bash -n deploy/observability/faultpad/actions.sh
+python3 -m py_compile deploy/observability/faultpad/server.py
+python3 -m json.tool deploy/observability/faultpad/catalog.json > /dev/null
 ```
 
 관측 스택을 띄우고 내리는 명령은 [`deploy/observability/README.md`](../deploy/observability/README.md) 에 있다.
@@ -2578,4 +2806,13 @@ docker compose -f deploy/observability/docker-compose.yml down -v
 
 # 하나만
 ./deploy/observability/scenarios/03-worker-stopped.sh
+```
+
+후속 3 의 버튼 패드는 스택을 올려 두고(또는 패드의 `스택 올리기` 버튼으로 올리고) 옆에 띄운다.
+Grafana 를 같이 열어 두고 버튼을 누르며 곡선을 보는 용도다.
+
+```
+./gradlew bootJar
+python3 deploy/observability/faultpad/server.py            # http://127.0.0.1:8090
+python3 deploy/observability/faultpad/server.py --port 8099
 ```

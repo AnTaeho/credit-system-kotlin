@@ -97,3 +97,24 @@ export 되므로 호출한 셸에는 남지 않는다.
 Grafana 로 곡선을 보려면 스크립트를 돌리는 동안 <http://localhost:3000> 의
 `credit-domain` 대시보드를 열어 둔다. 어느 시점에 어느 패널을 봐야 하는지는 문서 6단계의
 "포트폴리오 스크린샷 가이드" 절에 있다.
+
+## 장애 주입 버튼 패드 (step7 후속 3)
+
+시나리오 스크립트는 사고를 심고 끝까지 달린 다음 표를 내는 물건이다. **누르고 나서 곡선을
+보고 싶을 때**는 다른 게 필요하다. `faultpad/` 가 그거다 — 버튼 하나가 사고 하나이고,
+사고 버튼마다 짝이 되는 복구 버튼이 있다. 화면은 카드마다 **반응해야 할 지표(실측 초까지)와
+침묵해야 할 지표**를 나란히 놓는다.
+
+```
+./gradlew bootJar
+python3 deploy/observability/faultpad/server.py     # http://127.0.0.1:8090
+```
+
+전제는 Docker 와 python3 뿐이다(표준 라이브러리만 쓴다 — 설치할 것이 없다). 서버는 **127.0.0.1
+에만 바인드하고**, `catalog.json` 에 선언된 액션만 실행한다. docker·mysql·curl 조작은 전부
+`faultpad/actions.sh` 가 하고, 그 파일은 시나리오와 같은 `scenarios/lib.sh` 를 source 한다 —
+스크립트와 버튼이 다른 코드로 같은 사고를 심으면 둘 중 하나는 반드시 낡는다.
+
+스택은 패드의 `스택 올리기 (fresh)` 버튼으로 올려도 되고 미리 올려 둬도 된다. 상세는
+[`faultpad/README.md`](faultpad/README.md), 설계 근거는
+[`docs/step7-observability.md`](../../docs/step7-observability.md) 의 `## 후속 3` 에 있다.

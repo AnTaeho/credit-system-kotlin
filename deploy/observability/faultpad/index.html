@@ -1,0 +1,366 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>장애 주입 버튼 패드</title>
+<style>
+/* 운영 콘솔. 외부 폰트·CDN 을 쓰지 않는다 — 오프라인에서도 떠야 한다.
+   단일 다크 테마이므로 배경·글자색을 전부 명시한다. */
+:root {
+  --bg: #0e1116; --panel: #161b22; --panel2: #1c232d; --line: #2a323d;
+  --fg: #d7dee7; --dim: #8b97a6; --faint: #626d7c;
+  --ok: #4ec98a; --warn: #e0b341; --bad: #e05a5a; --info: #5aa9e0; --accent: #b98ce0;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 13px/1.55 var(--sans); padding-bottom: 210px;
+}
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ── 상태 띠 ─────────────────────────────────────────────────────────────── */
+header {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--panel); border-bottom: 1px solid var(--line); padding: 8px 14px;
+}
+h1 { font-size: 14px; margin: 0 0 6px; font-weight: 600; letter-spacing: -.01em; }
+h1 small { color: var(--faint); font-weight: 400; margin-left: 8px; }
+#strip { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+.chip {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px;
+}
+.chip b { font-weight: 600; color: var(--dim); font-size: 11px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--faint); }
+.dot.up { background: var(--ok); } .dot.down { background: var(--bad); }
+.alertbox { color: var(--bad); } .alertbox.pending { color: var(--warn); }
+#running { color: var(--warn); font-weight: 600; }
+#drift { color: var(--warn); }
+
+/* ── 카드 ────────────────────────────────────────────────────────────────── */
+main { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 10px; padding: 12px 14px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+.card h2 { font-size: 13px; margin: 0 0 2px; font-weight: 600; }
+.card .meta { color: var(--faint); font-size: 11px; margin-bottom: 8px; }
+.card .meta code { font-family: var(--mono); }
+.tag { display: inline-block; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; margin-left: 6px; color: var(--accent); font-size: 10px; }
+.tag.unmeasured { color: var(--warn); border-color: var(--warn); }
+.sec { margin: 7px 0; }
+.sec > .h { color: var(--dim); font-size: 11px; font-weight: 600; margin-bottom: 3px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 8px; padding: 1px 0; }
+.row .k { font-family: var(--mono); font-size: 11px; color: var(--fg); overflow-wrap: anywhere; }
+.row .v { font-size: 11px; color: var(--dim); overflow-wrap: anywhere; }
+.sec.silent .row .k { color: var(--faint); }
+.injects { color: var(--fg); }
+.note { color: var(--warn); font-size: 11px; border-left: 2px solid var(--line); padding-left: 7px; margin: 7px 0; }
+.alerts .name { font-family: var(--mono); font-size: 11px; color: var(--bad); }
+
+/* 지금 값 */
+.live { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px; }
+.live .cell { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; }
+.live .cell .lbl { color: var(--faint); font-size: 10px; display: block; overflow-wrap: anywhere; }
+.live .cell .val { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--ok); }
+.live .cell .val.none { color: var(--faint); font-size: 11px; }
+
+/* 버튼 */
+.btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.btn { display: inline-flex; align-items: center; gap: 5px; }
+button {
+  font: 12px var(--sans); color: var(--fg); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 4px; padding: 4px 9px; cursor: pointer;
+}
+button:hover:not(:disabled) { background: #232c37; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button.fault   { border-color: #6b3030; color: #f0a0a0; }
+button.restore { border-color: #2f5c44; color: #9fe0bd; }
+button.traffic { border-color: #2e4a63; color: #a5cbe8; }
+button.danger  { border-color: #7a4a1e; color: #eebb7d; }
+input[type=number] {
+  width: 62px; font: 12px var(--mono); font-variant-numeric: tabular-nums;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 4px; padding: 3px 5px;
+}
+
+/* ── 로그 ────────────────────────────────────────────────────────────────── */
+#logpane {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 200px;
+  background: #0a0d12; border-top: 1px solid var(--line); display: flex; flex-direction: column;
+}
+#logpane .bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 3px 12px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 11px;
+}
+#log {
+  flex: 1; overflow: auto; margin: 0; padding: 6px 12px;
+  font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 11.5px;
+  white-space: pre-wrap; color: #b9c4d0;
+}
+</style>
+
+<header>
+  <h1>장애 주입 버튼 패드 <small>버튼 하나 = 사고 하나. 옆에 Grafana(<span class="num">:3000</span>)를 띄워 두고 곡선을 봐라.</small></h1>
+  <div id="strip"><span class="chip">불러오는 중…</span></div>
+</header>
+
+<main id="cards"></main>
+
+<div id="logpane">
+  <div class="bar">
+    <span>실행 로그 <span id="runstate"></span></span>
+    <span><label><input type="checkbox" id="autoscroll" checked> 자동 스크롤</label></span>
+  </div>
+  <pre id="log"></pre>
+</div>
+
+<script>
+"use strict";
+
+const $ = (sel) => document.querySelector(sel);
+let CATALOG = null;
+let RUNNING = null;      // 실행 중 액션 이름. 있으면 버튼 전부 비활성.
+let LOG_SINCE = 0;
+
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const el = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
+
+async function api(path, body) {
+  const opt = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {};
+  const res = await fetch(path, opt);
+  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+}
+
+// ── 카드 그리기 ────────────────────────────────────────────────────────────
+function renderRows(list, cls) {
+  const box = el("div", "sec " + cls);
+  return { box, add: (items) => items.forEach((it) => {
+    const r = el("div", "row");
+    r.appendChild(el("div", "k", esc(it.metric)));
+    r.appendChild(el("div", "v", esc(it.expectation)));
+    box.appendChild(r);
+  }) };
+}
+
+function renderCard(card) {
+  const c = el("div", "card");
+  c.dataset.id = card.id;
+
+  const tag = card.unmeasured ? '<span class="tag unmeasured">예상(미실측)</span>' : "";
+  c.appendChild(el("h2", null, esc(card.title) + tag));
+
+  const meta = [];
+  if (card.scenario) meta.push("<code>scenarios/" + esc(card.scenario) + "</code>");
+  if (card.basis) meta.push("근거: " + esc(card.basis));
+  if (meta.length) c.appendChild(el("div", "meta", meta.join(" · ")));
+
+  c.appendChild(el("div", "injects", esc(card.injects)));
+  if (card.note) c.appendChild(el("div", "note", esc(card.note)));
+
+  if (card.expect && card.expect.length) {
+    const s = renderRows(card.expect, "expect");
+    s.box.prepend(el("div", "h", "반응해야 할 지표"));
+    s.add(card.expect);
+    c.appendChild(s.box);
+  }
+  if (card.silent && card.silent.length) {
+    const s = renderRows(card.silent, "silent");
+    s.box.prepend(el("div", "h", "침묵해야 할 지표"));
+    s.add(card.silent);
+    c.appendChild(s.box);
+  }
+  if (card.alerts && card.alerts.length) {
+    const s = el("div", "sec alerts");
+    s.appendChild(el("div", "h", "알람"));
+    card.alerts.forEach((a) => {
+      const r = el("div", "row");
+      r.appendChild(el("div", "k name", esc(a.name)));
+      r.appendChild(el("div", "v", esc(a.when)));
+      s.appendChild(r);
+    });
+    c.appendChild(s);
+  }
+
+  // 버튼
+  const btns = el("div", "btns");
+  (card.buttons || []).forEach((b, i) => {
+    const wrap = el("span", "btn");
+    const inputs = [];
+    const button = el("button", b.kind || "traffic", esc(b.label));
+    (b.params || []).forEach((p) => {
+      const inp = document.createElement("input");
+      inp.type = "number"; inp.value = p.default; inp.title = p.name;
+      if (p.min != null) inp.min = p.min;
+      if (p.max != null) inp.max = p.max;
+      inputs.push([p.name, inp]);
+    });
+    button.onclick = () => {
+      const args = {};
+      inputs.forEach(([name, inp]) => { args[name] = parseInt(inp.value, 10); });
+      if (b.env) args.env = b.env;
+      run(b.action, args);
+    };
+    wrap.appendChild(button);
+    inputs.forEach(([, inp]) => wrap.appendChild(inp));
+    btns.appendChild(wrap);
+  });
+  c.appendChild(btns);
+
+  // 지금 값 — 이 카드가 보라고 한 지표만 편다.
+  if (card.live && card.live.length) {
+    const s = el("div", "sec");
+    s.appendChild(el("div", "h", "지금 값"));
+    const grid = el("div", "live");
+    card.live.forEach((l) => {
+      const cell = el("div", "cell");
+      cell.appendChild(el("span", "lbl", esc(l.label)));
+      const v = el("span", "val none", "…");
+      v.dataset.q = l.promql;
+      cell.appendChild(v);
+      grid.appendChild(cell);
+    });
+    s.appendChild(grid);
+    c.appendChild(s);
+  }
+  return c;
+}
+
+function renderAll() {
+  const root = $("#cards");
+  root.textContent = "";
+  CATALOG.cards.forEach((card) => root.appendChild(renderCard(card)));
+  setButtonsEnabled(RUNNING === null);
+}
+
+function setButtonsEnabled(on) {
+  document.querySelectorAll("#cards button").forEach((b) => { b.disabled = !on; });
+}
+
+// ── 실행 ───────────────────────────────────────────────────────────────────
+async function run(action, args) {
+  setButtonsEnabled(false);
+  const res = await api("/api/run", { action, args });
+  if (!res.ok) {
+    appendLog("!! " + action + " 거부됨 (HTTP " + res.status + "): " + (res.data.error || ""));
+    setButtonsEnabled(RUNNING === null);
+    return;
+  }
+  RUNNING = action;
+  pollLog();
+}
+
+function appendLog(text) {
+  const log = $("#log");
+  log.textContent += text + "\n";
+  if ($("#autoscroll").checked) log.scrollTop = log.scrollHeight;
+}
+
+async function pollLog() {
+  const res = await api("/api/log?since=" + LOG_SINCE);
+  if (!res.ok) return;
+  const d = res.data;
+  LOG_SINCE = d.next;
+  if (d.lines.length) {
+    const log = $("#log");
+    log.textContent += d.lines.join("\n") + "\n";
+    if ($("#autoscroll").checked) log.scrollTop = log.scrollHeight;
+  }
+  const wasRunning = RUNNING;
+  RUNNING = d.running;
+  $("#runstate").textContent = d.running
+    ? "— 실행 중: " + d.running
+    : (d.exit_code == null ? "" : "— 마지막 종료 코드 " + d.exit_code);
+  if (wasRunning && !d.running) setButtonsEnabled(true);
+  if (!d.running) setButtonsEnabled(true);
+}
+
+// ── 상태 띠 ────────────────────────────────────────────────────────────────
+function chip(label, inner) {
+  return '<span class="chip"><b>' + esc(label) + "</b>" + inner + "</span>";
+}
+function dot(up) {
+  return '<span class="dot ' + (up === true ? "up" : up === false ? "down" : "") + '"></span>';
+}
+
+async function pollState() {
+  const [st, al, upq] = await Promise.all([
+    api("/api/state"),
+    api("/api/alerts"),
+    api("/api/query", { queries: ["process_uptime_seconds{job=\"credit_system\"}"] }),
+  ]);
+  const s = st.data || {};
+  const parts = [];
+
+  parts.push(chip("app", dot(s.app_up)));
+  parts.push(chip("redis", dot(s.redis_up)));
+  parts.push(chip("mysql", dot(s.mysql_up)));
+  const promOk = !(al.data && al.data.error);
+  parts.push(chip("prometheus", dot(promOk)));
+
+  const jobs = s.jobs;
+  parts.push(chip("DB job", '<span class="num">' + (jobs && Object.keys(jobs).length
+    ? Object.entries(jobs).map(([k, v]) => k + "=" + v).join(" ") : "—") + "</span>"));
+  parts.push(chip("DB 미결", '<span class="num">' + (s.db_pending_count == null ? "—" : s.db_pending_count)
+    + " / 최고 " + (s.db_oldest_pending_age == null ? "—" : s.db_oldest_pending_age) + "초</span>"));
+  parts.push(chip("잔액", '<span class="num">' + (s.balance == null ? "—" : s.balance) + "</span>"));
+  parts.push(chip("ZSET heartbeats", '<span class="num">' + (s.heartbeat_zset == null ? "—" : s.heartbeat_zset) + "</span>"));
+
+  const up = upq.data && upq.data.results && upq.data.results[0] ? upq.data.results[0].value : null;
+  parts.push(chip("가동 시간", '<span class="num">' + (up == null ? "없음" : Math.round(parseFloat(up)) + "초") + "</span>"));
+
+  const env = s.container_env || s.pad_env || {};
+  parts.push(chip("적용된 env", '<span class="num">' + Object.entries(env)
+    .map(([k, v]) => k.replace(/^APP_/, "") + "=" + v).join(" ") + "</span>"));
+  if (s.env_drift && Object.keys(s.env_drift).length) {
+    parts.push('<span class="chip" id="drift">패드가 아는 값과 컨테이너가 다르다: '
+      + esc(Object.entries(s.env_drift).map(([k, d]) => k + " 패드=" + d.pad + " 컨테이너=" + d.container).join(", ")) + "</span>");
+  }
+
+  if (promOk) {
+    const f = (al.data.firing || []), p = (al.data.pending || []);
+    parts.push('<span class="chip alertbox"><b>firing</b>' + (f.length ? esc(f.join(" ")) : "없음") + "</span>");
+    parts.push('<span class="chip alertbox pending"><b>pending</b>' + (p.length ? esc(p.join(" ")) : "없음") + "</span>");
+  } else {
+    parts.push('<span class="chip alertbox"><b>알람</b>Prometheus 에 닿지 않는다</span>');
+  }
+
+  if (s.running) parts.push('<span class="chip" id="running">실행 중: ' + esc(s.running) + "</span>");
+  if (s.error) parts.push('<span class="chip alertbox">' + esc(s.error) + "</span>");
+
+  $("#strip").innerHTML = parts.join("");
+}
+
+// ── 지금 값 ────────────────────────────────────────────────────────────────
+async function pollLive() {
+  const cells = Array.from(document.querySelectorAll(".live .val"));
+  if (!cells.length) return;
+  const queries = [...new Set(cells.map((c) => c.dataset.q))];
+  const res = await api("/api/query", { queries });
+  if (!res.ok || res.data.error) {
+    cells.forEach((c) => { c.className = "val none"; c.textContent = "Prometheus 없음"; });
+    return;
+  }
+  const byQuery = {};
+  res.data.results.forEach((r) => { byQuery[r.query] = r.value; });
+  cells.forEach((c) => {
+    const v = byQuery[c.dataset.q];
+    if (v == null) {
+      // null 은 0 이 아니다. "없는 시계열"과 "0" 을 구분하는 것이 이 챕터의 논지다.
+      c.className = "val none";
+      c.textContent = "없음(시계열 없음)";
+    } else {
+      const n = parseFloat(v);
+      c.className = "val";
+      c.textContent = Number.isFinite(n) ? (Math.abs(n - Math.round(n)) < 1e-6 ? String(Math.round(n)) : n.toFixed(2)) : v;
+    }
+  });
+}
+
+// ── 기동 ───────────────────────────────────────────────────────────────────
+(async function main() {
+  CATALOG = (await api("/catalog")).data;
+  renderAll();
+  pollLog(); setInterval(pollLog, 1000);
+  pollState(); setInterval(pollState, 4000);
+  pollLive(); setInterval(pollLive, 5000);
+})();
+</script>

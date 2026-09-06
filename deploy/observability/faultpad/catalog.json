@@ -1,0 +1,356 @@
+{
+  "_comment": "장애 주입 버튼 패드의 카드 정의. server.py 의 액션 허용 목록이자 index.html 이 그리는 데이터다. expect 의 숫자는 docs/step7-observability.md 6단계 결과 매트릭스와 후속 1 실측에서 그대로 옮긴 것이고, 08 만 미실측이다.",
+  "env_defaults": {
+    "APP_WORKER_ENABLED": "true",
+    "APP_SCHEDULING_ENABLED": "true",
+    "APP_STUB_FAILURE_RATE": "0.3",
+    "APP_STUB_MIN_DELAY_MILLIS": "3000",
+    "APP_STUB_MAX_DELAY_MILLIS": "7000"
+  },
+  "cards": [
+    {
+      "id": "stack",
+      "group": "준비",
+      "title": "스택",
+      "injects": "사고가 아니다. 관측 스택을 올리고 내린다.",
+      "note": "stack_up 은 down -v → up -d --build → seed 다. 먼저 ./gradlew bootJar 가 필요하다.",
+      "expect": [],
+      "silent": [],
+      "alerts": [],
+      "buttons": [
+        { "label": "스택 올리기 (fresh)", "action": "stack_up", "kind": "traffic" },
+        { "label": "스택 내리기 (down -v)", "action": "stack_down", "kind": "danger" }
+      ],
+      "live": [
+        { "label": "up{credit_system}", "promql": "up{job=\"credit_system\"}" },
+        { "label": "앱 가동 시간(초)", "promql": "process_uptime_seconds{job=\"credit_system\"}" }
+      ]
+    },
+    {
+      "id": "traffic",
+      "group": "준비",
+      "title": "트래픽",
+      "injects": "정상 트래픽. 사고를 심기 전에 먼저 여기서 지표를 살려 둔다.",
+      "note": "job 1건 = 100 크레딧. 사고 버튼은 대부분 미결 job 이 있어야 의미가 있다.",
+      "expect": [
+        { "metric": "credit_defense_total{point=\"hold_balance\",outcome=\"applied\"}", "expectation": "job 건수만큼 증가" },
+        { "metric": "credit_defense_total{point=\"hold_balance\",outcome=\"rejected\"}", "expectation": "잔액 부족 요청 수만큼 증가" }
+      ],
+      "silent": [
+        { "metric": "credit_invariant_* 4종", "expectation": "0 — 정상 트래픽은 불변식을 건드리지 않는다" }
+      ],
+      "alerts": [],
+      "buttons": [
+        { "label": "충전", "action": "charge", "kind": "traffic", "params": [{ "name": "amount", "type": "int", "default": 10000, "min": 1, "max": 10000000 }] },
+        { "label": "job 생성", "action": "create_jobs", "kind": "traffic", "params": [{ "name": "n", "type": "int", "default": 5, "min": 1, "max": 200 }] },
+        { "label": "잔액 부족 요청", "action": "overdraw", "kind": "traffic", "params": [{ "name": "n", "type": "int", "default": 7, "min": 1, "max": 100 }] },
+        { "label": "smoke", "action": "smoke", "kind": "traffic" }
+      ],
+      "live": [
+        { "label": "hold_balance/applied", "promql": "credit_defense_total{point=\"hold_balance\",outcome=\"applied\"}" },
+        { "label": "hold_balance/rejected", "promql": "credit_defense_total{point=\"hold_balance\",outcome=\"rejected\"}" },
+        { "label": "미결 건수(게이지)", "promql": "credit_hold_outstanding_count" },
+        { "label": "미결 금액(게이지)", "promql": "credit_hold_outstanding_amount" }
+      ]
+    },
+    {
+      "id": "s01",
+      "group": "01 워커 크래시",
+      "title": "01 — 워커 프로세스 크래시",
+      "scenario": "01-worker-crash.sh",
+      "basis": "6단계 결과 매트릭스 1번",
+      "injects": "PROCESSING 중인 job 을 들고 있는 프로세스를 SIGKILL 하고 즉시 재기동한다. heartbeat 는 Redis 에 남아 있지만 갱신이 멈춘다.",
+      "note": "PROCESSING 이 있을 때 눌러라. 상태 띠의 DB 카운트를 보고 판단한다.",
+      "expect": [
+        { "metric": "credit_job_recovery_total{detector=\"heartbeat\"}", "expectation": "죽을 때의 PROCESSING 수(실측 3). SIGKILL 후 11초, 재기동 후 6초" },
+        { "metric": "credit_job_oldest_pending_age_seconds", "expectation": "튀었다가 종결 후 0 으로" }
+      ],
+      "silent": [
+        { "metric": "credit_job_recovery_total{detector=\"backstop\"}", "expectation": "0 — heartbeat 가 먼저 잡는다" },
+        { "metric": "credit_invariant_* 4종 / mismatch", "expectation": "0" },
+        { "metric": "http 5xx", "expectation": "0" }
+      ],
+      "alerts": [{ "name": "(없음)", "when": "회수가 알람 임계 전에 끝난다" }],
+      "buttons": [
+        { "label": "SIGKILL → 즉시 재기동", "action": "crash_and_restart", "kind": "fault" }
+      ],
+      "live": [
+        { "label": "recovery{heartbeat}", "promql": "credit_job_recovery_total{detector=\"heartbeat\"}" },
+        { "label": "recovery{backstop}", "promql": "credit_job_recovery_total{detector=\"backstop\"}" },
+        { "label": "oldest_pending_age", "promql": "credit_job_oldest_pending_age_seconds" },
+        { "label": "retry_claim/applied", "promql": "credit_defense_total{point=\"retry_claim\",outcome=\"applied\"}" }
+      ]
+    },
+    {
+      "id": "s02a",
+      "group": "02 heartbeat",
+      "title": "02A — heartbeat 소실",
+      "scenario": "02-heartbeat-lost.sh",
+      "basis": "6단계 결과 매트릭스 2A",
+      "injects": "앱을 SIGKILL 하고 Redis 컨테이너와 익명 볼륨을 통째로 갈아엎어 ZSET(heartbeats)을 지운 뒤 재기동한다.",
+      "note": "함정: docker compose restart 로는 안 지워진다. redis:7 이 종료 시 RDB 를 저장하고 이미지가 VOLUME /data 를 선언해 익명 볼륨에 남는다 — --renew-anon-volumes 까지 줘야 한다.",
+      "expect": [
+        { "metric": "credit_job_recovery_total{detector=\"backstop\"}", "expectation": "3 / SIGKILL 후 70초, 재기동 후 60초" }
+      ],
+      "silent": [
+        { "metric": "credit_job_recovery_total{detector=\"heartbeat\"}", "expectation": "0 — 잡을 엔트리가 사라졌다" },
+        { "metric": "credit_job_recovery_total{detector=\"backstop_blind\"}", "expectation": "0 — Redis 는 살아 있으므로 ABSENT 로 읽힌다" },
+        { "metric": "credit_invariant_* 4종", "expectation": "0" }
+      ],
+      "alerts": [{ "name": "CreditBackstopRecovery", "when": "감지 +4초" }],
+      "buttons": [
+        { "label": "SIGKILL → 기억 소거 → 재기동", "action": "amnesia", "kind": "fault" }
+      ],
+      "live": [
+        { "label": "recovery{backstop}", "promql": "credit_job_recovery_total{detector=\"backstop\"}" },
+        { "label": "recovery{heartbeat}", "promql": "credit_job_recovery_total{detector=\"heartbeat\"}" },
+        { "label": "recovery{backstop_blind}", "promql": "credit_job_recovery_total{detector=\"backstop_blind\"}" }
+      ]
+    },
+    {
+      "id": "s02b",
+      "group": "02 heartbeat",
+      "title": "02B — Redis 장애 중 회수",
+      "scenario": "02-heartbeat-lost.sh",
+      "basis": "후속 1 재실행 실측",
+      "injects": "앱은 살려 둔 채 Redis 를 내리고, updated_at 이 120초 전인 PROCESSING 행을 심는다. heartbeat 조회가 UNKNOWN 을 돌려주고 백스톱이 updatedAt 만으로 회수한다.",
+      "note": "후속 1 이전에는 여기서 아무것도 반응하지 않았다 — backstop 이 자기가 방어하려던 Redis 를 참조했기 때문이다. 순서: Redis 정지 → 죽은 행 심기.",
+      "expect": [
+        { "metric": "credit_job_recovery_total{detector=\"backstop_blind\"}", "expectation": "심은 행 수(실측 3) / 심은 뒤 약 11초 (스캔 5초 + 스크레이프 5초)" },
+        { "metric": "앱 로그 WARN", "expectation": "\"heartbeat 저장소에 닿지 않아 updatedAt 만으로 회수\" 가 심은 행 수만큼(3회)" }
+      ],
+      "silent": [
+        { "metric": "credit_job_recovery_total{detector=\"backstop\"}", "expectation": "0" },
+        { "metric": "credit_job_recovery_total{detector=\"heartbeat\"}", "expectation": "0" }
+      ],
+      "alerts": [
+        { "name": "CreditBackstopBlindRecovery", "when": "감지 +8초" },
+        { "name": "credit_defense_total{point=\"confirm\",outcome=\"stale\"}", "when": "오탐이면 함께 오른다" }
+      ],
+      "buttons": [
+        { "label": "Redis 정지", "action": "redis_stop", "kind": "fault" },
+        { "label": "죽은 PROCESSING 심기", "action": "plant_dead_processing", "kind": "fault" },
+        { "label": "Redis 복구", "action": "redis_start", "kind": "restore" }
+      ],
+      "live": [
+        { "label": "recovery{backstop_blind}", "promql": "credit_job_recovery_total{detector=\"backstop_blind\"}" },
+        { "label": "recovery{backstop}", "promql": "credit_job_recovery_total{detector=\"backstop\"}" },
+        { "label": "recovery{heartbeat}", "promql": "credit_job_recovery_total{detector=\"heartbeat\"}" },
+        { "label": "confirm/stale", "promql": "credit_defense_total{point=\"confirm\",outcome=\"stale\"}" }
+      ]
+    },
+    {
+      "id": "s03",
+      "group": "03 워커 정지",
+      "title": "03 — 워커만 정지",
+      "scenario": "03-worker-stopped.sh",
+      "basis": "6단계 결과 매트릭스 3번",
+      "injects": "APP_WORKER_ENABLED=false 로 재기동한다. API 도 스케줄러도 살아 있고 워커만 없다.",
+      "note": "이 카드와 07 이 이 챕터의 논지다 — 서버 지표는 완벽히 정상이다. 재기동이므로 카운터가 0 으로 리셋된다.",
+      "expect": [
+        { "metric": "credit_hold_outstanding_count / _amount", "expectation": "job 수에 고정 (실측 5 / 500)" },
+        { "metric": "credit_job_oldest_pending_age_seconds", "expectation": "단조 증가 (실측 13 → 374)" }
+      ],
+      "silent": [
+        { "metric": "credit_defense_total (worker_claim, confirm 등)", "expectation": "전부 증가 0" },
+        { "metric": "credit_job_recovery_total", "expectation": "0" },
+        { "metric": "http 5xx / up", "expectation": "0 / 1" }
+      ],
+      "alerts": [{ "name": "CreditPipelineStalled", "when": "job 생성 후 385초 (임계 300 + for 60 + 평가)" }],
+      "buttons": [
+        { "label": "워커 정지", "action": "restart_app", "kind": "fault", "env": { "APP_WORKER_ENABLED": "false" } },
+        { "label": "워커 재개", "action": "restart_app", "kind": "restore", "env": { "APP_WORKER_ENABLED": "true" } }
+      ],
+      "live": [
+        { "label": "outstanding_count", "promql": "credit_hold_outstanding_count" },
+        { "label": "outstanding_amount", "promql": "credit_hold_outstanding_amount" },
+        { "label": "oldest_pending_age", "promql": "credit_job_oldest_pending_age_seconds" },
+        { "label": "worker_claim/applied", "promql": "credit_defense_total{point=\"worker_claim\",outcome=\"applied\"}" }
+      ]
+    },
+    {
+      "id": "s04",
+      "group": "04 스케줄러 정지",
+      "title": "04 — 스케줄러 정지 (관측 장치 자신이 멈춘다)",
+      "scenario": "04-scheduler-stopped.sh",
+      "basis": "6단계 결과 매트릭스 4번 (수정 후)",
+      "injects": "APP_SCHEDULING_ENABLED=false 로 재기동한다. 스냅샷·대사·회수·워커가 전부 사라진다.",
+      "note": "위험한 건 반응이 아니라 침묵이다. 게이지가 0 에 얼어붙는데, 그 0 은 \"미결이 없다\"가 아니라 \"아직 아무도 안 셌다\"다. 상태 띠의 DB 실제 미결 수와 나란히 봐라(실측: 게이지 0, DB 121초).",
+      "expect": [
+        { "metric": "credit_snapshot_staleness_seconds", "expectation": "-1 고정 (한 번도 안 돌았다)" },
+        { "metric": "credit_ledger_reconciliation_staleness_seconds", "expectation": "-1 고정" }
+      ],
+      "silent": [
+        { "metric": "credit_job_oldest_pending_age_seconds", "expectation": "0 에 얼어붙음 — DB 실제는 121초였다" },
+        { "metric": "credit_hold_outstanding_count", "expectation": "0 에 얼어붙음 — DB 실제는 3" },
+        { "metric": "credit_snapshot_cycles_total", "expectation": "0" }
+      ],
+      "alerts": [
+        { "name": "CreditSnapshotStale", "when": "재기동 후 76초 — 규칙에 `or < 0` 을 넣기 전에는 0개였다" },
+        { "name": "CreditReconciliationStale", "when": "재기동 후 76초" }
+      ],
+      "buttons": [
+        { "label": "스케줄러 정지", "action": "restart_app", "kind": "fault", "env": { "APP_SCHEDULING_ENABLED": "false" } },
+        { "label": "스케줄러 재개", "action": "restart_app", "kind": "restore", "env": { "APP_SCHEDULING_ENABLED": "true" } }
+      ],
+      "live": [
+        { "label": "snapshot_staleness", "promql": "credit_snapshot_staleness_seconds" },
+        { "label": "recon_staleness", "promql": "credit_ledger_reconciliation_staleness_seconds" },
+        { "label": "snapshot_cycles_total", "promql": "credit_snapshot_cycles_total" },
+        { "label": "oldest_pending_age(게이지)", "promql": "credit_job_oldest_pending_age_seconds" },
+        { "label": "outstanding_count(게이지)", "promql": "credit_hold_outstanding_count" }
+      ]
+    },
+    {
+      "id": "s05",
+      "group": "05 원장 훼손",
+      "title": "05 — 원장 훼손 (HTTP 200 인 채로 나는 사고)",
+      "scenario": "05-ledger-corruption.sh",
+      "basis": "6단계 결과 매트릭스 5 (a)(b)(c)",
+      "injects": "정상 처리가 끝난 뒤 DB 를 직접 깬다. (a) balance -1, (b) balance = -1, (c) HOLD 원장 1행 DELETE.",
+      "note": "훼손 전 잔액과 지운 행을 .state/ 에 저장한다. 원복 버튼이 그걸 읽는다. 상태 파일이 없으면 잔액을 initial_balance + SUM(ledger) 로 재계산한다.",
+      "expect": [
+        { "metric": "credit_ledger_reconciliation_mismatch", "expectation": "(a) 0 → 1 / 25초 (대사 주기 60초)" },
+        { "metric": "credit_invariant_negative_balance_orgs", "expectation": "(b) 0 → 1 / 11초 (스냅샷 주기 15초)" },
+        { "metric": "credit_invariant_jobs_without_hold", "expectation": "(c) 0 → 1 / 14초" },
+        { "metric": "원복", "expectation": "불변식 14초, mismatch 14초 만에 0 복귀. 알람 전부 resolve" }
+      ],
+      "silent": [
+        { "metric": "credit_defense_total 합", "expectation": "불변 (실측 31 → 31)" },
+        { "metric": "up / http 5xx", "expectation": "1 / 0 — 애플리케이션은 완벽히 건강하다" }
+      ],
+      "alerts": [
+        { "name": "CreditLedgerReconciliationMismatch", "when": "감지 +6초 (P1, for: 0m)" },
+        { "name": "CreditNegativeBalanceOrgs", "when": "감지 +0초" },
+        { "name": "CreditJobsWithoutHold", "when": "감지 +0초" }
+      ],
+      "buttons": [
+        { "label": "(a) balance −1", "action": "corrupt_balance_minus_one", "kind": "fault" },
+        { "label": "(b) balance = −1", "action": "corrupt_balance_negative", "kind": "fault" },
+        { "label": "(c) HOLD 원장 1행 삭제", "action": "delete_hold_row", "kind": "fault" },
+        { "label": "원복", "action": "restore_ledger", "kind": "restore" }
+      ],
+      "live": [
+        { "label": "mismatch", "promql": "credit_ledger_reconciliation_mismatch" },
+        { "label": "negative_balance_orgs", "promql": "credit_invariant_negative_balance_orgs" },
+        { "label": "jobs_without_hold", "promql": "credit_invariant_jobs_without_hold" },
+        { "label": "unsettled_terminal_jobs", "promql": "credit_invariant_unsettled_terminal_jobs" },
+        { "label": "defense 합", "promql": "sum(credit_defense_total)" },
+        { "label": "5xx", "promql": "sum(http_server_requests_seconds_count{status=~\"5..\"}) or vector(0)" }
+      ]
+    },
+    {
+      "id": "s06",
+      "group": "06 중복 폭풍",
+      "title": "06 — 중복 폭풍",
+      "scenario": "06-duplicate-storm.sh",
+      "basis": "6단계 결과 매트릭스 6번",
+      "injects": "같은 idemKey 로 N건을 동시에 던진다. 재시도 폭주 / 더블 클릭의 극단.",
+      "note": "전제: 잔액 ≥ 100. db_unique 는 HTTP 409 를 받는다 — 멱등성이 \"항상 같은 응답\"이 아니라 \"부작용이 한 번만\"으로 구현돼 있다는 뜻이다.",
+      "expect": [
+        { "metric": "idem_key{app_hit} + idem_key{db_unique}", "expectation": "N − 1 (실측 90 + 9 = 99. 둘의 비율은 매번 다르다)" },
+        { "metric": "credit_defense_total{point=\"hold_balance\",outcome=\"applied\"}", "expectation": "+1" },
+        { "metric": "잔액 / job 행", "expectation": "정확히 −100 / +1건" }
+      ],
+      "silent": [
+        { "metric": "credit_defense_total{point=\"hold_balance\",outcome=\"rejected\"}", "expectation": "0" },
+        { "metric": "credit_invariant_* 4종", "expectation": "0" }
+      ],
+      "alerts": [{ "name": "(없음)", "when": "방어가 설계대로 동작한 것이므로 알람은 없다" }],
+      "buttons": [
+        { "label": "같은 idemKey 동시 발사", "action": "duplicate_storm", "kind": "fault", "params": [{ "name": "n", "type": "int", "default": 100, "min": 2, "max": 300 }] }
+      ],
+      "live": [
+        { "label": "idem_key/app_hit", "promql": "credit_defense_total{point=\"idem_key\",outcome=\"app_hit\"}" },
+        { "label": "idem_key/db_unique", "promql": "credit_defense_total{point=\"idem_key\",outcome=\"db_unique\"}" },
+        { "label": "hold_balance/applied", "promql": "credit_defense_total{point=\"hold_balance\",outcome=\"applied\"}" },
+        { "label": "hold_balance/rejected", "promql": "credit_defense_total{point=\"hold_balance\",outcome=\"rejected\"}" }
+      ]
+    },
+    {
+      "id": "s07",
+      "group": "07 외부 API 지연",
+      "title": "07 — 외부 생성 API 무한 지연",
+      "scenario": "07-external-api-hang.sh",
+      "basis": "6단계 결과 매트릭스 7번",
+      "injects": "스텁 지연을 600초로 올린다. 워커는 job 을 잡고 heartbeat 도 정상 갱신하며, 그저 영원히 돌아오지 않는다.",
+      "note": "\"서버는 완벽히 건강한데 돈이 묶여 있다\" 의 가장 순수한 형태다. CPU 8.65% — 바쁜 것도 아니다.",
+      "expect": [
+        { "metric": "credit_job_oldest_pending_age_seconds", "expectation": "단조 증가 (실측 28 → 373)" },
+        { "metric": "credit_defense_total{point=\"worker_claim\",outcome=\"applied\"}", "expectation": "정확히 job 수 (실측 3 — churn 없음)" },
+        { "metric": "Redis ZSET heartbeats", "expectation": "PROCESSING 수와 같다" }
+      ],
+      "silent": [
+        { "metric": "credit_job_recovery_total{detector=\"heartbeat\"}", "expectation": "0 — heartbeat 가 살아 있으니 회수하지 않는 것이 옳다" },
+        { "metric": "credit_job_recovery_total{detector=\"backstop\"}", "expectation": "0 — 같은 이유" },
+        { "metric": "confirm/applied, mark_failed/applied, 5xx", "expectation": "0" }
+      ],
+      "alerts": [{ "name": "CreditPipelineStalled", "when": "job 생성 후 379초" }],
+      "buttons": [
+        { "label": "지연 600초로 재기동", "action": "restart_app", "kind": "fault", "env": { "APP_STUB_MIN_DELAY_MILLIS": "600000", "APP_STUB_MAX_DELAY_MILLIS": "600000" } },
+        { "label": "지연 기본값(3~7초) 복구", "action": "restart_app", "kind": "restore", "env": { "APP_STUB_MIN_DELAY_MILLIS": "3000", "APP_STUB_MAX_DELAY_MILLIS": "7000" } }
+      ],
+      "live": [
+        { "label": "oldest_pending_age", "promql": "credit_job_oldest_pending_age_seconds" },
+        { "label": "outstanding_count", "promql": "credit_hold_outstanding_count" },
+        { "label": "worker_claim/applied", "promql": "credit_defense_total{point=\"worker_claim\",outcome=\"applied\"}" },
+        { "label": "recovery{heartbeat}", "promql": "credit_job_recovery_total{detector=\"heartbeat\"}" },
+        { "label": "recovery{backstop}", "promql": "credit_job_recovery_total{detector=\"backstop\"}" },
+        { "label": "confirm/applied", "promql": "credit_defense_total{point=\"confirm\",outcome=\"applied\"}" }
+      ]
+    },
+    {
+      "id": "s08",
+      "group": "08 외부 API 실패",
+      "title": "08 — 외부 생성 API 전부 실패",
+      "basis": "미실측 (시나리오 스크립트가 없는 카드다)",
+      "unmeasured": true,
+      "injects": "스텁 실패율을 1.0 으로 올려 재기동한다. 모든 생성이 실패하고 재시도를 소진한 뒤 최종 환불로 끝난다.",
+      "note": "아래 숫자는 예상이지 실측이 아니다. 근거는 application.yml 의 generation.max-attempts=3, stub.min/max-delay-millis=3000/7000, worker.batch-size=3, worker.concurrency=3 이다. 재시도 간격은 별도 백오프 설정이 없고 회수/디스패치 주기에 따른다.",
+      "expect": [
+        { "metric": "credit_defense_total{point=\"mark_failed\",outcome=\"applied\"}", "expectation": "예상(미실측): job 수 × 시도 횟수(max-attempts 3)" },
+        { "metric": "credit_defense_total{point=\"retry_claim\",outcome=\"applied\"}", "expectation": "예상(미실측): job 수 × (3 − 1) = 재시도 횟수만큼" },
+        { "metric": "credit_defense_total{point=\"final_refund\",outcome=\"applied\"}", "expectation": "예상(미실측): job 수와 같다" },
+        { "metric": "잔액", "expectation": "예상(미실측): 최종 환불로 원복된다" }
+      ],
+      "silent": [
+        { "metric": "credit_invariant_* 4종", "expectation": "예상(미실측) 0 — 환불이 정상 경로다" },
+        { "metric": "http 5xx", "expectation": "예상(미실측) 0 — 실패는 도메인 안에서 처리된다" }
+      ],
+      "alerts": [{ "name": "CreditRetryExhaustionRateHigh", "when": "예상(미실측): P3. final_refund/hold_balance 비율 > 0.1 이 10분 지속" }],
+      "buttons": [
+        { "label": "실패율 100% 로 재기동", "action": "restart_app", "kind": "fault", "env": { "APP_STUB_FAILURE_RATE": "1.0" } },
+        { "label": "실패율 기본값(0.3) 복구", "action": "restart_app", "kind": "restore", "env": { "APP_STUB_FAILURE_RATE": "0.3" } }
+      ],
+      "live": [
+        { "label": "mark_failed/applied", "promql": "credit_defense_total{point=\"mark_failed\",outcome=\"applied\"}" },
+        { "label": "retry_claim/applied", "promql": "credit_defense_total{point=\"retry_claim\",outcome=\"applied\"}" },
+        { "label": "final_refund/applied", "promql": "credit_defense_total{point=\"final_refund\",outcome=\"applied\"}" },
+        { "label": "hold_balance/applied", "promql": "credit_defense_total{point=\"hold_balance\",outcome=\"applied\"}" }
+      ]
+    },
+    {
+      "id": "s09",
+      "group": "09 앱 정지",
+      "title": "09 — 앱 정지",
+      "basis": "5단계 알람 규칙 (CreditSystemDown, for: 30s)",
+      "injects": "앱을 SIGKILL 하고 그대로 둔다. 관리 포트(8081)에 닿지 않으므로 스크레이프 자체가 없다.",
+      "note": "이때 다른 모든 지표는 침묵한다 — 값이 0 이 아니라 시계열이 끊긴다. 아래 \"지금 값\" 이 \"없음\" 으로 바뀌는 것이 그 증거다.",
+      "expect": [
+        { "metric": "up{job=\"credit_system\"}", "expectation": "0" }
+      ],
+      "silent": [
+        { "metric": "credit_* 전부", "expectation": "스크레이프가 없으므로 값이 갱신되지 않는다" }
+      ],
+      "alerts": [{ "name": "CreditSystemDown", "when": "for: 30s → 약 30초" }],
+      "buttons": [
+        { "label": "앱 SIGKILL", "action": "kill_app", "kind": "fault" },
+        { "label": "앱 시작", "action": "start_app", "kind": "restore" }
+      ],
+      "live": [
+        { "label": "up{credit_system}", "promql": "up{job=\"credit_system\"}" },
+        { "label": "앱 가동 시간(초)", "promql": "process_uptime_seconds{job=\"credit_system\"}" }
+      ]
+    }
+  ]
+}
