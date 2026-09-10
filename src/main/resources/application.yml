@@ -1,13 +1,19 @@
 spring:
   application:
     name: credit_system
+  # 여기 적힌 값은 로컬 개발용 기본값이다. 루트 docker-compose 가 띄우는 DB 와 같은 계약
+  # (credit_system / credit / credit)을 쓴다. 다른 환경에서는 Spring 표준 환경변수
+  # (SPRING_DATASOURCE_URL, SPRING_DATASOURCE_USERNAME, SPRING_DATASOURCE_PASSWORD)로 덮어쓴다.
   datasource:
-    url: jdbc:mysql://localhost:3306/credit_system_k
-    username: root
-    password: an902318
+    url: jdbc:mysql://localhost:3306/credit_system
+    username: credit
+    password: credit
+  flyway:
+    enabled: true
   jpa:
     hibernate:
-      ddl-auto: update
+      # 스키마는 Flyway 마이그레이션이 만든다. Hibernate 는 맞는지 확인만 한다.
+      ddl-auto: validate
     open-in-view: false
     properties:
       hibernate:

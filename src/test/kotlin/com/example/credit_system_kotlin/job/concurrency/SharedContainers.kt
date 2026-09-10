@@ -53,6 +53,11 @@ object SharedContainers {
         registry.add("spring.datasource.username") { mysql.username }
         registry.add("spring.datasource.password") { mysql.password }
         registry.add("spring.datasource.driver-class-name") { mysql.driverClassName }
+        // H2 테스트와 달리 여기서는 스키마를 Flyway 가 만들고 Hibernate 가 검증한다.
+        // 마이그레이션이 실제 MySQL 에서 돌아가는지, 그 결과가 엔티티 매핑과 맞는지를
+        // 확인하는 자리가 이 테스트들뿐이다.
+        registry.add("spring.flyway.enabled") { "true" }
+        registry.add("spring.jpa.hibernate.ddl-auto") { "validate" }
         registry.add("spring.data.redis.host") { redis.host }
         registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
     }
@@ -72,7 +77,10 @@ object SharedContainers {
         try {
             DriverManager.getConnection(jdbcUrlFor("mysql"), "root", mysql.password).use { connection ->
                 connection.createStatement().use { statement ->
-                    statement.execute("CREATE DATABASE IF NOT EXISTS $database")
+                    // 컨테이너가 withReuse(true) 라 지난 실행의 테이블이 남아 있다.
+                    // Flyway 는 이력 테이블 없이 채워진 스키마를 만나면 멈추므로 매번 비우고 시작한다.
+                    statement.execute("DROP DATABASE IF EXISTS $database")
+                    statement.execute("CREATE DATABASE $database")
                     statement.execute("GRANT ALL PRIVILEGES ON $database.* TO 'credit'@'%'")
                     statement.execute("FLUSH PRIVILEGES")
                 }
