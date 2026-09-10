@@ -1,0 +1,63 @@
+# 검증 — test + detekt + ktlintCheck.
+#
+# 이 워크플로는 두 가지로 불린다.
+#   1) develop / main 을 대상으로 하는 PR (pull_request)
+#   2) image.yml 의 첫 job (workflow_call) — 이미지는 여기가 초록일 때만 빌드된다
+#
+# workflow_call 로 열어 둔 덕분에 image.yml 이 `needs:` 로 이 검증에 의존할 수 있다.
+# 자세한 이유는 image.yml 헤더 참고.
+name: ci
+
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_call:
+
+# 같은 브랜치에 새 커밋이 오면 돌던 검증은 버린다. 마지막 커밋만 의미가 있다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: test + detekt + ktlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # build.gradle.kts 의 toolchain 은 17 이고 이 저장소에는 toolchain 자동
+      # 프로비저닝(foojay) 플러그인이 없다. 그래서 JDK 17 을 여기서 깔아 줘야
+      # Gradle 이 toolchain 을 찾는다. detekt 도 같은 17 launcher 를 쓴다.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 테스트는 Testcontainers(MySQL 8.4 / Redis 7)로 돈다. ubuntu 러너에는
+      # Docker 데몬이 이미 떠 있으므로 서비스 컨테이너를 따로 선언할 필요가 없다.
+      #
+      # withReuse(true) 는 ~/.testcontainers.properties 의
+      # testcontainers.reuse.enable=true 가 있어야 켜진다. 러너에는 없으므로
+      # 경고 한 줄 내고 무시된다 — 재사용은 로컬에서 반복 실행할 때의 편의이고
+      # CI 는 매번 새 컨테이너로 도는 게 맞다. 그래서 아무 설정도 하지 않는다.
+      - name: gradle test detekt ktlintCheck
+        run: ./gradlew --no-daemon --console=plain test detekt ktlintCheck
+
+      # 실패했을 때 로그만 보고 원인을 찾기는 어렵다. 리포트를 통째로 올린다.
+      - name: upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/reports/
+            build/test-results/
+          retention-days: 7
+          if-no-files-found: warn

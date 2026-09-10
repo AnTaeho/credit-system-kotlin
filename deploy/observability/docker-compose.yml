@@ -1,6 +1,6 @@
 # step7 5단계 — 도메인 지표 관측 스택
 #
-# 올리기:  ./gradlew bootJar && docker compose -f deploy/observability/docker-compose.yml up -d --build
+# 올리기:  docker compose -f deploy/observability/docker-compose.yml up -d --build
 # 내리기:  docker compose -f deploy/observability/docker-compose.yml down -v
 
 services:
@@ -30,9 +30,10 @@ services:
 
   app:
     build:
-      # 컨텍스트가 저장소 루트여야 build/libs/*.jar 를 COPY 할 수 있다.
+      # 저장소 루트의 Dockerfile 을 쓴다(step8-C). 이미지 안에서 bootJar 까지 돌므로
+      # 예전처럼 호스트에서 ./gradlew bootJar 를 먼저 돌릴 필요가 없다.
       context: ../..
-      dockerfile: deploy/observability/Dockerfile
+      dockerfile: Dockerfile
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/credit_system?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8
       SPRING_DATASOURCE_USERNAME: root
