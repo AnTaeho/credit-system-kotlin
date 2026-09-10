@@ -101,10 +101,37 @@ FAILED가 들어가는 이유: 이 코드는 FAILED 뒤에 REFUNDED가 따로 �
 4. GitHub Actions
    - PR: `./gradlew test detekt ktlintCheck` (Testcontainers는 Actions 러너의 Docker로 돈다)
    - `develop` 머지: 이미지 빌드 → GHCR push. 태그는 git sha
-5. graceful shutdown: `server.shutdown: graceful` + 워커 executor가 진행 중인 job을 마칠 때까지 대기. 대기 상한은 `processing.timeout`에서 유도
-6. README. 무엇인지, 어떻게 띄우는지, 문서 지도(`docs/step*`, `STEPS.md`)
+5. README. 무엇인지, 어떻게 띄우는지, 문서 지도(`docs/step*`, `STEPS.md`)
 
-**완료 기준:** PR에서 테스트가 초록. `docker compose up`만으로 로컬 전체가 뜬다. `SIGTERM`에 진행 중 job이 회수 없이 완료된다.
+**완료 기준:** PR에서 테스트가 초록. `docker compose up`만으로 로컬 전체가 뜬다.
+
+#### 완료 기록 (2026-09-10, 브랜치 `step8-ops`)
+
+상세는 [`docs/step8-ops.md`](step8-ops.md).
+
+| 커밋 | 내용 |
+|---|---|
+| `6e1fc74` | step8-A — Flyway 도입(`V1__baseline.sql`)과 `ddl-auto: validate`, 프로파일 분리, 저장소에서 평문 비밀번호 제거 |
+| `b804f32` | step8-C — 루트 `Dockerfile`(멀티스테이지)·`docker-compose.yml`, GitHub Actions `ci.yml`/`image.yml` |
+| `c3bdda2` | step8-D — 관측 스택의 DB 자격증명을 루트 compose 계약(`credit_system`/`credit`/`credit`)으로 통일 |
+| `79616b7` | chore — 추적되던 faultpad `__pycache__` 정리 |
+
+완료 기준 대조:
+
+| 기준 | 결과 |
+|---|---|
+| PR에서 테스트가 초록 | **미검증.** 워크플로 두 개를 썼지만 아직 push 전이라 러너에서 한 번도 돌지 않았다. 첫 push가 실질적 검증이다 |
+| `docker compose up`만으로 로컬 전체가 뜬다 | **충족(조건부).** 기본 `up`은 MySQL·Redis만 띄우고 앱은 `--profile app`이다. 개발 중 앱 재시작 빈도를 고려해 일부러 나눴다. 조직 생성 API가 없어 첫 요청 전 SQL 삽입이 여전히 필요하다 |
+| README (5번 항목) | **충족.** 루트 `README.md`. `STEPS.md`에 step7·step8 항목 추가 |
+
+테스트는 181개로 그대로다. 도메인 코드를 건드리지 않는 단계라 새 테스트가 없다.
+
+step9로 넘기는 것:
+- **`status`·`type`이 네이티브 `ENUM`이다.** `@Enumerated(STRING)`이 MySQL에서 `VARCHAR`가 아니라 `ENUM`을 만든다. 원장 재설계에서 상태나 타입을 추가하면 `ALTER TABLE ... MODIFY`가 함께 필요하다
+- **H2 테스트는 마이그레이션을 안 탄다.** 마이그레이션 검증은 Testcontainers를 쓰는 테스트가 건드리는 범위까지다
+
+step10으로 넘기는 것:
+- CI 첫 실행 검증, 스케줄러 겹침 실측과 ShedLock, 시크릿 관리, `latest` 태그를 무엇으로 부를지
 
 ### step9 — 원장 재설계
 
@@ -128,11 +155,12 @@ FAILED가 들어가는 이유: 이 코드는 FAILED 뒤에 REFUNDED가 따로 �
 **규모:** 중간. 1~2주. 인프라 삽질 시간이 예측이 안 되니 넉넉히.
 
 1. Oracle Cloud Always Free ARM VM. compose 하나로 app×2 + MySQL + Redis + Prometheus + Grafana + Alertmanager + Caddy(리버스 프록시·TLS)
-2. CD: GHCR push 뒤 SSH로 `compose pull && compose up` — 앱 컨테이너를 하나씩 교체. step8의 graceful shutdown이 여기서 검증된다
-3. 스케줄러 3개(회수·대사·멱등키 정리)에 ShedLock. **먼저 ShedLock 없이 2대를 띄워 겹침이 실제로 어떤 지표로 드러나는지 실측한 뒤** 넣는다
-4. Alertmanager → Discord 웹훅. 알람 임계값은 설정값에서 유도(step7 방식 유지)
-5. k6 baseline 트래픽을 VM 안에서 상시 유지. 장애 시나리오를 실제 VM에서 재실행
-6. health 재설계: Redis down이 readiness DOWN이 되면 안 된다(백스톱이 있으니 degraded). liveness와 readiness를 분리
+2. CD: GHCR push 뒤 SSH로 `compose pull && compose up` — 앱 컨테이너를 하나씩 교체
+3. graceful shutdown: `server.shutdown: graceful` + 워커 executor가 진행 중인 job을 마칠 때까지 대기. 대기 상한은 `processing.timeout`에서 유도. 원래 step8 항목이었지만 배포 환경 없이는 검증할 수 없어 여기서 만들고 검증한다
+4. 스케줄러 3개(회수·대사·멱등키 정리)에 ShedLock. **먼저 ShedLock 없이 2대를 띄워 겹침이 실제로 어떤 지표로 드러나는지 실측한 뒤** 넣는다
+5. Alertmanager → Discord 웹훅. 알람 임계값은 설정값에서 유도(step7 방식 유지)
+6. k6 baseline 트래픽을 VM 안에서 상시 유지. 장애 시나리오를 실제 VM에서 재실행
+7. health 재설계: Redis down이 readiness DOWN이 되면 안 된다(백스톱이 있으니 degraded). liveness와 readiness를 분리
 
 **완료 기준:** `develop` 머지 후 손대지 않아도 VM이 새 버전으로 바뀐다. 배포 중 k6 에러율 0. 2대에서 회수 이중 발동 0.
 
@@ -179,7 +207,7 @@ FAILED가 들어가는 이유: 이 코드는 FAILED 뒤에 REFUNDED가 따로 �
 실제 토큰 사용량이 필요한 실험(step13)에서는 비용을 감수하고 실제 API를 쓴다.
 
 ### 결정 7 — 무중단 배포를 한다 (2026-09-10)
-app×2 + Caddy 순차 교체. graceful shutdown(step8)과 ShedLock(step10)이 여기서 검증된다.
+app×2 + Caddy 순차 교체. graceful shutdown과 ShedLock을 step10에서 함께 만들고 검증한다.
 
 ## 4. 미결 사항
 
@@ -194,7 +222,7 @@ app×2 + Caddy 순차 교체. graceful shutdown(step8)과 ShedLock(step10)이 �
 
 - **왜 큐를 안 썼나** — DB가 큐, CAS가 보호. step10의 2대 실측이 근거
 - **2대에서 스케줄러가 겹치면** — step10에서 겹치게 두고 실측한 뒤 ShedLock
-- **배포 중 처리 중이던 job은** — graceful shutdown(step8)이 정상 경로, 회수(step5)는 안전망
+- **배포 중 처리 중이던 job은** — graceful shutdown(step10)이 정상 경로, 회수(step5)는 안전망
 - **조건부 UPDATE의 한계** — 조직당 한 행이라 hot row. step12의 부하 실측에서 row lock 대기가 보이면 버킷 분할 검토
 - **0행이 잔액 부족인지 경합 패배인지** — 지금은 구분 안 함. 재조회로 구분하는 비용 vs 이득
 - **다른 조직 크레딧을 못 건드리게** — step11 API 키. 그 이상은 의도적으로 범위 밖
@@ -220,3 +248,4 @@ app×2 + Caddy 순차 교체. graceful shutdown(step8)과 ShedLock(step10)이 �
 | 2026-09-10 | v1 작성(3단계 마일스톤). 코드 대조로 Kafka 부재·step7 중복 확인 |
 | 2026-09-10 | v2로 전면 재작성. 목표를 "실서비스 수준"으로 바꾸고 step8~13 여섯 단계로 재편. Kafka 제외·원장 유일 진실 확정 |
 | 2026-09-10 | 결정 6·7 확정(외부 생성 선택 가능, 무중단 배포). step8 착수 — 브랜치 `step8-ops` |
+| 2026-09-10 | step8 완료 기록 추가. 완료 기준 4개 중 3개 충족, "PR에서 테스트가 초록"은 push 전이라 미검증. `docs/step8-ops.md`·`README.md` 작성, `STEPS.md`에 step7·step8 항목 추가 |

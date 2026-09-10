@@ -67,3 +67,9 @@ management:
 logging:
   level:
     com.example.credit_system_kotlin: info
+
+server:
+  # SIGTERM 이 오면 새 요청 접수를 멈추고 진행 중 요청을 끝낸 뒤 내려간다. 이 설정이 없으면
+  # 웹서버가 즉시 끊겨, 응답을 기다리던 hold 요청이 "돈은 묶였는데 jobId 는 못 받은" 상태로
+  # 남는다.
+  shutdown: graceful

@@ -1499,6 +1499,7 @@ NAME   IMAGE   COMMAND   SERVICE   CREATED   STATUS   PORTS
 - **앱 healthcheck 가 관리 포트에 의존한다.** `/actuator/health` 는 관리 포트로 옮겨갔으므로 healthcheck 도 8081 을 부른다. 관리 컨텍스트가 못 뜨면 애플리케이션 포트가 멀쩡히 요청을 처리하고 있어도 컨테이너는 unhealthy 가 되고, `depends_on: service_healthy` 를 건 것들이 줄줄이 막힌다. "관측 장치의 고장이 서비스의 고장으로 번지는" 구조인데, 관측 포트가 안 뜨면 어차피 사고를 못 보므로 그 상태를 정상으로 치지 않기로 했다.
 - **`scrape_interval: 5s` 는 비싸다.** 15초 대비 TSDB 쓰기와 저장량이 3배다. 지표 305개 × 12/분이면 로컬에서는 아무 문제가 없지만, 인스턴스가 수십 개인 환경에 그대로 옮기면 안 되는 값이다.
 - **비밀번호가 파일에 박혀 있다.** `application.yml` 의 `an902318` 을 compose 가 env 로 덮어쓰지만 그 env 도 평문이다. 로컬 실험 스택이라 그대로 뒀다 — 실제 배포라면 시크릿 관리가 별도로 필요하다.
+  (step8-A·D 이후에는 `application.yml` 에서 평문 비밀번호가 사라지고 로컬 기본값 `credit`/`credit` 만 남았다. 관측 스택도 같은 계약을 쓴다. compose 의 env 가 평문인 것은 그대로다.)
 - **데이터가 휘발된다.** MySQL·Prometheus·Grafana 모두 명명 볼륨을 두지 않았다. `down -v` 하면 전부 사라지고, 매번 `seed.sh` 부터 다시 한다. 실험대로서는 오히려 이쪽이 낫다(상태가 남으면 이전 실행의 카운터가 다음 실험을 오염시킨다 — 실제로 위의 `rejected 9` 가 그 사례다).
 
 ### 이 단계에서 남는 것
