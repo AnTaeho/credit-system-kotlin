@@ -58,7 +58,7 @@ docker compose -f deploy/observability/docker-compose.yml exec app \
 ```
 # DB 들여다보기 (3306 이 publish 되지 않으므로 exec 로 들어간다)
 docker compose -f deploy/observability/docker-compose.yml exec mysql \
-  mysql -uroot -pan902318 credit_system -e "SELECT status, COUNT(*) FROM jobs GROUP BY status;"
+  mysql -ucredit -pcredit credit_system -e "SELECT status, COUNT(*) FROM jobs GROUP BY status;"
 
 # 앱 로그
 docker compose -f deploy/observability/docker-compose.yml logs -f app
