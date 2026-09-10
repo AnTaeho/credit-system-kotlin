@@ -48,18 +48,31 @@ object SharedContainers {
     }
 
     fun registerDatabase(registry: DynamicPropertyRegistry, database: String) {
+        val properties = propertiesFor(database)
+        for ((key, value) in properties) {
+            registry.add(key) { value }
+        }
+    }
+
+    /**
+     * `@DynamicPropertySource` 를 못 쓰는 테스트 — 스프링 테스트 컨텍스트에 맡기지 않고
+     * 애플리케이션을 직접 띄웠다 내리는 종료 테스트 — 를 위해 같은 값을 맵으로도 내준다.
+     */
+    fun propertiesFor(database: String): Map<String, Any> {
         createDatabase(database)
-        registry.add("spring.datasource.url") { jdbcUrlFor(database) }
-        registry.add("spring.datasource.username") { mysql.username }
-        registry.add("spring.datasource.password") { mysql.password }
-        registry.add("spring.datasource.driver-class-name") { mysql.driverClassName }
-        // H2 테스트와 달리 여기서는 스키마를 Flyway 가 만들고 Hibernate 가 검증한다.
-        // 마이그레이션이 실제 MySQL 에서 돌아가는지, 그 결과가 엔티티 매핑과 맞는지를
-        // 확인하는 자리가 이 테스트들뿐이다.
-        registry.add("spring.flyway.enabled") { "true" }
-        registry.add("spring.jpa.hibernate.ddl-auto") { "validate" }
-        registry.add("spring.data.redis.host") { redis.host }
-        registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
+        return mapOf(
+            "spring.datasource.url" to jdbcUrlFor(database),
+            "spring.datasource.username" to mysql.username,
+            "spring.datasource.password" to mysql.password,
+            "spring.datasource.driver-class-name" to mysql.driverClassName,
+            // H2 테스트와 달리 여기서는 스키마를 Flyway 가 만들고 Hibernate 가 검증한다.
+            // 마이그레이션이 실제 MySQL 에서 돌아가는지, 그 결과가 엔티티 매핑과 맞는지를
+            // 확인하는 자리가 이 테스트들뿐이다.
+            "spring.flyway.enabled" to "true",
+            "spring.jpa.hibernate.ddl-auto" to "validate",
+            "spring.data.redis.host" to redis.host,
+            "spring.data.redis.port" to redis.getMappedPort(REDIS_PORT)
+        )
     }
 
     private fun flushRedis() {
