@@ -1,21 +1,26 @@
 # 단계별 학습 브랜치
 
 이 저장소의 크레딧 시스템을 **방어 로직이 하나도 없는 상태**에서 시작해
-**완성본**까지 일곱 단계로 나눠 놓은 브랜치들이다.
+지금까지 아홉 단계로 나눠 놓은 브랜치들이다.
 
 각 단계는 그 자체로 컴파일되고 테스트가 통과하는 실행 가능한 상태다.
 테스트도 그 단계에 실제로 존재하는 방어만 검증하도록 맞춰져 있다.
 
-히스토리는 `step0 → step6` 순방향 선형이다. 한 겹씩 이렇게 본다:
+히스토리는 `step0 → step7` 순방향 선형이고, `step8-ops` 는 step7 을 머지한 `develop` 위에 올라 있다.
+한 겹씩 이렇게 본다:
 
 ```
 git diff step0-naive step1-validation
-git log --oneline step0-naive..step6-resilience
+git log --oneline step0-naive..step7-observability
+git log --oneline develop..step8-ops
 ```
 
 `main` 은 실제 개발 히스토리를 담은 브랜치다. 동작과 방어 장치는 `step6-resilience` 와 같지만
 코드가 글자 그대로 같지는 않다 — step 브랜치 쪽은 엔티티의 불변 필드를 생성자에 `val` 로 선언하고,
 `ChargeService` 와 `OrganizationQueryService` 를 `OrganizationService` 하나로 합쳐 두었다.
+
+step0~step6 이 **사고를 막는** 이야기라면, step7 부터는 **밖에서 보이게 만들고 운영 가능하게 만드는**
+이야기다. step6 까지만 읽어도 도메인 방어의 논지는 다 들어온다.
 
 각 브랜치에는 그 단계까지의 **상세 문서**가 `docs/` 아래에 하나씩 들어 있다.
 `step3-idempotency` 를 체크아웃하면 `docs/step0-naive.md` 부터 `docs/step3-idempotency.md` 까지 읽을 수 있다.
@@ -173,7 +178,7 @@ heartbeat 와 timeout 두 겹인 이유: heartbeat 는 빠르지만 Redis 에 �
 
 ---
 
-## step6-resilience — 인프라 장애 내성과 감사 (완성본)
+## step6-resilience — 인프라 장애 내성과 감사 (도메인 방어의 완성본)
 
 새로 생긴 것:
 
@@ -200,6 +205,72 @@ heartbeat 와 timeout 두 겹인 이유: heartbeat 는 빠르지만 Redis 에 �
 
 ---
 
+## step7-observability — 도메인 지표 관측
+
+여기서부터는 사고를 **막는** 이야기가 아니라 **보이게 만드는** 이야기다.
+step2~6 이 만든 방어 장치들은 잘 막고 있는지, 얼마나 자주 막고 있는지, 아니면 아예 안 돌고 있는지를
+밖에서 알 수 없었다. 이 도메인의 진짜 사고는 CPU 40%, 에러율 0%로 서버가 완벽히 건강한 채로 난다.
+
+새로 생긴 것:
+
+- **관측 대상을 네 계층으로 나눈다** — L0 돈(묶인 금액과 나이), L1 불변식(대사), L2 흐름(적체),
+  L3 방어 발동(몇 번 막았나). L3 이 특히 서버 지표로 대체 불가능하다.
+  attemptNo 가 낡은 세대의 confirm 을 무효화한 사건은 HTTP 200 이고 에러 로그도 지연도 없다.
+  `credit_defense_total{point="confirm",outcome="stale"}` 이 오르는 것만이 유일한 흔적이다
+- **`observability/` 패키지** — 도메인·스케줄러 코드는 `LedgerReconciliationCompleted`,
+  `DefenseTriggered` 같은 **순수 값 이벤트**만 발행하고, Micrometer 를 아는 것은 이 패키지뿐이다.
+  "무엇이 일어났나"를 바꾸는 사람과 "그걸 어떻게 세나"를 바꾸는 사람이 서로의 코드를 안 건드린다
+- **노출 경계와 카디널리티 가드** — 관리 포트를 떼면 애플리케이션 포트의 `/actuator/prometheus` 가 404 가 된다.
+  레지스트리 수준의 시계열 상한. 조직 id 같은 식별자를 태그로 다는 것을 코드가 거부한다
+- **docker-compose 관측 스택** — Prometheus + Grafana + 알람 규칙. `deploy/observability/`
+- **장애 주입 9개 시나리오** — 워커를 죽이고 스케줄러를 끄고 Redis 를 내리고 원장을 SQL 로 깬다.
+  매번 세 가지를 잰다: 어느 지표가 반응했나, **어느 지표가 침묵했나**, 감지까지 몇 초 걸렸나
+
+이 단계의 관점: **막는 장치는 말이 없다. 말하게 만들어야 장치가 된다.**
+그리고 실측이 기존 코드의 결함 셋을 드러냈다 — staleness 규칙이 "한 번도 안 돎"(-1)을 못 잡던 것,
+`updatedAt` 백스톱이 사실은 Redis 에 의존하던 것, `worker_claim/applied` 가 처리량이 아니던 것.
+셋 다 고쳤다. **관측 장치 자신의 고장이 사고보다 나쁠 수 있다**는 게 첫 번째가 남긴 교훈이다.
+
+여기서도 남는 것: L2 흐름이 비어 있어 대시보드는 "막혔다"까지만 말하고 "어디서"는 말하지 않는다.
+Alertmanager 가 없어 알람은 누가 보고 있을 때만 알려준다. 그리고 한 대짜리 실험이라
+`worker_claim/lost`, `confirm/stale` 같은 경쟁 지표는 전부 0 인 채다 — 두 인스턴스가 필요하다.
+
+---
+
+## step8-ops — 운영 기반: 마이그레이션·설정·이미지·CI·종료
+
+여기까지의 저장소는 **내 노트북에서만** 살아 있었다. 스키마는 Hibernate 가 부팅마다 알아서 맞췄고,
+DB 비밀번호는 `application.yml` 에 평문이었고, 이미지는 "먼저 `./gradlew bootJar` 를 돌려라"가 전제였고,
+배포는 곧 진행 중인 job 을 죽이는 일이었다. 도메인 코드는 거의 건드리지 않는 단계다.
+
+새로 생긴 것:
+
+- **Flyway** — `V1__baseline.sql` 은 지금 스키마를 "개선하지 않고" 그대로 옮긴 것이다.
+  `SHOW CREATE TABLE` 을 받아 적었더니 `status`·`type` 이 `VARCHAR` 가 아니라 **네이티브 `ENUM`** 이었다.
+  `ddl-auto: update` → `validate` 로 바뀌면서, 이제 enum 값 하나 추가가 스키마 변경이 됐다
+- **프로파일 분리** — 로컬 기본값은 루트 compose 와 같은 계약(`credit_system`/`credit`/`credit`).
+  `application-prod.yml` 의 DB 설정에는 **기본값을 일부러 안 줬다**. 환경변수를 빠뜨리면
+  로컬 DB 를 향해 조용히 뜨는 대신 부팅에서 죽는다 — step6 의 설정 불변식과 같은 판단이다
+- **루트 `Dockerfile`(멀티스테이지)과 `docker-compose.yml`** — 빌드가 이미지 안에서 돈다.
+  compose 는 기본으로 인프라만 띄우고 앱은 `--profile app` 뒤에 숨겼다
+- **GitHub Actions** — PR 은 `test detekt ktlintCheck`, `develop` push·`v*` 태그는 GHCR.
+  `workflow_run` 대신 `workflow_call` + `needs` 를 쓴 이유가 `image.yml` 헤더에 있다
+  (`workflow_run` 은 워크플로가 기본 브랜치에 있어야만 뜨는데 통합 브랜치가 `develop` 이다)
+- **graceful shutdown** — `WorkerDrainGate` 가 디스패처의 문을 닫고, `GenerationWorkerLifecycle`
+  (`SmartLifecycle`)이 진행 중 job 이 스스로 끝나기를 기다린다. 문이 **플래그가 아니라 락**인 것이
+  요지다 — 플래그면 "읽음 → 아직 선점 전" 창이 남아 롤백 경로가 탄다.
+  결과는 `credit.worker.drain.jobs{outcome=drained|abandoned}` 로 드러난다
+
+이 단계의 관점: **회수는 안전망이지 정상 경로가 아니다.**
+배포는 예고된 종료인데, 그때마다 예고 없는 죽음을 위한 안전망을 부르는 것은 대가를 잘못 치르는 것이다.
+같은 원칙이 설정에도 있다 — 잘못된 상태로 조용히 뜨느니 부팅에서 죽는 게 싸다.
+
+여기서도 남는 것: **CI 가 실제로 돈 적이 없다**(push 전이라 러너에서 초록을 본 적이 없다).
+스케줄러 셋에 분산 락이 없어 2대를 띄우면 겹친다. 드레인 상한을 넘긴 job 은 여전히 회수에 맡긴다.
+H2 를 쓰는 대다수 테스트는 마이그레이션을 타지 않는다.
+
+---
+
 ## 추천 학습 순서
 
 1. `git checkout step0-naive` 하고 `HoldService`, `OrganizationService`, `GenerationWorker` 를 읽는다.
@@ -215,19 +286,38 @@ git diff step2-atomic-balance step3-idempotency
 git diff step3-idempotency step4-state-machine
 git diff step4-state-machine step5-recovery
 git diff step5-recovery step6-resilience
+git diff step6-resilience step7-observability
+git diff develop step8-ops
 ```
+
+step6 까지가 "사고를 어떻게 막는가"의 전부다. 거기서 멈춰도 논지는 닫힌다.
+step7·step8 은 그 위에 얹은 다른 종류의 이야기라, 관심이 관측이나 운영 쪽이면 바로 건너뛰어도 된다.
 
 특정 파일 하나가 어떻게 자랐는지 따라가려면:
 
 ```
-git log -p --follow step0-naive..step6-resilience -- src/main/kotlin/com/example/credit_system_kotlin/job/service/HoldService.kt
+git log -p --follow step0-naive..step7-observability -- src/main/kotlin/com/example/credit_system_kotlin/job/service/HoldService.kt
 ```
 
 ## 실행
 
-각 단계마다:
+`step8-ops` 부터는 인프라를 루트 compose 가 띄운다.
 
 ```
-./gradlew test        # Docker 필요 (Testcontainers)
-./gradlew bootRun     # MySQL 필요, step5 부터는 Redis 도 필요
+docker compose up -d      # MySQL 8.4 + Redis 7
+./gradlew bootRun         # application.yml 의 기본값이 위 컨테이너와 같은 계약이다
+docker compose down -v
+```
+
+조직을 만드는 API 가 없어서 첫 요청 전에 SQL 로 하나 넣어야 한다.
+띄우는 법과 curl 예시는 [`README.md`](README.md) 에 있다.
+
+step7 이하의 브랜치를 체크아웃했다면 루트 compose 가 없으므로 MySQL·Redis 를 직접 준비한다
+(step5 부터 Redis 가 필요하다).
+
+테스트는 어느 단계에서든 같다.
+
+```
+./gradlew test                    # Docker 필요 (Testcontainers 가 MySQL·Redis 를 띄운다)
+./gradlew test detekt ktlintCheck # step8 의 CI 가 PR 에서 돌리는 조합
 ```
