@@ -13,7 +13,7 @@
       "group": "준비",
       "title": "스택",
       "injects": "사고가 아니다. 관측 스택을 올리고 내린다.",
-      "note": "stack_up 은 down -v → up -d --build → seed 다. 먼저 ./gradlew bootJar 가 필요하다.",
+      "note": "stack_up 은 down -v → up -d --build → seed 다. 이미지는 루트 Dockerfile 로 소스에서 직접 빌드된다(첫 빌드는 몇 분).",
       "expect": [],
       "silent": [],
       "alerts": [],

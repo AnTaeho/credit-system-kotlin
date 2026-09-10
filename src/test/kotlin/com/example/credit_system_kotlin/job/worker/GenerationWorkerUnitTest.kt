@@ -47,7 +47,7 @@ class GenerationWorkerUnitTest {
         eventPublisher.clear()
         worker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
-            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
+            UNLIMITED_SLOTS, WorkerDrainGate(), WorkerProperties(true, 20, CONCURRENCY)
         )
         job = Job.hold(10L, 100L, "cat")
         ReflectionTestUtils.setField(job, "id", 1L)
@@ -97,7 +97,7 @@ class GenerationWorkerUnitTest {
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
             TaskExecutor { throw IllegalStateException("executor shutdown") }, eventPublisher,
-            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
+            UNLIMITED_SLOTS, WorkerDrainGate(), WorkerProperties(true, 20, CONCURRENCY)
         )
         doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
@@ -130,7 +130,7 @@ class GenerationWorkerUnitTest {
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
             TaskExecutor { throw TaskRejectedException("pool exhausted") }, eventPublisher,
-            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
+            UNLIMITED_SLOTS, WorkerDrainGate(), WorkerProperties(true, 20, CONCURRENCY)
         )
         doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
@@ -184,7 +184,7 @@ class GenerationWorkerUnitTest {
     fun `빈 슬롯이 없으면 DB 조회도 선점도 하지 않는다`() {
         val fullWorker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
-            WorkerSlots { 0 }, WorkerProperties(true, 3, CONCURRENCY)
+            WorkerSlots { 0 }, WorkerDrainGate(), WorkerProperties(true, 3, CONCURRENCY)
         )
 
         fullWorker.dispatchPendingJobs()
@@ -198,7 +198,7 @@ class GenerationWorkerUnitTest {
     fun `빈 슬롯이 batchSize보다 적으면 슬롯 수만큼만 읽는다`() {
         val slotWorker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
-            WorkerSlots { 2 }, WorkerProperties(true, 3, CONCURRENCY)
+            WorkerSlots { 2 }, WorkerDrainGate(), WorkerProperties(true, 3, CONCURRENCY)
         )
         doReturn(emptyList<Job>()).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
 
@@ -211,7 +211,7 @@ class GenerationWorkerUnitTest {
     fun `빈 슬롯이 batchSize보다 많으면 batchSize가 상한이다`() {
         val slotWorker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
-            WorkerSlots { 5 }, WorkerProperties(true, 3, CONCURRENCY)
+            WorkerSlots { 5 }, WorkerDrainGate(), WorkerProperties(true, 3, CONCURRENCY)
         )
         doReturn(emptyList<Job>()).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
 

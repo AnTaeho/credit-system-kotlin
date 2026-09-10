@@ -6,11 +6,10 @@ step7 5단계에서 만든 로컬 관측 스택이다. 논지·지표 해석·�
 ## 전제
 
 - Docker (Compose v2)
-- **먼저 jar 를 만들어야 한다.** 이미지는 호스트가 만든 fat jar 를 COPY 할 뿐이다.
 
-```
-./gradlew bootJar
-```
+앱 이미지는 저장소 루트의 `Dockerfile`(멀티스테이지)로 만들어진다. 빌더 스테이지가
+이미지 안에서 `bootJar` 까지 돌리므로 호스트에 JDK 도, 미리 만든 jar 도 필요 없다.
+(step8-C 이전에는 `./gradlew bootJar` 를 먼저 돌려야 했다.)
 
 호스트의 3306(MySQL)·6379(Redis)는 건드리지 않는다 — 스택의 MySQL/Redis 는 포트를
 publish 하지 않고 compose 네트워크 안에서만 산다.
@@ -59,7 +58,7 @@ docker compose -f deploy/observability/docker-compose.yml exec app \
 ```
 # DB 들여다보기 (3306 이 publish 되지 않으므로 exec 로 들어간다)
 docker compose -f deploy/observability/docker-compose.yml exec mysql \
-  mysql -uroot -pan902318 credit_system -e "SELECT status, COUNT(*) FROM jobs GROUP BY status;"
+  mysql -ucredit -pcredit credit_system -e "SELECT status, COUNT(*) FROM jobs GROUP BY status;"
 
 # 앱 로그
 docker compose -f deploy/observability/docker-compose.yml logs -f app
@@ -73,7 +72,6 @@ docker compose -f deploy/observability/docker-compose.yml logs -f app
 
 ```
 # 전체 (30~50분, 마지막에 down -v 까지 한다)
-./gradlew bootJar
 ./deploy/observability/scenarios/run-all.sh
 
 # 하나만 (각 스크립트가 시작할 때 down -v → up 을 하므로 단독 실행된다)
@@ -106,7 +104,6 @@ Grafana 로 곡선을 보려면 스크립트를 돌리는 동안 <http://localho
 침묵해야 할 지표**를 나란히 놓는다.
 
 ```
-./gradlew bootJar
 python3 deploy/observability/faultpad/server.py     # http://127.0.0.1:8090
 ```
 

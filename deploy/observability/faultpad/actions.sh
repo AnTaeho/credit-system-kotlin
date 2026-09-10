@@ -102,7 +102,7 @@ print(json.dumps({
 action_stack_up() {
   if ! ls "${REPO_ROOT}"/build/libs/*.jar >/dev/null 2>&1; then
     say "jar 가 없다"
-    note "이미지는 호스트가 만든 fat jar 를 COPY 할 뿐이다. 먼저 ./gradlew bootJar 를 돌려라."
+    note "이미지는 저장소 루트의 Dockerfile 로 소스에서 직접 빌드된다. 첫 빌드는 몇 분 걸린다."
     return 1
   fi
   fresh_stack

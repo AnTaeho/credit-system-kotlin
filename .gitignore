@@ -45,3 +45,10 @@ deploy/observability/faultpad/.state/
 
 # macOS
 .DS_Store
+
+### env ###
+.env
+
+# python
+__pycache__/
+*.pyc

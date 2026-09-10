@@ -10,13 +10,11 @@
 ## 전제
 
 - Docker (Compose v2), python3 (표준 라이브러리만 쓴다 — 설치할 것이 없다)
-- **먼저 jar 를 만들어야 한다.** `./gradlew bootJar`
 - 8090(패드) · 8080(앱) · 9090(Prometheus) · 3000(Grafana) 포트를 쓴다
 
 ## 띄우기
 
 ```
-./gradlew bootJar
 python3 deploy/observability/faultpad/server.py          # 기본 포트 8090
 python3 deploy/observability/faultpad/server.py --port 8099
 ```

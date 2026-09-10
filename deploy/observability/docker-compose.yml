@@ -1,6 +1,6 @@
 # step7 5단계 — 도메인 지표 관측 스택
 #
-# 올리기:  ./gradlew bootJar && docker compose -f deploy/observability/docker-compose.yml up -d --build
+# 올리기:  docker compose -f deploy/observability/docker-compose.yml up -d --build
 # 내리기:  docker compose -f deploy/observability/docker-compose.yml down -v
 
 services:
@@ -8,13 +8,16 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_ROOT_PASSWORD: an902318
+      # 루트 docker-compose.yml·application.yml 과 같은 계약이다(step8-D).
+      MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: credit_system
+      MYSQL_USER: credit
+      MYSQL_PASSWORD: credit
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     # 포트를 publish 하지 않는다. 개발 머신의 로컬 MySQL(3306)과 충돌하기 때문이다.
-    # 디버깅은 docker compose exec mysql mysql -uroot -pan902318 credit_system 으로 한다.
+    # 디버깅은 docker compose exec mysql mysql -ucredit -pcredit credit_system 으로 한다.
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pan902318"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -30,13 +33,14 @@ services:
 
   app:
     build:
-      # 컨텍스트가 저장소 루트여야 build/libs/*.jar 를 COPY 할 수 있다.
+      # 저장소 루트의 Dockerfile 을 쓴다(step8-C). 이미지 안에서 bootJar 까지 돌므로
+      # 예전처럼 호스트에서 ./gradlew bootJar 를 먼저 돌릴 필요가 없다.
       context: ../..
-      dockerfile: deploy/observability/Dockerfile
+      dockerfile: Dockerfile
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/credit_system?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: an902318
+      SPRING_DATASOURCE_USERNAME: credit
+      SPRING_DATASOURCE_PASSWORD: credit
       SPRING_DATA_REDIS_HOST: redis
       # 노출 경계의 실물. 관리 포트를 애플리케이션 포트에서 떼어낸다.
       # application.yml 에 쓰지 않고 여기서 주는 이유는 docs/step7-observability.md 4단계 참고.

@@ -1,0 +1,78 @@
+# 로컬 개발 인프라 — MySQL 과 Redis 만 띄운다.
+#
+# 기본 사용법은 "인프라는 컨테이너, 앱은 호스트"다. 앱을 IDE 나 ./gradlew bootRun 으로
+# 띄우면 application.yml 의 기본값(localhost:3306 / localhost:6379, credit_system,
+# credit/credit)이 그대로 맞는다. 컨테이너 안의 값과 그 기본값은 같은 계약이다.
+#
+#   docker compose up -d                  # MySQL + Redis
+#   ./gradlew bootRun                     # 앱은 호스트에서
+#   docker compose down -v                # 데이터까지 버리고 내리기
+#
+# 앱까지 컨테이너로 확인하고 싶으면 profile 을 켠다. 이때는 호스트명이 달라지므로
+# Spring 표준 환경변수로 덮어쓴다 — application.yml 은 건드리지 않는다.
+#
+#   docker compose --profile app up -d --build
+#
+# 관측 스택(Prometheus/Grafana 포함)은 별도다: deploy/observability/docker-compose.yml
+
+services:
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: credit_system
+      MYSQL_USER: credit
+      MYSQL_PASSWORD: credit
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      # 관측 스택과 달리 여기서는 publish 한다. 호스트의 앱이 붙어야 하기 때문이다.
+      # 로컬에 이미 MySQL 이 3306 을 쓰고 있으면 그쪽을 내리거나 이 줄을 바꿔라.
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    # 기본 up 에는 안 뜬다. --profile app 을 줘야 뜬다.
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/credit_system?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8
+      SPRING_DATASOURCE_USERNAME: credit
+      SPRING_DATASOURCE_PASSWORD: credit
+      SPRING_DATA_REDIS_HOST: redis
+      # 관리 포트를 애플리케이션 포트에서 떼어낸다(step7 4단계와 같은 경계).
+      MANAGEMENT_SERVER_PORT: 8081
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  mysql-data:

@@ -1,0 +1,30 @@
+# 빌드 컨텍스트에서 뺄 것들. 컨텍스트가 저장소 루트라 이게 없으면
+# build/ 와 .git/ 이 통째로 데몬에 올라가고, 호스트의 build/ 산출물이
+# 이미지 안 빌드에 섞여 들어갈 수도 있다.
+.git
+.gitignore
+.gitattributes
+
+# 호스트 빌드 산출물 — 이미지는 자기 안에서 다시 빌드한다.
+build/
+.gradle/
+.kotlin/
+out/
+bin/
+
+# 에디터·IDE
+.idea/
+.vscode/
+*.iml
+.editorconfig
+
+# 에이전트·문서
+.claude/
+docs/
+*.md
+
+# 관측 스택은 자기 compose 가 마운트해서 쓴다. 앱 이미지에는 필요 없다.
+deploy/
+
+# macOS
+.DS_Store

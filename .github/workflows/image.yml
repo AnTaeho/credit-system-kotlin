@@ -1,0 +1,83 @@
+# 이미지 빌드 & GHCR push.
+#
+# 검증이 초록일 때만 이미지가 나가야 한다. 그 의존을 거는 방법이 둘이었다.
+#
+#   (a) workflow_run — ci 워크플로가 끝나면 이 워크플로가 뒤따라 뜬다.
+#   (b) 같은 실행 안의 job 의존 — `needs:` 로 묶는다.
+#
+# (b)를 골랐다. workflow_run 은 트리거 워크플로가 **기본 브랜치에 있을 때만** 뜨는데,
+# 이 저장소의 통합 브랜치는 develop 이고 기본 브랜치는 main 이다. develop 에 올린
+# 워크플로는 main 에 머지되기 전까지 한 번도 안 도는 함정에 그대로 걸린다. 게다가
+# workflow_run 의 체크아웃은 기본이 기본 브랜치 HEAD 라 `head_sha` 를 손으로 넘겨야
+# 하고, 실패하면 이미지가 엉뚱한 커밋으로 만들어진다.
+#
+# `needs:` 는 같은 실행·같은 커밋이라 그런 어긋남이 없다. 파일을 나눈 채로 job 의존을
+# 걸기 위해 ci.yml 에 workflow_call 을 열어 두고 여기서 불렀다.
+name: image
+
+on:
+  push:
+    branches: [develop]
+    tags: ['v*']
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # 이미지가 나가기 전에 반드시 초록이어야 하는 관문. ci.yml 그대로다.
+  verify:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  build-and-push:
+    name: build & push to GHCR
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 태그 규칙
+      #   - develop push          → `develop`, `sha-<짧은 sha>`
+      #   - v1.2.3 태그 push      → `1.2.3`, `1.2`, `sha-<짧은 sha>`
+      # 짧은 sha 는 항상 붙는다. "지금 도는 게 어느 커밋인가"에 답할 수 있어야 한다.
+      # latest 는 붙이지 않는다 — 배포는 step10 이고, 그때 무엇을 latest 로 부를지
+      # 정하지 않은 채 태그부터 만들면 아무도 못 믿는 이름이 하나 생길 뿐이다.
+      - name: derive tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/antaeho/credit-system-kotlin
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - name: build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 러너는 매번 새 머신이다. gha 캐시가 없으면 Gradle 의존성을 매 push 마다
+          # 처음부터 받는다. Dockerfile 의 의존성 레이어가 여기서 값을 한다.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

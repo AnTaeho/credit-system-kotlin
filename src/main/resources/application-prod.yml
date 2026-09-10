@@ -1,0 +1,14 @@
+spring:
+  # 기본값을 일부러 주지 않는다. 플레이스홀더에 `:기본값` 을 붙이면 환경변수를 빠뜨렸을 때
+  # 앱이 로컬 개발용 DB 를 향해 조용히 뜬다. 운영에서 그건 장애를 늦게 발견하게 만들 뿐이라,
+  # 값이 없으면 부팅 단계에서 죽는 쪽을 택했다.
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      # 운영에서 Hibernate 가 스키마를 건드리는 일은 없어야 한다. 명시해서 못 박는다.
+      ddl-auto: validate
