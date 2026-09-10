@@ -42,3 +42,6 @@ out/
 ### 장애 주입 버튼 패드 (step7 후속 3) ###
 # 05 원장 훼손의 원복 정보(훼손 전 잔액, 삭제한 HOLD 행). 로컬 실행 흔적이다.
 deploy/observability/faultpad/.state/
+
+# macOS
+.DS_Store
