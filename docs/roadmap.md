@@ -117,12 +117,14 @@ FAILED가 들어가는 이유: 이 코드는 FAILED 뒤에 REFUNDED가 따로 �
 | `c3bdda2` | step8-D — 관측 스택의 DB 자격증명을 루트 compose 계약(`credit_system`/`credit`/`credit`)으로 통일 |
 | `79616b7` | chore — 추적되던 faultpad `__pycache__` 정리 |
 | `3bdbbf2` | step8-B — graceful shutdown. `WorkerDrainGate` + `GenerationWorkerLifecycle`, 드레인 이벤트·카운터 |
+| `bf98d02` | step8-E — README, `docs/step8-ops.md`, STEPS.md, 로드맵 완료 기록 |
+| `3b4a8ce` | test — CI 1차 실패를 보고 드레인 테스트 전제를 "PROCESSING + heartbeat LIVE" 로 |
 
 완료 기준 대조:
 
 | 기준 | 결과 |
 |---|---|
-| PR에서 테스트가 초록 | **미검증.** 워크플로 두 개를 썼지만 아직 push 전이라 러너에서 한 번도 돌지 않았다. 첫 push가 실질적 검증이다 |
+| PR에서 테스트가 초록 | **충족.** PR #1에서 1차 실패(드레인 테스트의 전제 — 선점과 첫 heartbeat 사이 창) → 테스트 전제 수정 → 2차 성공, 2분 48초. Testcontainers·detekt toolchain 은 첫 실행부터 문제없었다. GHCR push 는 develop 머지 뒤에야 검증된다 |
 | `docker compose up`만으로 로컬 전체가 뜬다 | **충족(조건부).** 기본 `up`은 MySQL·Redis만 띄우고 앱은 `--profile app`이다. 개발 중 앱 재시작 빈도를 고려해 일부러 나눴다. 조직 생성 API가 없어 첫 요청 전 SQL 삽입이 여전히 필요하다 |
 | `SIGTERM`에 진행 중 job이 회수 없이 완료된다 | **충족.** `bootRun` + job 2개 + SIGTERM 실측 — 웹서버 graceful 2초 → 드레인 8.2초 → job1 `COMPLETED`, job2 `HOLDING` 유지, 회수 0회. 재현 조건은 스텁 지연 15초 고정, `concurrency: 1`, 이 머신(Apple Silicon macOS) |
 | README (6번 항목) | **충족.** 루트 `README.md`. `STEPS.md`에 step7·step8 항목 추가 |
@@ -251,3 +253,4 @@ app×2 + Caddy 순차 교체. graceful shutdown(step8)과 ShedLock(step10)이 �
 | 2026-09-10 | v2로 전면 재작성. 목표를 "실서비스 수준"으로 바꾸고 step8~13 여섯 단계로 재편. Kafka 제외·원장 유일 진실 확정 |
 | 2026-09-10 | 결정 6·7 확정(외부 생성 선택 가능, 무중단 배포). step8 착수 — 브랜치 `step8-ops` |
 | 2026-09-10 | step8 완료 기록 추가. 완료 기준 4개 중 3개 충족, "PR에서 테스트가 초록"은 push 전이라 미검증. `docs/step8-ops.md`·`README.md` 작성, `STEPS.md`에 step7·step8 항목 추가 |
+| 2026-09-10 | push·PR #1. CI 1차 실패(테스트 전제) → 2차 성공 2분 48초. 완료 기준 4개 전부 충족(GHCR 은 머지 후). |

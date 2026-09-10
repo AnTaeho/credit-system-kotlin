@@ -292,6 +292,23 @@ credit.worker.drain.jobs{outcome=abandoned}   상한을 넘겨 포기한 job —
 
 부수 효과가 하나 생겼다. `RANDOM_PORT` 를 쓰는 테스트 컨텍스트마다 종료 훅에서 웹서버 graceful 대기 2초가 붙는다. 테스트 전체 시간이 그만큼 늘어난다. 테스트 프로파일에서 `server.shutdown: immediate` 로 되돌릴 수도 있었지만, 그러면 테스트가 검증하는 종료 경로와 실제 종료 경로가 달라진다. 시간을 내주고 같은 경로를 쓰는 쪽을 택했다.
 
+## CI 첫 실행에서 나온 것
+
+PR #1(step8-ops → develop)에서 `ci.yml` 이 처음 돌았다.
+
+| 실행 | 결과 | 소요 | 내용 |
+|---|---|---|---|
+| 1차 (`bf98d02`) | 실패 | 2분 54초 | 187개 중 1개 실패 — `GenerationDrainOnShutdownTest` 의 heartbeat 단언이 `LIVE` 를 기대했는데 `ABSENT` |
+| 2차 (`3b4a8ce`) | 성공 | 2분 48초 | 187개 전부 통과 |
+
+Testcontainers 기동과 detekt 의 JDK 17 toolchain 해석은 첫 실행부터 문제없었다. 걱정했던 둘이 아니라 테스트 하나가 걸렸다.
+
+원인은 코드가 아니라 테스트의 전제였다. 선점(DB 상태를 `PROCESSING` 으로)은 디스패처 스레드에서 일어나고, 첫 heartbeat 기록은 그 뒤 워커 스레드가 `runGeneration` 에 들어가 `startHeartbeat` 를 부를 때 일어난다. 그 사이 짧은 창에서 heartbeat 는 `ABSENT` 다. 테스트는 상태만 보고 종료를 시작했고, 느린 러너에서 정확히 그 창을 잡았다(테스트 전체가 1.4초 만에 끝났다). 로컬에서는 창이 너무 짧아 한 번도 안 걸렸다.
+
+운영에서 이 창은 `updatedAt` 백스톱이 덮는다 — `ABSENT` 인 `PROCESSING` job 은 heartbeat 가 아니라 60초 정체로 회수된다. 그래서 테스트의 전제를 "`PROCESSING` 이면서 heartbeat 가 `LIVE`" 로 고쳤다. 드레인이 검증하는 것("드레인 중에 heartbeat 가 끊기지 않는다")은 그대로다.
+
+이 창 자체는 남는다. 선점과 첫 heartbeat 기록이 원자적이지 않다는 사실은 step10 에서 두 대가 될 때 다시 본다 — 다른 인스턴스의 회수 태스크가 이 창을 heartbeat 부재로 읽을 수 있는지, 백스톱 60초가 그걸 충분히 가리는지.
+
 ## 여기서도 남는 것
 
 - **CI 가 실제로 돈 적이 없다.** `ci.yml` 과 `image.yml` 은 아직 push 되지 않았다. YAML 문법과 액션 버전은 확인했지만 러너에서 초록이 뜬 것을 본 적은 없다. 로드맵의 step8 완료 기준 "PR 에서 테스트가 초록"은 **미충족**이고, 첫 push 에서 고칠 것이 나올 가능성이 높다. Testcontainers 가 러너 Docker 에서 도는지, 30분 timeout 이 충분한지가 특히 그렇다.
