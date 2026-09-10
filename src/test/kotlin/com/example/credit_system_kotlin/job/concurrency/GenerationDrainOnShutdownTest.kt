@@ -88,8 +88,13 @@ class GenerationDrainOnShutdownTest {
             val waiting = holdService.requestGeneration(organization.persistedId, "drain-2", "a dog").jobId
             probe.watchedJobIds = listOf(running, waiting)
 
+            // 전제는 "PROCESSING 이면서 heartbeat 가 살아 있다"이다. 선점(DB 상태 전이)은 디스패처
+            // 스레드에서, 첫 heartbeat 기록은 그 뒤 워커 스레드가 runGeneration 에 들어가서야
+            // 일어난다. 그 사이 heartbeat 는 ABSENT 라 상태만 보고 닫으면 드레인과 무관하게
+            // 이 창을 잡는다(CI 러너에서 실제로 잡혔다). 운영에서는 updatedAt 백스톱이 이 창을 덮는다.
             await().atMost(20, TimeUnit.SECONDS).untilAsserted {
                 assertThat(jobRepository.findById(running).orElseThrow().status).isEqualTo(JobStatus.PROCESSING)
+                assertThat(heartbeatRegistry.heartbeatState(running, 0)).isEqualTo(HeartbeatState.LIVE)
             }
 
             val closing = thread(name = "sigterm") { context.close() }
