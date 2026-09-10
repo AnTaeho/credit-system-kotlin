@@ -173,9 +173,17 @@ Testcontainers 는 ubuntu 러너의 Docker 데몬으로 그냥 돈다. `withReus
 
 마이그레이션 자체는 별도 테스트가 없다. Testcontainers 를 쓰는 모든 테스트가 `flyway.enabled: true` + `ddl-auto: validate` 로 뜨는 것이 곧 검증이다 — V1 이 실제 MySQL 에서 실행되지 않거나 결과가 엔티티 매핑과 어긋나면 그 테스트들이 부팅에서 전부 죽는다.
 
+## CI 첫 실행에서 나온 것
+
+PR #1(step8-ops → develop)에서 `ci.yml` 이 처음 돌았다. 181개 전부 통과, 2분 48초.
+
+걱정했던 둘은 아무 일도 하지 않았다. Testcontainers 는 러너의 Docker 데몬에서 그냥 떴고, detekt 의 JDK 17 toolchain 해석도 첫 실행부터 문제가 없었다. 30분 timeout 은 실제 소요의 10배 넘게 남는다.
+
+한 가지 발견은 이 브랜치에 남기지 않았다. 선점(DB 상태를 `PROCESSING` 으로)과 첫 heartbeat 기록이 원자적이지 않아 그 사이에 heartbeat 가 `ABSENT` 인 짧은 창이 있다. 운영에서는 `updatedAt` 백스톱(60초 정체)이 덮는 창이지만, 두 대가 되면 다른 인스턴스의 회수 태스크가 이 창을 어떻게 읽는지가 문제가 된다. step10 에서 다시 본다.
+
 ## 여기서도 남는 것
 
-- **CI 가 실제로 돈 적이 없다.** `ci.yml` 과 `image.yml` 은 아직 push 되지 않았다. YAML 문법과 액션 버전은 확인했지만 러너에서 초록이 뜬 것을 본 적은 없다. 로드맵의 step8 완료 기준 "PR 에서 테스트가 초록"은 **미충족**이고, 첫 push 에서 고칠 것이 나올 가능성이 높다. Testcontainers 가 러너 Docker 에서 도는지, 30분 timeout 이 충분한지가 특히 그렇다.
+- **이미지 경로는 아직 돈 적이 없다.** PR #1 에서 검증된 것은 `ci.yml` 까지다. `image.yml` 의 `build-and-push` 는 `develop` push 와 `v*` 태그에서만 도니까, GHCR 로그인·태그 계산·push 는 이 브랜치를 머지하는 순간 처음 실행된다. 거기서 고칠 것이 나올 수 있다.
 - **2대에서는 스케줄러가 겹친다.** 회수·대사·멱등키 정리 세 스케줄러에는 여전히 분산 락이 없어서, 인스턴스를 둘로 늘리면 같은 주기에 둘 다 돈다. CAS 덕에 이중 처리는 안 나지만 그게 실측된 적도 없다 — step10 에서 일부러 겹치게 두고 어떤 지표로 드러나는지 본 뒤 ShedLock 을 넣는다.
 - **종료는 아직 안전망에 맡긴다.** 배포마다 진행 중 job 이 죽고 step5 의 회수가 받는다. graceful shutdown 은 배포 환경이 생기는 step10 에서 무중단 배포와 함께 넣는다.
 - **상태 하나 추가가 스키마 변경이 됐다.** `status`·`type` 이 네이티브 `ENUM` 이라 `JobStatus` / `LedgerType` 에 값을 더하려면 `ALTER TABLE ... MODIFY` 마이그레이션이 함께 필요하다. step9 의 원장 재설계에서 바로 부딪힌다.

@@ -115,12 +115,13 @@ FAILED가 들어가는 이유: 이 코드는 FAILED 뒤에 REFUNDED가 따로 �
 | `b804f32` | step8-C — 루트 `Dockerfile`(멀티스테이지)·`docker-compose.yml`, GitHub Actions `ci.yml`/`image.yml` |
 | `c3bdda2` | step8-D — 관측 스택의 DB 자격증명을 루트 compose 계약(`credit_system`/`credit`/`credit`)으로 통일 |
 | `79616b7` | chore — 추적되던 faultpad `__pycache__` 정리 |
+| `bdae77a` | step8-E — README, `docs/step8-ops.md`, STEPS.md, 로드맵 완료 기록 |
 
 완료 기준 대조:
 
 | 기준 | 결과 |
 |---|---|
-| PR에서 테스트가 초록 | **미검증.** 워크플로 두 개를 썼지만 아직 push 전이라 러너에서 한 번도 돌지 않았다. 첫 push가 실질적 검증이다 |
+| PR에서 테스트가 초록 | **충족.** PR #1에서 2분 48초에 초록. Testcontainers·detekt toolchain 은 첫 실행부터 문제없었다. GHCR push 는 develop 머지 뒤에야 검증된다 |
 | `docker compose up`만으로 로컬 전체가 뜬다 | **충족(조건부).** 기본 `up`은 MySQL·Redis만 띄우고 앱은 `--profile app`이다. 개발 중 앱 재시작 빈도를 고려해 일부러 나눴다. 조직 생성 API가 없어 첫 요청 전 SQL 삽입이 여전히 필요하다 |
 | README (5번 항목) | **충족.** 루트 `README.md`. `STEPS.md`에 step7·step8 항목 추가 |
 
@@ -131,7 +132,7 @@ step9로 넘기는 것:
 - **H2 테스트는 마이그레이션을 안 탄다.** 마이그레이션 검증은 Testcontainers를 쓰는 테스트가 건드리는 범위까지다
 
 step10으로 넘기는 것:
-- CI 첫 실행 검증, 스케줄러 겹침 실측과 ShedLock, 시크릿 관리, `latest` 태그를 무엇으로 부를지
+- graceful shutdown(위 step10 3번), 스케줄러 겹침 실측과 ShedLock, 시크릿 관리, `latest` 태그를 무엇으로 부를지
 
 ### step9 — 원장 재설계
 
@@ -248,4 +249,6 @@ app×2 + Caddy 순차 교체. graceful shutdown과 ShedLock을 step10에서 함�
 | 2026-09-10 | v1 작성(3단계 마일스톤). 코드 대조로 Kafka 부재·step7 중복 확인 |
 | 2026-09-10 | v2로 전면 재작성. 목표를 "실서비스 수준"으로 바꾸고 step8~13 여섯 단계로 재편. Kafka 제외·원장 유일 진실 확정 |
 | 2026-09-10 | 결정 6·7 확정(외부 생성 선택 가능, 무중단 배포). step8 착수 — 브랜치 `step8-ops` |
-| 2026-09-10 | step8 완료 기록 추가. 완료 기준 4개 중 3개 충족, "PR에서 테스트가 초록"은 push 전이라 미검증. `docs/step8-ops.md`·`README.md` 작성, `STEPS.md`에 step7·step8 항목 추가 |
+| 2026-09-10 | step8 완료 기록 추가. 완료 기준 3개 중 2개 충족, "PR에서 테스트가 초록"은 push 전이라 미검증. `docs/step8-ops.md`·`README.md` 작성, `STEPS.md`에 step7·step8 항목 추가 |
+| 2026-09-10 | push·PR #1. CI 2분 48초에 초록. 완료 기준 3개 전부 충족(GHCR 은 머지 후). |
+| 2026-09-14 | step8 에서 graceful shutdown 을 들어내 step10 으로 미룬다. 배포 환경이 없는 시점에 검증할 수 없는 코드였고, 무중단 배포와 함께 만드는 편이 맥락이 붙는다. 드레인 구현은 step8-b-drain-archive 브랜치에 보존 |
