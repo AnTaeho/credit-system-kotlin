@@ -55,7 +55,7 @@ class MetricsCardinalityConfig {
     /**
      * `credit.` 접두 미터의 태그 값 개수 상한.
      *
-     * 지금 실제 값은 point 7개, outcome 7개, detector 2개다. 상한 32는 enum 이 지금의 네 배로
+     * 지금 실제 값은 point 7개, outcome 8개, detector 3개다. 상한 32는 enum 이 지금의 네 배로
      * 커져도 걸리지 않는 값이고, 그 이상이 관측된다면 enum 이 아니라 자유 문자열이 태그로
      * 들어갔다는 뜻이다 — 그 시점에 막는 것이 이 필터의 목적이다.
      */
