@@ -33,7 +33,9 @@ import org.springframework.test.context.ActiveProfiles
 @AutoConfigureTestRestTemplate
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["management.server.port=0"]
+    // Redis 상태는 health 판정에서 뺀다. 이 테스트가 보는 것은 "인증 없이 닿는가"이지 "시스템이 건강한가"가
+    // 아니다. 로컬에 Redis 가 떠 있으면 200, CI 처럼 없으면 503 이 되어 환경에 따라 결과가 갈렸다.
+    properties = ["management.server.port=0", "management.health.redis.enabled=false"]
 )
 class ManagementPortBoundaryTest @Autowired constructor(
     restTemplate: TestRestTemplate
