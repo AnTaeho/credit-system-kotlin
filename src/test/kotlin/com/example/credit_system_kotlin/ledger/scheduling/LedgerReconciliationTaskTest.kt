@@ -4,11 +4,14 @@ import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.example.credit_system_kotlin.global.config.appProperties
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.event.LedgerReconciliationCompleted
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.user.domain.User
 import com.example.credit_system_kotlin.user.repository.UserRepository
+import com.example.credit_system_kotlin.user.service.UserFinder
+import com.example.credit_system_kotlin.user.service.UserService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -135,6 +138,29 @@ class LedgerReconciliationTaskTest @Autowired constructor(
         verify(eventPublisher).publishEvent(captor.capture())
         assertThat(captor.firstValue.checkedCount).isEqualTo(3)
         assertThat(captor.firstValue.mismatchCount).isEqualTo(1)
+    }
+
+    /**
+     * 대사 공식은 유형을 가리지 않고 `initialBalance + SUM(amount)` 다. 운영자 지급이 음수나 0 으로
+     * 기록되면 여기서 불일치가 난다. 실제 지급 경로(UserService.grant)를 태워 부호를 확인한다.
+     */
+    @Test
+    fun `운영자 지급 뒤에도 대사 불일치가 없다`() {
+        val user = userRepository.save(User("acme", 1000L))
+        val userService = UserService(userRepository, UserFinder(userRepository), ledgerRepository, appProperties())
+        userService.grant(adminUserId = 1L, userId = user.persistedId, idemKey = "grant-key-1", amount = 700L)
+        userService.grant(adminUserId = 1L, userId = user.persistedId, idemKey = "grant-key-1", amount = 700L)
+        ledgerRepository.save(LedgerEntry.hold(user.persistedId, 1L, 100L))
+        userRepository.addBalance(user.persistedId, -100L, Instant.now())
+        userRepository.flush()
+
+        task.reconcile()
+
+        assertThat(errorLogs()).isEmpty()
+        val captor = argumentCaptor<LedgerReconciliationCompleted>()
+        verify(eventPublisher).publishEvent(captor.capture())
+        assertThat(captor.firstValue.mismatchCount).isEqualTo(0)
+        assertThat(userRepository.findById(user.persistedId).orElseThrow().balance).isEqualTo(1600L)
     }
 
     private fun errorLogs(): List<ILoggingEvent> =

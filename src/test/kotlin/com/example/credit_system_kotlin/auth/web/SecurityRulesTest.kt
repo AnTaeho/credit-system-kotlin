@@ -98,7 +98,7 @@ class SecurityRulesTest @Autowired constructor(
 
     @Test
     fun `운영자는 운영자 경로의 권한 검사를 통과한다`() {
-        // 운영자 경로는 아직 없다(9-C). 권한 검사를 통과하면 컨트롤러가 없어 404 가 난다.
+        // 없는 운영자 경로다. 권한 검사를 통과하면 컨트롤러가 없어 404 가 난다.
         val result = mockMvc.perform(get("/api/admin/anything").header(DEV_HEADER, ADMIN_EMAIL)).andReturn()
 
         assertThat(result.response.status).isEqualTo(404)
@@ -113,10 +113,10 @@ class SecurityRulesTest @Autowired constructor(
     }
 
     @Test
-    fun `세션 로그인 사용자의 CSRF 토큰 없는 POST 는 403 이고 돈이 움직이지 않는다`() {
+    fun `세션 로그인 운영자의 CSRF 토큰 없는 POST 는 403 이고 돈이 움직이지 않는다`() {
         val result = mockMvc.perform(
-            post("/api/users/me/charge")
-                .with(oidcLogin().oidcUser(sessionUser()))
+            post("/api/admin/users/${user.persistedId}/grants")
+                .with(oidcLogin().oidcUser(sessionAdmin()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"idemKey":"csrf-1","amount":300}""")
         ).andReturn()
@@ -127,10 +127,10 @@ class SecurityRulesTest @Autowired constructor(
     }
 
     @Test
-    fun `세션 로그인 사용자가 CSRF 토큰을 실으면 POST 가 통과한다`() {
+    fun `세션 로그인 운영자가 CSRF 토큰을 실으면 POST 가 통과한다`() {
         val result = mockMvc.perform(
-            post("/api/users/me/charge")
-                .with(oidcLogin().oidcUser(sessionUser()))
+            post("/api/admin/users/${user.persistedId}/grants")
+                .with(oidcLogin().oidcUser(sessionAdmin()))
                 .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"idemKey":"csrf-2","amount":300}""")
@@ -158,14 +158,24 @@ class SecurityRulesTest @Autowired constructor(
         assertThat(withToken.response.status).isEqualTo(302)
     }
 
-    private fun sessionUser(): AppOidcUser {
+    private fun sessionUser(): AppOidcUser =
+        sessionPrincipal(user.persistedId, "sub-me", USER_EMAIL, admin = false)
+
+    /**
+     * CSRF 검사는 운영자 지급으로 확인한다. 세션 주체가 운영자여야 403 이 권한이 아니라 CSRF 때문임이 분명해진다.
+     * 운영자 자신의 사용자 행은 필요 없다 — 지급 대상은 [user] 다.
+     */
+    private fun sessionAdmin(): AppOidcUser =
+        sessionPrincipal(user.persistedId + 1_000L, "sub-admin", ADMIN_EMAIL, admin = true)
+
+    private fun sessionPrincipal(userId: Long, sub: String, email: String, admin: Boolean): AppOidcUser {
         val idToken = OidcIdToken(
             "token",
             Instant.now(),
             Instant.now().plusSeconds(60),
-            mapOf("sub" to "sub-me", "email" to USER_EMAIL, "email_verified" to true)
+            mapOf("sub" to sub, "email" to email, "email_verified" to true)
         )
-        return AppOidcUser(user.persistedId, authoritiesFor(admin = false), idToken, null)
+        return AppOidcUser(userId, authoritiesFor(admin = admin), idToken, null)
     }
 
     private fun errorCode(result: MvcResult): String? =

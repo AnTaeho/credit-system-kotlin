@@ -16,35 +16,37 @@ import org.springframework.test.context.DynamicPropertySource
 
 @ActiveProfiles("test")
 @SpringBootTest
-class ConcurrentChargeTest @Autowired constructor(
+class ConcurrentGrantTest @Autowired constructor(
     private val userService: UserService,
     private val ledgerRepository: LedgerRepository,
     private val userRepository: UserRepository
 ) {
 
     companion object {
+        private const val ADMIN_ID = 1L
+
         @JvmStatic
         @DynamicPropertySource
         fun datasourceProps(registry: DynamicPropertyRegistry) {
-            SharedContainers.registerDatabase(registry, "concurrent_charge")
+            SharedContainers.registerDatabase(registry, "concurrent_grant")
         }
     }
 
     @Test
-    fun `동일 idemKey로 동시 충전해도 잔액은 한 번만 오른다`() {
+    fun `동일 idemKey로 동시 지급해도 잔액은 한 번만 오른다`() {
         val user = userRepository.save(User("acme", 10_000L))
-        val idemKey = "shared-charge-key"
+        val idemKey = "shared-grant-key"
 
         runConcurrently(10) {
             try {
-                userService.charge(user.persistedId, idemKey, 300L)
+                userService.grant(ADMIN_ID, user.persistedId, idemKey, 300L)
             } catch (e: DataIntegrityViolationException) {
                 // 유니크 제약에서 밀린 쪽. 잔액이 오르지 않는 것이 정상이므로 무시한다.
             }
         }
 
         assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId))
-            .filteredOn { it.type == LedgerType.CHARGE }
+            .filteredOn { it.type == LedgerType.ADMIN_GRANT }
             .hasSize(1)
 
         val found = userRepository.findById(user.persistedId).orElseThrow()

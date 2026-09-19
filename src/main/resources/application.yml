@@ -57,6 +57,9 @@ app:
     timezone: Asia/Seoul
   idempotency:
     retention-days: 7
+  admin:
+    # 운영자 지급(POST /api/admin/users/{userId}/grants) 1회 상한.
+    max-grant-amount: 1000000
   worker:
     enabled: true
     batch-size: 3

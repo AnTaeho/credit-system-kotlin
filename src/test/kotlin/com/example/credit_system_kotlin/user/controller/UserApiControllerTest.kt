@@ -1,10 +1,8 @@
 package com.example.credit_system_kotlin.user.controller
 
-import com.example.credit_system_kotlin.global.exception.ErrorResponse
+import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.user.domain.User
 import com.example.credit_system_kotlin.user.dto.BalanceResponse
-import com.example.credit_system_kotlin.user.dto.ChargeRequest
-import com.example.credit_system_kotlin.user.dto.ChargeResponse
 import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -26,7 +24,8 @@ import org.springframework.test.context.ActiveProfiles
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class UserApiControllerTest @Autowired constructor(
     private val restTemplate: TestRestTemplate,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val ledgerRepository: LedgerRepository
 ) {
 
     @field:LocalServerPort
@@ -41,72 +40,41 @@ class UserApiControllerTest @Autowired constructor(
 
     @AfterEach
     fun tearDown() {
+        ledgerRepository.deleteAll()
         userRepository.deleteAll()
     }
 
     @Test
-    fun `잔액 조회와 충전이 정상 동작한다`() {
+    fun `잔액 조회가 정상 동작한다`() {
         val headers = HttpHeaders()
         headers.add("X-Dev-User", DEV_USER)
 
-        val before = restTemplate.exchange(
+        val response = restTemplate.exchange(
             url("/api/users/me/balance"), HttpMethod.GET,
             HttpEntity<Void>(headers), BalanceResponse::class.java
         )
-        assertThat(before.body?.balance).isEqualTo(500L)
 
-        headers.contentType = MediaType.APPLICATION_JSON
-        val after = restTemplate.exchange(
-            url("/api/users/me/charge"), HttpMethod.POST,
-            HttpEntity(ChargeRequest("idem-1", 300L), headers), ChargeResponse::class.java
-        )
-
-        assertThat(after.body?.balance).isEqualTo(800L)
-        assertThat(after.body?.duplicate).isFalse()
-    }
-
-    @Test
-    fun `같은 idemKey로 두 번 충전하면 두 번째 응답은 중복이다`() {
-        val headers = HttpHeaders()
-        headers.add("X-Dev-User", DEV_USER)
-        headers.contentType = MediaType.APPLICATION_JSON
-
-        val first = restTemplate.exchange(
-            url("/api/users/me/charge"), HttpMethod.POST,
-            HttpEntity(ChargeRequest("idem-dup", 300L), headers), ChargeResponse::class.java
-        )
-        val second = restTemplate.exchange(
-            url("/api/users/me/charge"), HttpMethod.POST,
-            HttpEntity(ChargeRequest("idem-dup", 300L), headers), ChargeResponse::class.java
-        )
-
-        assertThat(first.body?.duplicate).isFalse()
-        assertThat(first.body?.balance).isEqualTo(800L)
-        assertThat(second.body?.duplicate).isTrue()
-        assertThat(second.body?.balance).isEqualTo(800L)
+        assertThat(response.body?.balance).isEqualTo(500L)
     }
 
     /**
-     * Java 원본은 UserServiceTest 에서 idemKey에 null을 넘겨 이 경계를 확인했다.
-     * Kotlin은 idemKey를 non-null로 닫아(report.md A-4) 그 호출이 컴파일되지 않으므로
-     * 남은 실제 경로 — 필드가 아예 없는 JSON — 를 여기서 확인한다.
-     * 코드(INVALID_REQUEST)와 상태(400)는 Java와 같고 메시지 문구만 다르다.
+     * 결제 확인 없이 잔액을 더하던 자기 충전은 없앴다(9-C). 인증된 사용자가 불러도
+     * 받아 줄 핸들러가 없어 404 이고, 잔액과 원장은 그대로다.
      */
     @Test
-    fun `idemKey 필드가 없는 본문은 400으로 거부된다`() {
+    fun `자기 충전 경로는 더 이상 없다`() {
         val headers = HttpHeaders()
         headers.add("X-Dev-User", DEV_USER)
         headers.contentType = MediaType.APPLICATION_JSON
 
         val response = restTemplate.exchange(
             url("/api/users/me/charge"), HttpMethod.POST,
-            HttpEntity("""{"amount":300}""", headers), ErrorResponse::class.java
+            HttpEntity("""{"idemKey":"idem-1","amount":300}""", headers), String::class.java
         )
 
-        assertThat(response.statusCode.value()).isEqualTo(400)
-        assertThat(response.body?.code).isEqualTo("INVALID_REQUEST")
-        assertThat(userRepository.findById(user.persistedId).orElseThrow().balance)
-            .isEqualTo(500L)
+        assertThat(response.statusCode.value()).isEqualTo(404)
+        assertThat(userRepository.findById(user.persistedId).orElseThrow().balance).isEqualTo(500L)
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId)).isEmpty()
     }
 
     private fun url(path: String) = "http://localhost:$port$path"

@@ -73,5 +73,17 @@ class LedgerEntry private constructor(
             }
             return LedgerEntry(userId, null, LedgerType.CHARGE, amount, idemKey)
         }
+
+        /**
+         * 운영자 지급은 잔액을 늘리는 대변이라 CHARGE 와 같이 양수로 기록된다.
+         * 대사 공식(`balance == initialBalance + SUM(amount)`)이 유형을 가리지 않고 합산하므로
+         * 부호가 틀리면 곧바로 불일치가 된다.
+         */
+        fun adminGrant(userId: Long, idemKey: String, amount: Long): LedgerEntry {
+            require(idemKey.isNotBlank()) {
+                "ADMIN_GRANT 원장은 idemKey가 비어 있으면 안 됩니다: idemKey=$idemKey"
+            }
+            return LedgerEntry(userId, null, LedgerType.ADMIN_GRANT, amount, idemKey)
+        }
     }
 }
