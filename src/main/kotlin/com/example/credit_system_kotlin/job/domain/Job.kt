@@ -12,7 +12,13 @@ import jakarta.persistence.Index
 import jakarta.persistence.Table
 
 @Entity
-@Table(name = "jobs", indexes = [Index(name = "idx_jobs_status_id", columnList = "status, id")])
+@Table(
+    name = "jobs",
+    indexes = [
+        Index(name = "idx_jobs_status_id", columnList = "status, id"),
+        Index(name = "idx_jobs_user_id", columnList = "userId, id")
+    ]
+)
 class Job private constructor(
 
     @Column(nullable = false)

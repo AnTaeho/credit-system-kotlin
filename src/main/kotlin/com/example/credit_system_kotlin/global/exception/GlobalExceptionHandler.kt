@@ -65,6 +65,13 @@ class GlobalExceptionHandler(
             .body(ErrorResponse("USER_NOT_FOUND", e.message))
     }
 
+    @ExceptionHandler(JobNotFoundException::class)
+    fun handleJobNotFound(e: JobNotFoundException): ResponseEntity<ErrorResponse> {
+        log.info("business exception: code=JOB_NOT_FOUND, message={}", e.message)
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ErrorResponse("JOB_NOT_FOUND", e.message))
+    }
+
     private fun conflict(code: String, message: String): ResponseEntity<ErrorResponse> {
         log.info("business exception: code={}, message={}", code, message)
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse(code, message))

@@ -86,6 +86,15 @@ interface JobRepository : JpaRepository<Job, Long> {
 
     fun findByUserIdOrderByIdDesc(userId: Long): List<Job>
 
+    /** 커서 페이징의 첫 페이지. `Page` 가 아니라 `List` 로 받아 count 쿼리를 피한다. */
+    fun findByUserIdOrderByIdDesc(userId: Long, pageable: Pageable): List<Job>
+
+    /** 커서 페이징의 다음 페이지. [cursor] 는 배타적 상한 id 다. */
+    fun findByUserIdAndIdLessThanOrderByIdDesc(userId: Long, cursor: Long, pageable: Pageable): List<Job>
+
+    /** 남의 job 은 없는 job 과 똑같이 null 이다. 가져와서 비교하지 않고 조건 하나로 거른다. */
+    fun findByIdAndUserId(id: Long, userId: Long): Job?
+
     fun findByStatusAndUpdatedAtBeforeOrderByIdAsc(status: JobStatus, cutoff: Instant, pageable: Pageable): List<Job>
 
     /**
