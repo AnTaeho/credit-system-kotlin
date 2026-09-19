@@ -1,5 +1,6 @@
 package com.example.credit_system_kotlin.job.controller
 
+import com.example.credit_system_kotlin.global.exception.ErrorResponse
 import com.example.credit_system_kotlin.job.dto.HoldResult
 import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.dto.JobResponse
@@ -36,7 +37,7 @@ class JobApiControllerTest @Autowired constructor(
 
     @BeforeEach
     fun setUp() {
-        user = userRepository.save(User("acme", 1000L))
+        user = userRepository.save(User("acme", 1000L, email = DEV_USER))
     }
 
     @AfterEach
@@ -45,16 +46,17 @@ class JobApiControllerTest @Autowired constructor(
     }
 
     @Test
-    fun `사용자 헤더 없이 호출하면 400이다`() {
-        val response = restTemplate.getForEntity(url("/api/jobs"), String::class.java)
+    fun `인증 없이 호출하면 401이다`() {
+        val response = restTemplate.getForEntity(url("/api/jobs"), ErrorResponse::class.java)
 
-        assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+        assertThat(response.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+        assertThat(response.body?.code).isEqualTo("UNAUTHENTICATED")
     }
 
     @Test
     fun `생성 요청과 목록 조회가 정상 동작한다`() {
         val headers = HttpHeaders()
-        headers.add("X-Organization-Id", user.persistedId.toString())
+        headers.add("X-Dev-User", DEV_USER)
         headers.contentType = MediaType.APPLICATION_JSON
 
         val createResponse = restTemplate.exchange(
@@ -77,4 +79,9 @@ class JobApiControllerTest @Autowired constructor(
     }
 
     private fun url(path: String) = "http://localhost:$port$path"
+
+    companion object {
+        /** application-test.yml 의 허용 목록에 있는 이메일. 개발 로그인 헤더로 이 사람이 된다. */
+        private const val DEV_USER = "user@test.local"
+    }
 }

@@ -15,8 +15,24 @@ spring:
     hibernate:
       ddl-auto: create-drop
     open-in-view: false
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: test-client-id
+            client-secret: test-client-secret
 
 app:
+  auth:
+    allowed-emails:
+      - user@test.local
+      - admin@test.local
+    admin-emails:
+      - admin@test.local
+    # 컨트롤러 테스트는 X-Dev-User 헤더로 인증한다.
+    dev-login:
+      enabled: true
   scheduling:
     enabled: false
   idempotency:

@@ -12,9 +12,9 @@ interface UserRepository : JpaRepository<User, Long> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
         """
-        UPDATE User o
-        SET o.balance = o.balance - :amount, o.updatedAt = :now
-        WHERE o.id = :id AND o.balance >= :amount
+        UPDATE User u
+        SET u.balance = u.balance - :amount, u.updatedAt = :now
+        WHERE u.id = :id AND u.balance >= :amount
         """
     )
     fun deductBalance(
@@ -26,9 +26,9 @@ interface UserRepository : JpaRepository<User, Long> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
         """
-        UPDATE User o
-        SET o.balance = o.balance + :amount, o.updatedAt = :now
-        WHERE o.id = :id
+        UPDATE User u
+        SET u.balance = u.balance + :amount, u.updatedAt = :now
+        WHERE u.id = :id
         """
     )
     fun addBalance(
@@ -36,6 +36,10 @@ interface UserRepository : JpaRepository<User, Long> {
         @Param("amount") amount: Long,
         @Param("now") now: Instant
     ): Int
+
+    fun findByGoogleSub(googleSub: String): User?
+
+    fun findByEmail(email: String): User?
 
     /** 잔액이 음수인 사용자 수. 불변식이라 0 이 아니면 즉시 사고다. */
     fun countByBalanceLessThan(balance: Long): Long

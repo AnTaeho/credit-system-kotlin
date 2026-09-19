@@ -36,7 +36,7 @@ class UserApiControllerTest @Autowired constructor(
 
     @BeforeEach
     fun setUp() {
-        user = userRepository.save(User("acme", 500L))
+        user = userRepository.save(User("acme", 500L, email = DEV_USER))
     }
 
     @AfterEach
@@ -47,7 +47,7 @@ class UserApiControllerTest @Autowired constructor(
     @Test
     fun `잔액 조회와 충전이 정상 동작한다`() {
         val headers = HttpHeaders()
-        headers.add("X-Organization-Id", user.persistedId.toString())
+        headers.add("X-Dev-User", DEV_USER)
 
         val before = restTemplate.exchange(
             url("/api/users/me/balance"), HttpMethod.GET,
@@ -68,7 +68,7 @@ class UserApiControllerTest @Autowired constructor(
     @Test
     fun `같은 idemKey로 두 번 충전하면 두 번째 응답은 중복이다`() {
         val headers = HttpHeaders()
-        headers.add("X-Organization-Id", user.persistedId.toString())
+        headers.add("X-Dev-User", DEV_USER)
         headers.contentType = MediaType.APPLICATION_JSON
 
         val first = restTemplate.exchange(
@@ -86,19 +86,6 @@ class UserApiControllerTest @Autowired constructor(
         assertThat(second.body?.balance).isEqualTo(800L)
     }
 
-    @Test
-    fun `존재하지 않는 사용자면 404다`() {
-        val headers = HttpHeaders()
-        headers.add("X-Organization-Id", (user.persistedId + 999_999L).toString())
-
-        val response = restTemplate.exchange(
-            url("/api/users/me/balance"), HttpMethod.GET,
-            HttpEntity<Void>(headers), String::class.java
-        )
-
-        assertThat(response.statusCode.value()).isEqualTo(404)
-    }
-
     /**
      * Java 원본은 UserServiceTest 에서 idemKey에 null을 넘겨 이 경계를 확인했다.
      * Kotlin은 idemKey를 non-null로 닫아(report.md A-4) 그 호출이 컴파일되지 않으므로
@@ -108,7 +95,7 @@ class UserApiControllerTest @Autowired constructor(
     @Test
     fun `idemKey 필드가 없는 본문은 400으로 거부된다`() {
         val headers = HttpHeaders()
-        headers.add("X-Organization-Id", user.persistedId.toString())
+        headers.add("X-Dev-User", DEV_USER)
         headers.contentType = MediaType.APPLICATION_JSON
 
         val response = restTemplate.exchange(
@@ -123,4 +110,9 @@ class UserApiControllerTest @Autowired constructor(
     }
 
     private fun url(path: String) = "http://localhost:$port$path"
+
+    companion object {
+        /** application-test.yml 의 허용 목록에 있는 이메일. 개발 로그인 헤더로 이 사람이 된다. */
+        private const val DEV_USER = "user@test.local"
+    }
 }

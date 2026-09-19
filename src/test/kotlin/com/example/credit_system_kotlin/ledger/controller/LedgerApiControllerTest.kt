@@ -1,5 +1,6 @@
 package com.example.credit_system_kotlin.ledger.controller
 
+import com.example.credit_system_kotlin.global.exception.ErrorResponse
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.dto.LedgerResponse
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
@@ -36,7 +37,7 @@ class LedgerApiControllerTest @Autowired constructor(
 
     @BeforeEach
     fun setUp() {
-        user = userRepository.save(User("acme", 1000L))
+        user = userRepository.save(User("acme", 1000L, email = DEV_USER))
         ledgerRepository.save(LedgerEntry.hold(user.persistedId, 1L, 100L))
         ledgerRepository.save(LedgerEntry.charge(user.persistedId, "charge-key-1", 500L))
     }
@@ -48,9 +49,9 @@ class LedgerApiControllerTest @Autowired constructor(
     }
 
     @Test
-    fun `사용자 헤더가 있으면 ledger 내역을 최신순으로 돌려준다`() {
+    fun `인증되면 ledger 내역을 최신순으로 돌려준다`() {
         val headers = HttpHeaders()
-        headers.add("X-Organization-Id", user.persistedId.toString())
+        headers.add("X-Dev-User", DEV_USER)
 
         val response = restTemplate.exchange(
             url("/api/ledger"), HttpMethod.GET, HttpEntity<Void>(headers),
@@ -64,11 +65,17 @@ class LedgerApiControllerTest @Autowired constructor(
     }
 
     @Test
-    fun `사용자 헤더 없이 호출하면 400이다`() {
-        val response = restTemplate.getForEntity(url("/api/ledger"), String::class.java)
+    fun `인증 없이 호출하면 401이다`() {
+        val response = restTemplate.getForEntity(url("/api/ledger"), ErrorResponse::class.java)
 
-        assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+        assertThat(response.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
+        assertThat(response.body?.code).isEqualTo("UNAUTHENTICATED")
     }
 
     private fun url(path: String) = "http://localhost:$port$path"
+
+    companion object {
+        /** application-test.yml 의 허용 목록에 있는 이메일. 개발 로그인 헤더로 이 사람이 된다. */
+        private const val DEV_USER = "user@test.local"
+    }
 }

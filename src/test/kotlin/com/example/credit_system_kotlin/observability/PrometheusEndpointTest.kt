@@ -11,11 +11,10 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 
 /**
- * `/actuator/prometheus` 가 원장 대사 지표를 실제로 노출하는지 확인하는 통합 테스트다.
+ * 관리 포트를 따로 주지 않은 기동(관리 포트 = 애플리케이션 포트)에서는 액추에이터가 공개 포트에
+ * 섞인다. 그때는 누구에게도 열지 않는다. 운영자로 로그인해도 막힌다.
  *
- * Micrometer 의 점 표기법(`credit.ledger.reconciliation.mismatch`)은 Prometheus
- * 스크레이프 포맷에서 언더스코어(`credit_ledger_reconciliation_mismatch`)로 바뀌므로
- * 언더스코어로 검색해야 한다.
+ * 지표 내용 자체(원장 대사 지표 노출)는 관리 포트를 분리한 [ManagementPortBoundaryTest] 가 확인한다.
  */
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
@@ -25,11 +24,17 @@ class PrometheusEndpointTest @Autowired constructor(
 ) {
 
     @Test
-    fun `prometheus 엔드포인트가 원장 대사 지표를 노출한다`() {
-        val result = mockMvc.perform(get("/actuator/prometheus")).andReturn()
+    fun `같은 포트에서는 운영자라도 prometheus 엔드포인트에 닿을 수 없다`() {
+        val result = mockMvc.perform(get("/actuator/prometheus").header("X-Dev-User", "admin@test.local")).andReturn()
 
-        assertThat(result.response.status).isEqualTo(HttpStatus.OK.value())
-        assertThat(result.response.contentAsString).contains("credit_ledger_reconciliation_mismatch")
-        assertThat(result.response.contentAsString).contains("credit_job_oldest_pending_age_seconds")
+        assertThat(result.response.status).isEqualTo(HttpStatus.FORBIDDEN.value())
+        assertThat(result.response.contentAsString).doesNotContain("credit_ledger_reconciliation_mismatch")
+    }
+
+    @Test
+    fun `같은 포트에서는 미인증 health 도 열리지 않는다`() {
+        val result = mockMvc.perform(get("/actuator/health")).andReturn()
+
+        assertThat(result.response.status).isNotEqualTo(HttpStatus.OK.value())
     }
 }

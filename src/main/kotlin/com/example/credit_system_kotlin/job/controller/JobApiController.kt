@@ -1,5 +1,6 @@
 package com.example.credit_system_kotlin.job.controller
 
+import com.example.credit_system_kotlin.auth.CurrentUser
 import com.example.credit_system_kotlin.job.dto.HoldResult
 import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.dto.JobResponse
@@ -8,7 +9,6 @@ import com.example.credit_system_kotlin.job.service.JobQueryService
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
@@ -21,11 +21,11 @@ class JobApiController(
 
     @PostMapping
     fun create(
-        @RequestHeader("X-Organization-Id") userId: Long,
+        currentUser: CurrentUser,
         @RequestBody request: JobCreateRequest
-    ): HoldResult = holdService.requestGeneration(userId, request.idemKey, request.prompt)
+    ): HoldResult = holdService.requestGeneration(currentUser.userId, request.idemKey, request.prompt)
 
     @GetMapping
-    fun list(@RequestHeader("X-Organization-Id") userId: Long): List<JobResponse> =
-        jobQueryService.findByUser(userId)
+    fun list(currentUser: CurrentUser): List<JobResponse> =
+        jobQueryService.findByUser(currentUser.userId)
 }
