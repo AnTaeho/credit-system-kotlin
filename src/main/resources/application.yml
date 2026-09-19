@@ -60,6 +60,12 @@ app:
   admin:
     # 운영자 지급(POST /api/admin/users/{userId}/grants) 1회 상한.
     max-grant-amount: 1000000
+  rate-limit:
+    job-create:
+      # 사용자별 job 접수(POST /api/jobs) 속도 제한. 분당 이만큼까지, 초당 균등하게 다시 찬다.
+      # 넘으면 hold 전에 429 로 거절한다 — 원장·job·멱등키·잔액 어디에도 흔적이 남지 않는다.
+      enabled: true
+      per-minute: 10
   worker:
     enabled: true
     batch-size: 3
