@@ -13,7 +13,7 @@ restart_app_with APP_WORKER_ENABLED=false
 reset_clock
 mark "워커 정지 상태로 재기동. 스케줄러·API 는 그대로 산다"
 
-charge 10000
+grant 10000
 BASE_WORKER_CLAIM="$(prom_num 'credit_defense_total{point="worker_claim",outcome="applied"}')"
 BASE_CONFIRM="$(prom_num 'credit_defense_total{point="confirm",outcome="applied"}')"
 BASE_5XX="$(prom_num 'sum(http_server_requests_seconds_count{status=~"5.."}) or vector(0)')"

@@ -225,6 +225,37 @@ step10으로 넘기는 것:
 
 **완료 기준:** 인증 없이 통하는 쓰기 경로 0개. 허용 목록 밖 구글 계정은 로그인 거부. 브라우저에서 로그인 → 요청 → (가짜 생성기) 결과 확인이 된다.
 
+#### 완료 기록 (2026-09-20, 브랜치 `step9-auth`)
+
+상세는 [`docs/step9-auth.md`](step9-auth.md).
+
+| 커밋 | 내용 |
+|---|---|
+| `c15cd23` | step9-A — Flyway V2 `organizations` → `users`, 패키지·API 경로·오류 코드를 사용자로 |
+| `ab67639` | step9-B — 구글 `oauth2Login` + 허용 목록·운영자 목록, `X-Organization-Id` 제거(`CurrentUser`), CSRF, 개발 로그인(`X-Dev-User`, local·test 전용) |
+| `f90d80e` | step9-C — `/me/charge` 삭제, 운영자 지급 `POST /api/admin/users/{userId}/grants`, 원장 유형 `ADMIN_GRANT`(V3) |
+| `8397fea` | step9-E — `GET /api/jobs/{id}`(남의 것·없는 것 404), jobs·ledger 커서 페이징 `{items, nextCursor}`, V4 인덱스 |
+| `30ec842` | test — 지급 대사 검사를 한 사용자로 좁힘, 경로 타입 불일치도 `{code, message}` 400 |
+| `cbe3dee` | test — 관리 포트 health 테스트가 로컬 Redis 유무에 따라 갈리지 않게(PR #2 첫 CI 실패의 원인) |
+| `eab84fb` | step9-D — 사용자별 job 접수 속도 제한(토큰 버킷, 기본 분당 10, 429 `RATE_LIMITED`), 방어 지표 `rate_limit` |
+| `4b2a618` | step9-F — Thymeleaf 최소 화면(로그인·홈·job·원장·운영자 지급), CSP, local 전용 세션 개발 로그인 |
+| (G) | 관측 스택을 개발 로그인·운영자 지급으로 이전, 시나리오 재실행, `docs/step9-auth.md`·README·STEPS.md·이 기록 |
+
+완료 기준 대조:
+
+| 기준 | 결과 |
+|---|---|
+| 인증 없이 통하는 쓰기 경로 0개 | **충족.** `/api/**` 미인증은 401, 미인증 쓰기는 CSRF 가 먼저 막아 403. 열린 경로는 `/login`·정적 리소스·`/error`·`/dev-login`(local 전용, CSRF 적용)뿐이다. 컨트롤러가 요청에서 사용자 id 를 받지 않는다는 것을 `ApiIdentitySourceTest` 가 전수 검사한다(예외는 운영자 지급 하나) |
+| 허용 목록 밖 구글 계정은 로그인 거부 | **충족.** 허용 목록 밖·`email_verified=false` 는 거부하고 사용자 행을 만들지 않는다. prod 에서 허용 목록이 비었거나 개발 로그인이 켜져 있으면 기동 거부 |
+| 브라우저에서 로그인 → 요청 → 결과 확인 | **충족(조건부).** 서버 렌더링 화면과 세션 개발 로그인으로 로컬 스모크(개발 로그인 → 자기 지급 → 요청 → PROCESSING → FAILED → 재시도 → COMPLETED)를 통과했다. 실제 구글 자격증명으로의 로그인과 브라우저 JS 의 실브라우저 실행은 아직 검증하지 않았다(`node --check` 구문 검사까지) |
+
+테스트는 181 → 291 개다.
+
+step10으로 넘기는 것:
+- Redis 가 죽으면 health 전체가 DOWN 이다(CI 첫 실패에서 드러남). health 재설계
+- 구글 로그인 실사용 검증과 브라우저 JS 의 실브라우저 확인 — 아직 구글 OAuth 클라이언트를 만들어 실제로 로그인해 본 적이 없다
+- 운영 환경변수 `GOOGLE_CLIENT_ID`·`GOOGLE_CLIENT_SECRET`·`APP_AUTH_ALLOWEDEMAILS`·`APP_AUTH_ADMINEMAILS`(대시가 빠진다)를 시크릿으로
+
 ### step10 — 배포 1대
 
 **증명하는 것:** 인터넷에 떠 있고, 배포해도 처리 중이던 job이 회수가 아니라 드레인으로 끝나며, 알람이 나에게 온다.
@@ -359,3 +390,4 @@ step10으로 넘기는 것:
 | 2026-09-19 | v3. 목표를 "실제로 쓰는 개인 서비스"로 전환. 결정 8~15 확정(개인 사용자, 공개·단독 사용, 구글 로그인+허용 목록, 기능별 고정가, Claude API와 원가 상한·기록, 실패 전액 환불과 손실 지표, 일일 원가 상한·속도 제한, 서버 1대, mock PG 충전·고정 패키지). 결정 4에서 부분 확정 제외, 결정 6·7 대체. step9~13을 원장 → 인증 → Claude 연결 → mock PG → 배포 순으로 재편. 옛 step12(대용량·정산)·step13(토큰 계량) 제외 |
 | 2026-09-19 | step8 PR #1 을 develop 으로 fast-forward 머지(`69a67c5..a4bfb9f`). `image.yml` 첫 실행 성공으로 GHCR push 검증 — step8 완료 기준 전부 충족 |
 | 2026-09-19 | v4. 단계 순서를 "먼저 한 바퀴, 그다음 두껍게"로 재편(결정 16): step9 개인 사용자와 인증(+최소 화면) → 10 배포 1대 → 11 외부 호출 안전화 → 12 진짜 Claude와 원가(첫 실제 기능) → 13 원장 재설계(운영 데이터 위) → 14 mock PG. 화면은 서버 렌더링(결정 17). v3의 거대 step11을 11·12로 분할, 정정 거래 API와 시나리오 전체 재실측 제외 |
+| 2026-09-20 | step9 완료 기록 추가. 완료 기준 3개 충족(브라우저 한 바퀴는 개발 로그인 기준, 실제 구글·실브라우저는 미검증). 관측 스택을 개발 로그인·운영자 지급으로 옮겨 시나리오 재실행, `docs/step9-auth.md` 작성 |

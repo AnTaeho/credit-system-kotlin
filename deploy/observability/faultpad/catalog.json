@@ -41,7 +41,7 @@
       ],
       "alerts": [],
       "buttons": [
-        { "label": "충전", "action": "charge", "kind": "traffic", "params": [{ "name": "amount", "type": "int", "default": 10000, "min": 1, "max": 10000000 }] },
+        { "label": "운영자 지급", "action": "grant", "kind": "traffic", "params": [{ "name": "amount", "type": "int", "default": 10000, "min": 1, "max": 1000000 }] },
         { "label": "job 생성", "action": "create_jobs", "kind": "traffic", "params": [{ "name": "n", "type": "int", "default": 5, "min": 1, "max": 200 }] },
         { "label": "잔액 부족 요청", "action": "overdraw", "kind": "traffic", "params": [{ "name": "n", "type": "int", "default": 7, "min": 1, "max": 100 }] },
         { "label": "smoke", "action": "smoke", "kind": "traffic" }

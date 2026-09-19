@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# 사용자 1명(id=1)을 직접 INSERT 한다.
+# 사용자 1명(id=1, email=dev@local.test)을 직접 INSERT 한다.
 #
-# 사용자 생성 API 가 없어서 SQL 로 넣는다. 테이블은 앱 기동 때 Flyway 마이그레이션이
-# 만들므로, 앱이 UP 이 될 때까지 기다린 다음에 넣어야 한다.
+# 사용자 행은 첫 로그인 때 만들어지지만(step9-B), 시나리오 SQL 은 전부 users.id=1 을 가정한다.
+# 그래서 id 를 못 박아 미리 넣어 둔다. 개발 로그인(X-Dev-User: dev@local.test)은 이메일로
+# 사용자를 찾으므로 이 행을 찾아 id=1 로 들어온다. 운영자(admin@local.test)는 첫 요청 때
+# 개발 로그인이 새 행(id=2)으로 만든다 — 지급하는 쪽이라 id 를 가정하는 곳이 없다.
+#
+# 테이블은 앱 기동 때 Flyway 마이그레이션이 만들므로, 앱이 UP 이 될 때까지 기다린 다음에 넣어야 한다.
 set -euo pipefail
 
 COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.yml"
@@ -24,10 +28,10 @@ done
 
 echo "사용자 id=1 을 넣는다..."
 $DC exec -T mysql mysql -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -e "
-  INSERT INTO users (id, name, balance, initial_balance, created_at, updated_at)
-  VALUES (1, 'seed-org', 0, 0, NOW(6), NOW(6))
-  ON DUPLICATE KEY UPDATE name = VALUES(name);
+  INSERT INTO users (id, name, email, balance, initial_balance, created_at, updated_at)
+  VALUES (1, 'dev', 'dev@local.test', 0, 0, NOW(6), NOW(6))
+  ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email);
 " 2>/dev/null
 
 $DC exec -T mysql mysql -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -e \
-  "SELECT id, name, balance, initial_balance FROM users;" 2>/dev/null
+  "SELECT id, name, email, balance, initial_balance FROM users;" 2>/dev/null

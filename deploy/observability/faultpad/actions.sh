@@ -122,7 +122,7 @@ action_overdraw() {
   key="overdraw-$(date +%s)-$RANDOM"
   say "잔액을 넘기는 job 요청 ${n}건 (현재 잔액 $(balance))"
   for i in $(seq 1 "$n"); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${API}/api/jobs" -H "$ORG_HEADER" \
+    code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${API}/api/jobs" -H "$USER_HEADER" \
       -H 'Content-Type: application/json' -d "{\"idemKey\":\"${key}-${i}\",\"prompt\":\"overdraw ${i}\"}")"
     note "  요청 ${i} → HTTP ${code}"
   done
@@ -260,7 +260,7 @@ action_duplicate_storm() {
   say "06 — 같은 idemKey(${key}) 로 ${n}건 동시 발사"
   reset_clock
   seq 1 "$n" | xargs -P "$n" -I{} curl -s -o /dev/null -w '%{http_code}\n' \
-    -X POST "${API}/api/jobs" -H "$ORG_HEADER" -H 'Content-Type: application/json' \
+    -X POST "${API}/api/jobs" -H "$USER_HEADER" -H 'Content-Type: application/json' \
     -d "{\"idemKey\":\"${key}\",\"prompt\":\"duplicate storm\"}" \
     | sort | uniq -c | sed 's/^/     HTTP /'
   after="$(mysql_q "SELECT balance FROM users WHERE id=1;")"
@@ -280,7 +280,7 @@ case "$ACTION" in
   state)                     action_state ;;
   stack_up)                  action_stack_up ;;
   stack_down)                action_stack_down ;;
-  charge)                    charge "${1:-10000}" ;;
+  grant)                     grant "${1:-10000}" ;;
   create_jobs)               say "job ${1:-5}건 생성"; create_jobs "${1:-5}" ;;
   overdraw)                  action_overdraw "${1:-7}" ;;
   smoke)                     action_smoke ;;

@@ -10,7 +10,7 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 fresh_stack
-charge 10000
+grant 10000
 create_jobs 5
 # 게이지가 아니라 DB 로 판정한다. 스냅샷이 아직 한 번도 안 돌았으면 게이지는 초깃값 0 이라
 # "미결 0건"으로 보이는데, 그건 4단계 시나리오가 보여준 바로 그 함정이다.

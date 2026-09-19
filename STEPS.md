@@ -1,18 +1,20 @@
 # 단계별 학습 브랜치
 
 이 저장소의 크레딧 시스템을 **방어 로직이 하나도 없는 상태**에서 시작해
-지금까지 아홉 단계로 나눠 놓은 브랜치들이다.
+지금까지 열 단계로 나눠 놓은 브랜치들이다.
 
 각 단계는 그 자체로 컴파일되고 테스트가 통과하는 실행 가능한 상태다.
 테스트도 그 단계에 실제로 존재하는 방어만 검증하도록 맞춰져 있다.
 
-히스토리는 `step0 → step7` 순방향 선형이고, `step8-ops` 는 step7 을 머지한 `develop` 위에 올라 있다.
+히스토리는 `step0 → step7` 순방향 선형이고, `step8-ops` 는 step7 을 머지한 `develop` 위에,
+`step9-auth` 는 step8 을 머지한 `develop` 위에 올라 있다.
 한 겹씩 이렇게 본다:
 
 ```
 git diff step0-naive step1-validation
 git log --oneline step0-naive..step7-observability
 git log --oneline develop..step8-ops
+git log --oneline step8-ops..step9-auth
 ```
 
 `main` 은 실제 개발 히스토리를 담은 브랜치다. 동작과 방어 장치는 `step6-resilience` 와 같지만
@@ -268,6 +270,40 @@ H2 를 쓰는 대다수 테스트는 마이그레이션을 타지 않는다.
 
 ---
 
+## step9-auth — 개인 사용자와 인증
+
+step8 까지는 **요청이 스스로 밝힌 신원을 그대로 믿었다.** 모든 API 가 조직 id 헤더의 숫자를
+계정으로 썼고, 충전 API 는 결제 확인 없이 잔액을 더했다. 인터넷에 올리는 순간(step10) 누구나 남의 크레딧을
+쓰고 자기 크레딧을 찍어낼 수 있는 상태였다. 이 단계는 그 문을 닫고, 브라우저로 한 바퀴를 돌게 만든다.
+
+새로 생긴 것:
+
+- **조직 → 개인 사용자** — Flyway V2 가 `organizations` 를 `users` 로 옮긴다. 이름만 바꾸고 동작은 그대로다.
+  지표 이름(`..._orgs`)은 step7 의 실측 기록과 이어지도록 일부러 두었다
+- **구글 로그인 + 허용 목록** — Spring Security `oauth2Login`(세션). `email_verified` 이고 허용 목록 안이어야
+  들어온다. 신원은 구글 `sub`, 첫 로그인 때 사용자 행이 생긴다. 컨트롤러는 인증 주체(`CurrentUser`)만 받고,
+  요청에서 사용자 id 를 받는 핸들러가 없다는 것을 테스트가 리플렉션으로 전수 검사한다
+- **결제 없는 충전 삭제 → 운영자 지급** — 자기 충전 API 가 사라지고 `POST /api/admin/users/{userId}/grants`
+  (운영자 전용, 멱등, 1회 상한) 하나가 남는다. 원장 유형 `ADMIN_GRANT`(V3) — 네이티브 `ENUM` 에 값 하나를
+  더하는 것이 step8 이 예고한 대로 마이그레이션이 됐다
+- **job 단건 조회와 커서 페이징** — 남의 job 과 없는 job 은 둘 다 404(존재 여부를 흘리지 않는다).
+  목록은 `{items, nextCursor}`
+- **사용자별 속도 제한** — `POST /api/jobs` 에 토큰 버킷(기본 분당 10). hold 보다 먼저 걸러 거절된 요청은
+  어디에도 흔적이 없다. 방어 지표에 `point="rate_limit"` 이 생겼다
+- **최소 화면** — Thymeleaf 서버 렌더링. 로그인·홈·job·원장·운영자 지급. CSRF 는 켜고 CSP 로 인라인 스크립트를 막는다
+- **개발 로그인** — `X-Dev-User: <email>` 헤더(요청 단위, CSRF 면제)와 `/login` 화면의 세션 개발 로그인(CSRF 적용).
+  local·test 프로필 전용이고, prod 에서 켜져 있으면 기동을 거부한다. 관측 스택의 스크립트도 이걸로 옮겼다
+
+이 단계의 관점: **신원은 요청이 말하는 것이 아니라 서버가 확인한 것이다.** 헤더 숫자를 믿던 코드를
+인증 주체만 믿게 바꾸자, 요청에서 사용자 id 를 받는 곳이 운영자 지급 하나로 줄었고 그 하나는 테스트가 이름으로 붙잡고 있다.
+돈이 생기는 경로도 같은 원리로 운영자 한 명에게만 남겼다.
+
+여기서도 남는 것: 실제 구글 자격증명과 실브라우저로는 아직 한 바퀴를 돌지 않았다(개발 로그인과 서버 테스트까지).
+미인증 POST 는 401 이 아니라 CSRF 403 으로 막힌다. Redis 가 죽으면 health 가 DOWN 이 된다는 것이 CI 첫 실패로
+드러났다 — step10 의 health 재설계 몫이다. 속도 제한 카운터는 앱 메모리라 재시작하면 가득 찬 채로 돌아온다.
+
+---
+
 ## 추천 학습 순서
 
 1. `git checkout step0-naive` 하고 `HoldService`, `OrganizationService`, `GenerationWorker` 를 읽는다.
@@ -285,10 +321,11 @@ git diff step4-state-machine step5-recovery
 git diff step5-recovery step6-resilience
 git diff step6-resilience step7-observability
 git diff develop step8-ops
+git diff step8-ops step9-auth
 ```
 
 step6 까지가 "사고를 어떻게 막는가"의 전부다. 거기서 멈춰도 논지는 닫힌다.
-step7·step8 은 그 위에 얹은 다른 종류의 이야기라, 관심이 관측이나 운영 쪽이면 바로 건너뛰어도 된다.
+step7~step9 는 그 위에 얹은 다른 종류의 이야기라, 관심이 관측·운영·인증 쪽이면 바로 건너뛰어도 된다.
 
 특정 파일 하나가 어떻게 자랐는지 따라가려면:
 
@@ -306,7 +343,9 @@ docker compose up -d      # MySQL 8.4 + Redis 7
 docker compose down -v
 ```
 
-조직을 만드는 API 가 없어서 첫 요청 전에 SQL 로 하나 넣어야 한다.
+`step9-auth` 부터는 로그인이 필요하다. 로컬은 `SPRING_PROFILES_ACTIVE=local ./gradlew bootRun` 으로 띄우고
+개발 로그인(`X-Dev-User` 헤더 또는 `/login` 의 폼)을 쓴다. 크레딧은 운영자 지급으로 얻는다.
+step8 이하는 사용자(조직)를 만드는 API 가 없어서 첫 요청 전에 SQL 로 하나 넣어야 한다.
 띄우는 법과 curl 예시는 [`README.md`](README.md) 에 있다.
 
 step7 이하의 브랜치를 체크아웃했다면 루트 compose 가 없으므로 MySQL·Redis 를 직접 준비한다
