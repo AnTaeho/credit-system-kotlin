@@ -239,7 +239,7 @@ step10으로 넘기는 것:
 | `cbe3dee` | test — 관리 포트 health 테스트가 로컬 Redis 유무에 따라 갈리지 않게(PR #2 첫 CI 실패의 원인) |
 | `eab84fb` | step9-D — 사용자별 job 접수 속도 제한(토큰 버킷, 기본 분당 10, 429 `RATE_LIMITED`), 방어 지표 `rate_limit` |
 | `4b2a618` | step9-F — Thymeleaf 최소 화면(로그인·홈·job·원장·운영자 지급), CSP, local 전용 세션 개발 로그인 |
-| (G) | 관측 스택을 개발 로그인·운영자 지급으로 이전, 시나리오 재실행, `docs/step9-auth.md`·README·STEPS.md·이 기록 |
+| `78851f8` | step9-G — 관측 스택을 개발 로그인·운영자 지급으로 이전, 시나리오 재실행, `docs/step9-auth.md`·README·STEPS.md·이 기록 |
 
 완료 기준 대조:
 
