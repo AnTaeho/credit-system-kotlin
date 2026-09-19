@@ -11,18 +11,18 @@ import java.time.Instant
 
 interface IdempotencyKeyRepository : JpaRepository<IdempotencyKey, Long> {
 
-    fun findByOrganizationIdAndIdemKey(organizationId: Long, idemKey: String): IdempotencyKey?
+    fun findByUserIdAndIdemKey(userId: Long, idemKey: String): IdempotencyKey?
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
         """
         UPDATE IdempotencyKey k
         SET k.jobId = :jobId
-        WHERE k.organizationId = :organizationId AND k.idemKey = :idemKey
+        WHERE k.userId = :userId AND k.idemKey = :idemKey
         """
     )
     fun attachJobId(
-        @Param("organizationId") organizationId: Long,
+        @Param("userId") userId: Long,
         @Param("idemKey") idemKey: String,
         @Param("jobId") jobId: Long
     ): Int

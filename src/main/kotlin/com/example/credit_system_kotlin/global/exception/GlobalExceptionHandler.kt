@@ -58,11 +58,11 @@ class GlobalExceptionHandler(
             .firstOrNull()
             ?.kind == ConstraintViolationException.ConstraintKind.UNIQUE
 
-    @ExceptionHandler(OrganizationNotFoundException::class)
-    fun handleOrganizationNotFound(e: OrganizationNotFoundException): ResponseEntity<ErrorResponse> {
-        log.info("business exception: code=ORGANIZATION_NOT_FOUND, message={}", e.message)
+    @ExceptionHandler(UserNotFoundException::class)
+    fun handleUserNotFound(e: UserNotFoundException): ResponseEntity<ErrorResponse> {
+        log.info("business exception: code=USER_NOT_FOUND, message={}", e.message)
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
-            .body(ErrorResponse("ORGANIZATION_NOT_FOUND", e.message))
+            .body(ErrorResponse("USER_NOT_FOUND", e.message))
     }
 
     private fun conflict(code: String, message: String): ResponseEntity<ErrorResponse> {

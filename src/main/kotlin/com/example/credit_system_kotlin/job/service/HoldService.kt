@@ -15,8 +15,8 @@ import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
-import com.example.credit_system_kotlin.organization.service.OrganizationFinder
+import com.example.credit_system_kotlin.user.repository.UserRepository
+import com.example.credit_system_kotlin.user.service.UserFinder
 import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
@@ -28,8 +28,8 @@ private val log = LoggerFactory.getLogger(HoldService::class.java)
 @Service
 class HoldService(
     private val idempotencyKeyRepository: IdempotencyKeyRepository,
-    private val organizationRepository: OrganizationRepository,
-    private val organizationFinder: OrganizationFinder,
+    private val userRepository: UserRepository,
+    private val userFinder: UserFinder,
     private val jobRepository: JobRepository,
     private val ledgerRepository: LedgerRepository,
     private val appProperties: AppProperties,
@@ -37,27 +37,27 @@ class HoldService(
 ) {
 
     @Transactional
-    fun requestGeneration(organizationId: Long, idemKey: String, prompt: String): HoldResult {
+    fun requestGeneration(userId: Long, idemKey: String, prompt: String): HoldResult {
         validateRequest(idemKey, prompt)
 
-        val existing = idempotencyKeyRepository.findByOrganizationIdAndIdemKey(organizationId, idemKey)
+        val existing = idempotencyKeyRepository.findByUserIdAndIdemKey(userId, idemKey)
         if (existing != null) {
             eventPublisher.publishEvent(DefenseTriggered(DefensePoint.IDEM_KEY, DefenseOutcome.APP_HIT))
             return resolveDuplicateRequest(existing)
         }
 
-        idempotencyKeyRepository.save(IdempotencyKey(organizationId, idemKey))
+        idempotencyKeyRepository.save(IdempotencyKey(userId, idemKey))
 
         val cost = appProperties.generation.cost
 
-        deductBalance(organizationId, cost)
-        val job = jobRepository.save(Job.hold(organizationId, cost, prompt))
+        deductBalance(userId, cost)
+        val job = jobRepository.save(Job.hold(userId, cost, prompt))
         val jobId = job.persistedId
 
-        attachIdemKeyToJob(organizationId, idemKey, jobId)
+        attachIdemKeyToJob(userId, idemKey, jobId)
 
-        ledgerRepository.save(LedgerEntry.hold(organizationId, jobId, cost))
-        log.info("hold 완료: organizationId={}, jobId={}, cost={}", organizationId, jobId, cost)
+        ledgerRepository.save(LedgerEntry.hold(userId, jobId, cost))
+        log.info("hold 완료: userId={}, jobId={}, cost={}", userId, jobId, cost)
         return HoldResult(jobId, false)
     }
 
@@ -77,22 +77,22 @@ class HoldService(
         return HoldResult(jobId, true)
     }
 
-    private fun deductBalance(organizationId: Long, cost: Long) {
-        val updated = organizationRepository.deductBalance(organizationId, cost, Instant.now())
+    private fun deductBalance(userId: Long, cost: Long) {
+        val updated = userRepository.deductBalance(userId, cost, Instant.now())
         if (updated == 1) {
             eventPublisher.publishEvent(DefenseTriggered(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED))
             return
         }
         eventPublisher.publishEvent(DefenseTriggered(DefensePoint.HOLD_BALANCE, DefenseOutcome.REJECTED))
 
-        val organization = organizationFinder.getOrThrow(organizationId)
-        throw InsufficientBalanceException(organization.balance, cost)
+        val user = userFinder.getOrThrow(userId)
+        throw InsufficientBalanceException(user.balance, cost)
     }
 
-    private fun attachIdemKeyToJob(organizationId: Long, idemKey: String, jobId: Long) {
-        val attached = idempotencyKeyRepository.attachJobId(organizationId, idemKey, jobId)
+    private fun attachIdemKeyToJob(userId: Long, idemKey: String, jobId: Long) {
+        val attached = idempotencyKeyRepository.attachJobId(userId, idemKey, jobId)
         check(attached == 1) {
-            "idempotency key에 jobId 연결 실패: organizationId=$organizationId, idemKey=$idemKey, jobId=$jobId"
+            "idempotency key에 jobId 연결 실패: userId=$userId, idemKey=$idemKey, jobId=$jobId"
         }
     }
 }

@@ -7,7 +7,7 @@ import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
@@ -19,7 +19,7 @@ private val log = LoggerFactory.getLogger(JobLifecycleService::class.java)
 @Service
 class JobLifecycleService(
     private val jobRepository: JobRepository,
-    private val organizationRepository: OrganizationRepository,
+    private val userRepository: UserRepository,
     private val ledgerRepository: LedgerRepository,
     private val eventPublisher: ApplicationEventPublisher
 ) {
@@ -34,7 +34,7 @@ class JobLifecycleService(
             return
         }
         eventPublisher.publishEvent(DefenseTriggered(DefensePoint.CONFIRM, DefenseOutcome.APPLIED))
-        ledgerRepository.save(LedgerEntry.confirm(job.organizationId, jobId))
+        ledgerRepository.save(LedgerEntry.confirm(job.userId, jobId))
         log.info("confirm 완료: jobId={}, attemptNo={}", jobId, job.attemptNo)
     }
 
@@ -74,15 +74,15 @@ class JobLifecycleService(
         }
         eventPublisher.publishEvent(DefenseTriggered(DefensePoint.FINAL_REFUND, DefenseOutcome.APPLIED))
 
-        val orgUpdated = organizationRepository.addBalance(job.organizationId, job.holdAmount, Instant.now())
-        check(orgUpdated == 1) {
-            "환불 잔액 반영 실패: organization이 존재하지 않음, jobId=$jobId, organizationId=${job.organizationId}"
+        val userUpdated = userRepository.addBalance(job.userId, job.holdAmount, Instant.now())
+        check(userUpdated == 1) {
+            "환불 잔액 반영 실패: user이 존재하지 않음, jobId=$jobId, userId=${job.userId}"
         }
 
-        ledgerRepository.save(LedgerEntry.refund(job.organizationId, jobId, job.holdAmount))
+        ledgerRepository.save(LedgerEntry.refund(job.userId, jobId, job.holdAmount))
         log.info(
-            "최종 환불 완료: jobId={}, organizationId={}, amount={}",
-            jobId, job.organizationId, job.holdAmount
+            "최종 환불 완료: jobId={}, userId={}, amount={}",
+            jobId, job.userId, job.holdAmount
         )
     }
 }

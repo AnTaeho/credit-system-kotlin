@@ -21,11 +21,11 @@ class JobApiController(
 
     @PostMapping
     fun create(
-        @RequestHeader("X-Organization-Id") organizationId: Long,
+        @RequestHeader("X-Organization-Id") userId: Long,
         @RequestBody request: JobCreateRequest
-    ): HoldResult = holdService.requestGeneration(organizationId, request.idemKey, request.prompt)
+    ): HoldResult = holdService.requestGeneration(userId, request.idemKey, request.prompt)
 
     @GetMapping
-    fun list(@RequestHeader("X-Organization-Id") organizationId: Long): List<JobResponse> =
-        jobQueryService.findByOrganization(organizationId)
+    fun list(@RequestHeader("X-Organization-Id") userId: Long): List<JobResponse> =
+        jobQueryService.findByUser(userId)
 }

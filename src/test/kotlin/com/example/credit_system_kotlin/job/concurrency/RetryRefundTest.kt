@@ -4,8 +4,8 @@ import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.HoldService
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
-import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit
 class RetryRefundTest @Autowired constructor(
     private val holdService: HoldService,
     private val jobRepository: JobRepository,
-    private val organizationRepository: OrganizationRepository,
+    private val userRepository: UserRepository,
     private val ledgerRepository: LedgerRepository
 ) {
 
@@ -43,9 +43,9 @@ class RetryRefundTest @Autowired constructor(
 
     @Test
     fun `매번 실패하면 재시도를 모두 소진하고 최종적으로 환불된다`() {
-        val organization = organizationRepository.save(Organization("acme", 1000L))
+        val user = userRepository.save(User("acme", 1000L))
 
-        val result = holdService.requestGeneration(organization.persistedId, "retry-key", "cat")
+        val result = holdService.requestGeneration(user.persistedId, "retry-key", "cat")
 
         await().atMost(30, TimeUnit.SECONDS).untilAsserted {
             val job = jobRepository.findById(result.jobId).orElseThrow()
@@ -53,9 +53,9 @@ class RetryRefundTest @Autowired constructor(
             assertThat(job.attemptNo).isEqualTo(2)
         }
 
-        val found = organizationRepository.findById(organization.persistedId).orElseThrow()
+        val found = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(found.balance).isEqualTo(1000L)
-        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId))
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId))
             .extracting<String> { it.type.name }
             .contains("HOLD", "REFUND")
     }

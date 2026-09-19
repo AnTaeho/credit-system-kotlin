@@ -15,13 +15,13 @@ import java.time.Instant
 @Entity
 @Table(
     name = "ledger_entries",
-    indexes = [Index(name = "idx_ledger_org_id", columnList = "organizationId")],
-    uniqueConstraints = [UniqueConstraint(name = "uk_ledger_org_idem", columnNames = ["organizationId", "idemKey"])]
+    indexes = [Index(name = "idx_ledger_user_id", columnList = "userId")],
+    uniqueConstraints = [UniqueConstraint(name = "uk_ledger_user_idem", columnNames = ["userId", "idemKey"])]
 )
 class LedgerEntry private constructor(
 
     @Column(nullable = false)
-    val organizationId: Long,
+    val userId: Long,
 
     val jobId: Long?,
 
@@ -52,26 +52,26 @@ class LedgerEntry private constructor(
     companion object {
 
         /** hold 는 잔액을 묶는 차변이라 음수로 기록된다. */
-        fun hold(organizationId: Long, jobId: Long, cost: Long): LedgerEntry {
+        fun hold(userId: Long, jobId: Long, cost: Long): LedgerEntry {
             require(cost > 0) { "hold 원장의 cost는 양수여야 합니다: cost=$cost" }
-            return LedgerEntry(organizationId, jobId, LedgerType.HOLD, -cost, null)
+            return LedgerEntry(userId, jobId, LedgerType.HOLD, -cost, null)
         }
 
         /** confirm 은 hold 를 확정할 뿐 잔액을 움직이지 않아 금액이 0이다. */
-        fun confirm(organizationId: Long, jobId: Long): LedgerEntry =
-            LedgerEntry(organizationId, jobId, LedgerType.CONFIRM, 0, null)
+        fun confirm(userId: Long, jobId: Long): LedgerEntry =
+            LedgerEntry(userId, jobId, LedgerType.CONFIRM, 0, null)
 
         /** refund 는 묶인 잔액을 되돌려주는 대변이라 양수로 기록된다. */
-        fun refund(organizationId: Long, jobId: Long, amount: Long): LedgerEntry {
+        fun refund(userId: Long, jobId: Long, amount: Long): LedgerEntry {
             require(amount > 0) { "refund 원장의 amount는 양수여야 합니다: amount=$amount" }
-            return LedgerEntry(organizationId, jobId, LedgerType.REFUND, amount, null)
+            return LedgerEntry(userId, jobId, LedgerType.REFUND, amount, null)
         }
 
-        fun charge(organizationId: Long, idemKey: String, amount: Long): LedgerEntry {
+        fun charge(userId: Long, idemKey: String, amount: Long): LedgerEntry {
             require(idemKey.isNotBlank()) {
                 "CHARGE 원장은 idemKey가 비어 있으면 안 됩니다: idemKey=$idemKey"
             }
-            return LedgerEntry(organizationId, null, LedgerType.CHARGE, amount, idemKey)
+            return LedgerEntry(userId, null, LedgerType.CHARGE, amount, idemKey)
         }
     }
 }

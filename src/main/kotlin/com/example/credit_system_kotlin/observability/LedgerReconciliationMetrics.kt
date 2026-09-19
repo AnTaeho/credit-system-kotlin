@@ -20,8 +20,8 @@ import java.util.concurrent.atomic.AtomicReference
  * 발행하고, 세는 책임은 이 컴포넌트가 진다. 관측 방식이 바뀌어도(Prometheus → 다른 것)
  * 도메인 코드는 흔들리지 않는다.
  *
- * 라벨(tag)은 붙이지 않는다. 특히 organizationId 는 카디널리티가 폭발하므로 절대 금지 —
- * 개별 조직 식별은 로그(`LedgerReconciliationTask` 의 ERROR 로그)의 몫이고, 여기는
+ * 라벨(tag)은 붙이지 않는다. 특히 userId 는 카디널리티가 폭발하므로 절대 금지 —
+ * 개별 사용자 식별은 로그(`LedgerReconciliationTask` 의 ERROR 로그)의 몫이고, 여기는
  * 전역 집계만 담당한다.
  */
 @Component
@@ -47,11 +47,11 @@ class LedgerReconciliationMetrics(
 
     init {
         Gauge.builder(MISMATCH_METRIC, mismatchCount) { it.get().toDouble() }
-            .description("마지막 대사 주기에서 발견된 불일치 조직 수. 0이 아니면 즉시 사고다")
+            .description("마지막 대사 주기에서 발견된 불일치 사용자 수. 0이 아니면 즉시 사고다")
             .register(registry)
 
         Gauge.builder(CHECKED_METRIC, checkedCount) { it.get().toDouble() }
-            .description("마지막 대사 주기에서 검사한 조직 수")
+            .description("마지막 대사 주기에서 검사한 사용자 수")
             .register(registry)
 
         // 상태 객체로 `this`(싱글턴 빈)를 넘긴다. Spring 컨텍스트가 이 빈을 강하게 들고

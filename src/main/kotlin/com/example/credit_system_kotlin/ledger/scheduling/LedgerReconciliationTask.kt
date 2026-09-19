@@ -36,9 +36,9 @@ class LedgerReconciliationTask(
                     }
                     checkedCount++
                 } catch (e: RuntimeException) {
-                    log.warn("원장 대사 항목 처리 실패: organizationId={}", balanceCheck.organizationId, e)
+                    log.warn("원장 대사 항목 처리 실패: userId={}", balanceCheck.userId, e)
                 }
-                lastId = balanceCheck.organizationId
+                lastId = balanceCheck.userId
             }
         } while (checks.size == RECONCILE_BATCH_SIZE)
         log.info("원장 대사 주기 완료: checkedCount={}, mismatchCount={}", checkedCount, mismatchCount)
@@ -59,8 +59,8 @@ class LedgerReconciliationTask(
             return true
         }
         log.error(
-            "원장 대사 불일치 발견: organizationId={}, balance={}, expected={}, initialBalance={}, ledgerSum={}, diff={}",
-            balanceCheck.organizationId, balanceCheck.balance, expected,
+            "원장 대사 불일치 발견: userId={}, balance={}, expected={}, initialBalance={}, ledgerSum={}, diff={}",
+            balanceCheck.userId, balanceCheck.balance, expected,
             balanceCheck.initialBalance, balanceCheck.ledgerSum, balanceCheck.balance - expected
         )
         return false

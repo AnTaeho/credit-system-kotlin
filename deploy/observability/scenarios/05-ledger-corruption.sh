@@ -24,13 +24,13 @@ mark "정상 처리 완료 — $(job_status), 잔액=$(balance)"
 # 카운터 증가분이 아직 안 긁힌 채로 기준선이 되어, 훼손과 무관한 +1 이 섞인다.
 sleep 12
 DEFENSE_BASE="$(prom_num 'sum(credit_defense_total)')"
-GOOD_BALANCE="$(mysql_q "SELECT balance FROM organizations WHERE id=1;")"
+GOOD_BALANCE="$(mysql_q "SELECT balance FROM users WHERE id=1;")"
 note "훼손 전 balance = ${GOOD_BALANCE}"
 
 # ── (a) 대사 불일치 ──────────────────────────────────────────────────────────
-say "(a) UPDATE organizations SET balance = balance - 1 WHERE id=1"
+say "(a) UPDATE users SET balance = balance - 1 WHERE id=1"
 reset_clock
-mysql_q "UPDATE organizations SET balance = balance - 1 WHERE id=1;" >/dev/null
+mysql_q "UPDATE users SET balance = balance - 1 WHERE id=1;" >/dev/null
 mark "1 크레딧을 원장 없이 증발시켰다. 잔액 = 최초 잔액 + 원장 합계 가 깨졌다"
 wait_until "mismatch > 0" 180 '[ "$(prom_num "credit_ledger_reconciliation_mismatch")" != "0" ]'
 A_WAIT="$WAITED"; A_MISMATCH="$(prom_num 'credit_ledger_reconciliation_mismatch')"
@@ -39,9 +39,9 @@ mark "mismatch=${A_MISMATCH}, ${A_WAIT}초 만에 감지. firing=[$(alerts | tr 
 note "대사 주기가 60초이므로 최악 60초, 평균 30초가 이 훼손의 감지 지연이다"
 
 # ── (b) 음수 잔액 ────────────────────────────────────────────────────────────
-say "(b) UPDATE organizations SET balance = -1"
+say "(b) UPDATE users SET balance = -1"
 reset_clock
-mysql_q "UPDATE organizations SET balance = -1 WHERE id=1;" >/dev/null
+mysql_q "UPDATE users SET balance = -1 WHERE id=1;" >/dev/null
 mark "조건부 UPDATE 의 잔액 가드가 뚫린 것과 같은 상태를 만들었다"
 wait_until "negative_balance_orgs > 0" 60 '[ "$(prom_num "credit_invariant_negative_balance_orgs")" != "0" ]'
 B_WAIT="$WAITED"; B_NEG="$(prom_num 'credit_invariant_negative_balance_orgs')"
@@ -53,7 +53,7 @@ say "(c) 어떤 job 의 HOLD 원장 1행 DELETE"
 reset_clock
 VICTIM="$(mysql_q "SELECT job_id FROM ledger_entries WHERE type='HOLD' ORDER BY id LIMIT 1;")"
 VICTIM_AMT="$(mysql_q "SELECT amount FROM ledger_entries WHERE type='HOLD' AND job_id=${VICTIM};")"
-VICTIM_ORG="$(mysql_q "SELECT organization_id FROM ledger_entries WHERE type='HOLD' AND job_id=${VICTIM};")"
+VICTIM_ORG="$(mysql_q "SELECT user_id FROM ledger_entries WHERE type='HOLD' AND job_id=${VICTIM};")"
 mysql_q "DELETE FROM ledger_entries WHERE type='HOLD' AND job_id=${VICTIM};" >/dev/null
 mark "jobId=${VICTIM} 의 HOLD 원장(amount=${VICTIM_AMT})을 지웠다 — 돈을 안 묶고 처리된 job 이 됐다"
 wait_until "jobs_without_hold > 0" 60 '[ "$(prom_num "credit_invariant_jobs_without_hold")" != "0" ]'
@@ -73,9 +73,9 @@ DEFENSE_AFTER="$(prom_num 'sum(credit_defense_total)')"
 # ── 원복 ─────────────────────────────────────────────────────────────────────
 say "원복 — 알람이 resolve 되는 것까지 확인한다"
 reset_clock
-mysql_q "INSERT INTO ledger_entries (organization_id, job_id, type, amount, idem_key, created_at)
+mysql_q "INSERT INTO ledger_entries (user_id, job_id, type, amount, idem_key, created_at)
          VALUES (${VICTIM_ORG}, ${VICTIM}, 'HOLD', ${VICTIM_AMT}, NULL, NOW(6));" >/dev/null
-mysql_q "UPDATE organizations SET balance = ${GOOD_BALANCE} WHERE id=1;" >/dev/null
+mysql_q "UPDATE users SET balance = ${GOOD_BALANCE} WHERE id=1;" >/dev/null
 mark "HOLD 원장 재삽입 + balance=${GOOD_BALANCE} 복구"
 wait_until "불변식 3종이 전부 0" 90 '[ "$(prom_num "credit_invariant_negative_balance_orgs + credit_invariant_jobs_without_hold")" = "0" ]'
 R1="$WAITED"

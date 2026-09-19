@@ -3,8 +3,8 @@ package com.example.credit_system_kotlin.ledger.controller
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.dto.LedgerResponse
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
-import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -25,32 +25,32 @@ import org.springframework.test.context.ActiveProfiles
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class LedgerApiControllerTest @Autowired constructor(
     private val restTemplate: TestRestTemplate,
-    private val organizationRepository: OrganizationRepository,
+    private val userRepository: UserRepository,
     private val ledgerRepository: LedgerRepository
 ) {
 
     @field:LocalServerPort
     private var port: Int = 0
 
-    private lateinit var organization: Organization
+    private lateinit var user: User
 
     @BeforeEach
     fun setUp() {
-        organization = organizationRepository.save(Organization("acme", 1000L))
-        ledgerRepository.save(LedgerEntry.hold(organization.persistedId, 1L, 100L))
-        ledgerRepository.save(LedgerEntry.charge(organization.persistedId, "charge-key-1", 500L))
+        user = userRepository.save(User("acme", 1000L))
+        ledgerRepository.save(LedgerEntry.hold(user.persistedId, 1L, 100L))
+        ledgerRepository.save(LedgerEntry.charge(user.persistedId, "charge-key-1", 500L))
     }
 
     @AfterEach
     fun tearDown() {
         ledgerRepository.deleteAll()
-        organizationRepository.deleteAll()
+        userRepository.deleteAll()
     }
 
     @Test
-    fun `조직 헤더가 있으면 ledger 내역을 최신순으로 돌려준다`() {
+    fun `사용자 헤더가 있으면 ledger 내역을 최신순으로 돌려준다`() {
         val headers = HttpHeaders()
-        headers.add("X-Organization-Id", organization.persistedId.toString())
+        headers.add("X-Organization-Id", user.persistedId.toString())
 
         val response = restTemplate.exchange(
             url("/api/ledger"), HttpMethod.GET, HttpEntity<Void>(headers),
@@ -64,7 +64,7 @@ class LedgerApiControllerTest @Autowired constructor(
     }
 
     @Test
-    fun `조직 헤더 없이 호출하면 400이다`() {
+    fun `사용자 헤더 없이 호출하면 400이다`() {
         val response = restTemplate.getForEntity(url("/api/ledger"), String::class.java)
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)

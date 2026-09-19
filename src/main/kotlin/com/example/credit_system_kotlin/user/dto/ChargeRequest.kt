@@ -1,3 +1,3 @@
-package com.example.credit_system_kotlin.organization.dto
+package com.example.credit_system_kotlin.user.dto
 
 data class ChargeRequest(val idemKey: String, val amount: Long)

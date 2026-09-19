@@ -16,7 +16,7 @@ class IdempotencyKeyRepositoryTest @Autowired constructor(
 ) {
 
     @Test
-    fun `동일 조직 동일 키는 유니크 제약으로 거부된다`() {
+    fun `동일 사용자 동일 키는 유니크 제약으로 거부된다`() {
         idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1"))
 
         assertThatThrownBy { idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1")) }
@@ -24,7 +24,7 @@ class IdempotencyKeyRepositoryTest @Autowired constructor(
     }
 
     @Test
-    fun `다른 조직은 같은 키를 사용할 수 있다`() {
+    fun `다른 사용자는 같은 키를 사용할 수 있다`() {
         idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1"))
         idempotencyKeyRepository.saveAndFlush(IdempotencyKey(2L, "key-1"))
 
@@ -37,7 +37,7 @@ class IdempotencyKeyRepositoryTest @Autowired constructor(
 
         val updated = idempotencyKeyRepository.attachJobId(1L, "key-1", 42L)
 
-        val found = requireNotNull(idempotencyKeyRepository.findByOrganizationIdAndIdemKey(1L, "key-1"))
+        val found = requireNotNull(idempotencyKeyRepository.findByUserIdAndIdemKey(1L, "key-1"))
         assertThat(updated).isEqualTo(1)
         assertThat(found.jobId).isEqualTo(42L)
     }

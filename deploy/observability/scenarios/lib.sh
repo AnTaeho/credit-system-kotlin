@@ -176,12 +176,12 @@ job_status() { mysql_q "SELECT status, COUNT(*) FROM jobs GROUP BY status;" | tr
 STAMP=""
 charge() {
   STAMP="$(date +%s)-$RANDOM"
-  curl -s -o /dev/null -X POST "${API}/api/organizations/me/charge" -H "$ORG_HEADER" \
+  curl -s -o /dev/null -X POST "${API}/api/users/me/charge" -H "$ORG_HEADER" \
     -H 'Content-Type: application/json' -d "{\"idemKey\":\"charge-${STAMP}\",\"amount\":${1:-10000}}"
   note "충전 ${1:-10000}, 잔액=$(balance)"
 }
 
-balance() { curl -s "${API}/api/organizations/me/balance" -H "$ORG_HEADER"; }
+balance() { curl -s "${API}/api/users/me/balance" -H "$ORG_HEADER"; }
 
 # create_jobs N — job N 건 생성. 충전은 호출자가 미리 해 둔다.
 create_jobs() {

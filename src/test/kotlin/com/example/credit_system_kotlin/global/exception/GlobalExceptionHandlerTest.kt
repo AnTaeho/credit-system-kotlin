@@ -36,7 +36,7 @@ class GlobalExceptionHandlerTest {
     fun `유니크 제약 위반은 중복 처리중으로 번역된다`() {
         val uniqueViolation = ConstraintViolationException(
             "constraint violated", SQLException("Duplicate entry"),
-            ConstraintViolationException.ConstraintKind.UNIQUE, "uk_idempotency_org_key"
+            ConstraintViolationException.ConstraintKind.UNIQUE, "uk_idempotency_user_key"
         )
 
         val response = handler.handleDataIntegrityViolation(
@@ -74,11 +74,11 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    fun `존재하지 않는 조직 예외는 404와 코드를 반환한다`() {
-        val response = handler.handleOrganizationNotFound(OrganizationNotFoundException(1L))
+    fun `존재하지 않는 사용자 예외는 404와 코드를 반환한다`() {
+        val response = handler.handleUserNotFound(UserNotFoundException(1L))
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
-        assertThat(response.body!!.code).isEqualTo("ORGANIZATION_NOT_FOUND")
-        assertThat(response.body!!.message).isEqualTo("존재하지 않는 organization: 1")
+        assertThat(response.body!!.code).isEqualTo("USER_NOT_FOUND")
+        assertThat(response.body!!.message).isEqualTo("존재하지 않는 user: 1")
     }
 }

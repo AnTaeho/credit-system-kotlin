@@ -84,7 +84,7 @@ interface JobRepository : JpaRepository<Job, Long> {
 
     fun findByStatusOrderByIdAsc(status: JobStatus, pageable: Pageable): List<Job>
 
-    fun findByOrganizationIdOrderByIdDesc(organizationId: Long): List<Job>
+    fun findByUserIdOrderByIdDesc(userId: Long): List<Job>
 
     fun findByStatusAndUpdatedAtBeforeOrderByIdAsc(status: JobStatus, cutoff: Instant, pageable: Pageable): List<Job>
 

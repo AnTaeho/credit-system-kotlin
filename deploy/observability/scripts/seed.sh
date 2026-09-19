@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 조직 1개(id=1)를 직접 INSERT 한다.
+# 사용자 1명(id=1)을 직접 INSERT 한다.
 #
-# 조직 생성 API 가 없어서 SQL 로 넣는다. 테이블은 앱 기동 때 Flyway 마이그레이션이
+# 사용자 생성 API 가 없어서 SQL 로 넣는다. 테이블은 앱 기동 때 Flyway 마이그레이션이
 # 만들므로, 앱이 UP 이 될 때까지 기다린 다음에 넣어야 한다.
 set -euo pipefail
 
@@ -22,12 +22,12 @@ for i in $(seq 1 60); do
   if [ "$i" = "60" ]; then echo "앱이 UP 되지 않았다"; exit 1; fi
 done
 
-echo "조직 id=1 을 넣는다..."
+echo "사용자 id=1 을 넣는다..."
 $DC exec -T mysql mysql -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -e "
-  INSERT INTO organizations (id, name, balance, initial_balance, created_at, updated_at)
+  INSERT INTO users (id, name, balance, initial_balance, created_at, updated_at)
   VALUES (1, 'seed-org', 0, 0, NOW(6), NOW(6))
   ON DUPLICATE KEY UPDATE name = VALUES(name);
 " 2>/dev/null
 
 $DC exec -T mysql mysql -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -e \
-  "SELECT id, name, balance, initial_balance FROM organizations;" 2>/dev/null
+  "SELECT id, name, balance, initial_balance FROM users;" 2>/dev/null

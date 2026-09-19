@@ -9,7 +9,7 @@ import org.springframework.transaction.annotation.Transactional
 class JobQueryService(private val jobRepository: JobRepository) {
 
     @Transactional(readOnly = true)
-    fun findByOrganization(organizationId: Long): List<JobResponse> =
-        jobRepository.findByOrganizationIdOrderByIdDesc(organizationId)
+    fun findByUser(userId: Long): List<JobResponse> =
+        jobRepository.findByUserIdOrderByIdDesc(userId)
             .map(JobResponse::from)
 }

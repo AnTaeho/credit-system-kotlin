@@ -3,8 +3,8 @@ package com.example.credit_system_kotlin.job.controller
 import com.example.credit_system_kotlin.job.dto.HoldResult
 import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.dto.JobResponse
-import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -26,26 +26,26 @@ import org.springframework.test.context.ActiveProfiles
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class JobApiControllerTest @Autowired constructor(
     private val restTemplate: TestRestTemplate,
-    private val organizationRepository: OrganizationRepository
+    private val userRepository: UserRepository
 ) {
 
     @field:LocalServerPort
     private var port: Int = 0
 
-    private lateinit var organization: Organization
+    private lateinit var user: User
 
     @BeforeEach
     fun setUp() {
-        organization = organizationRepository.save(Organization("acme", 1000L))
+        user = userRepository.save(User("acme", 1000L))
     }
 
     @AfterEach
     fun tearDown() {
-        organizationRepository.deleteAll()
+        userRepository.deleteAll()
     }
 
     @Test
-    fun `조직 헤더 없이 호출하면 400이다`() {
+    fun `사용자 헤더 없이 호출하면 400이다`() {
         val response = restTemplate.getForEntity(url("/api/jobs"), String::class.java)
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
@@ -54,7 +54,7 @@ class JobApiControllerTest @Autowired constructor(
     @Test
     fun `생성 요청과 목록 조회가 정상 동작한다`() {
         val headers = HttpHeaders()
-        headers.add("X-Organization-Id", organization.persistedId.toString())
+        headers.add("X-Organization-Id", user.persistedId.toString())
         headers.contentType = MediaType.APPLICATION_JSON
 
         val createResponse = restTemplate.exchange(

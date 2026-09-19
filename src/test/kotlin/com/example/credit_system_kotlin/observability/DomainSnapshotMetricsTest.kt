@@ -43,7 +43,7 @@ class DomainSnapshotMetricsTest {
                 outstandingHoldCount = 0,
                 outstandingHoldAmount = 0,
                 oldestPendingAgeSeconds = 0,
-                negativeBalanceOrgs = 0,
+                negativeBalanceUsers = 0,
                 jobsWithoutHold = 0,
                 unsettledTerminalJobs = 0
             )
@@ -83,7 +83,7 @@ class DomainSnapshotMetricsTest {
         outstandingHoldCount: Long = 3,
         outstandingHoldAmount: Long = 300,
         oldestPendingAgeSeconds: Long = 90,
-        negativeBalanceOrgs: Long = 1,
+        negativeBalanceUsers: Long = 1,
         jobsWithoutHold: Long = 2,
         unsettledTerminalJobs: Long = 4,
         duration: Duration = Duration.ofMillis(120)
@@ -91,7 +91,7 @@ class DomainSnapshotMetricsTest {
         outstandingHoldCount = outstandingHoldCount,
         outstandingHoldAmount = outstandingHoldAmount,
         oldestPendingAgeSeconds = oldestPendingAgeSeconds,
-        negativeBalanceOrgs = negativeBalanceOrgs,
+        negativeBalanceUsers = negativeBalanceUsers,
         jobsWithoutHold = jobsWithoutHold,
         unsettledTerminalJobs = unsettledTerminalJobs,
         duration = duration,

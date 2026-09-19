@@ -16,7 +16,7 @@ import jakarta.persistence.Table
 class Job private constructor(
 
     @Column(nullable = false)
-    val organizationId: Long,
+    val userId: Long,
 
     @Column(nullable = false)
     val holdAmount: Long,
@@ -47,7 +47,7 @@ class Job private constructor(
         protected set
 
     companion object {
-        fun hold(organizationId: Long, holdAmount: Long, prompt: String): Job =
-            Job(organizationId, holdAmount, prompt)
+        fun hold(userId: Long, holdAmount: Long, prompt: String): Job =
+            Job(userId, holdAmount, prompt)
     }
 }

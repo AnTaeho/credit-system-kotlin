@@ -14,6 +14,6 @@ class LedgerApiController(
 ) {
 
     @GetMapping
-    fun list(@RequestHeader("X-Organization-Id") organizationId: Long): List<LedgerResponse> =
-        ledgerQueryService.findByOrganization(organizationId)
+    fun list(@RequestHeader("X-Organization-Id") userId: Long): List<LedgerResponse> =
+        ledgerQueryService.findByUser(userId)
 }

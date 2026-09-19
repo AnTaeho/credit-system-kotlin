@@ -9,7 +9,7 @@ import org.springframework.transaction.annotation.Transactional
 class LedgerQueryService(private val ledgerRepository: LedgerRepository) {
 
     @Transactional(readOnly = true)
-    fun findByOrganization(organizationId: Long): List<LedgerResponse> =
-        ledgerRepository.findByOrganizationIdOrderByIdDesc(organizationId)
+    fun findByUser(userId: Long): List<LedgerResponse> =
+        ledgerRepository.findByUserIdOrderByIdDesc(userId)
             .map(LedgerResponse::from)
 }

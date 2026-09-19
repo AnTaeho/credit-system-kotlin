@@ -21,7 +21,7 @@ post() {
 }
 
 echo "== 1000 크레딧 충전"
-post charge /api/organizations/me/charge "{\"idemKey\":\"charge-${STAMP}\",\"amount\":1000}"
+post charge /api/users/me/charge "{\"idemKey\":\"charge-${STAMP}\",\"amount\":1000}"
 
 echo "== job 5건 생성 (건당 100)"
 for i in 1 2 3 4 5; do
@@ -37,7 +37,7 @@ for i in $(seq 6 12); do
 done
 
 echo "== 잔액"
-curl -s "${API}/api/organizations/me/balance" -H "$ORG_HEADER"; echo
+curl -s "${API}/api/users/me/balance" -H "$ORG_HEADER"; echo
 
 echo "== Prometheus 에서 본 방어 카운터"
 curl -s --get "${PROM}/api/v1/query" --data-urlencode 'query=credit_defense_total' \
