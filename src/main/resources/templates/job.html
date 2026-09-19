@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('요청 상세')}"></head>
+<body>
+<header th:replace="~{fragments :: topbar}"></header>
+<main>
+  <h2>요청 <span th:text="${job.id}">1</span></h2>
+  <dl class="detail job-row" id="job-detail" th:attr="data-job-id=${job.id},data-status=${job.status}">
+    <dt>상태</dt><dd class="c-status" th:text="${job.status}">HOLDING</dd>
+    <dt>프롬프트</dt><dd class="c-prompt" th:text="${job.prompt}">prompt</dd>
+    <dt>시도 횟수</dt><dd class="c-attempt" th:text="${job.attemptNo}">1</dd>
+    <dt>묶인 금액</dt><dd class="c-hold" th:text="${job.holdAmount}">100</dd>
+    <!-- 결과 URL 은 이미지로 그리지 않고 텍스트로만 보여 준다(가짜 생성기의 존재하지 않는 도메인). step12 에서 실제 결과물 표시로 바뀔 자리. -->
+    <dt>결과</dt><dd class="c-result" th:text="${job.resultUrl} ?: '-'">-</dd>
+    <dt>갱신</dt><dd class="c-updated" th:text="${job.updatedAt}">-</dd>
+  </dl>
+  <p id="job-message" class="message" role="status"></p>
+  <p><a th:href="@{/}">홈으로</a></p>
+</main>
+<script th:src="@{/js/job.js}" defer></script>
+</body>
+</html>

@@ -141,11 +141,11 @@ class SecurityRulesTest @Autowired constructor(
     }
 
     @Test
-    fun `api 밖의 경로는 미인증 브라우저 요청이면 로그인으로 리다이렉트한다`() {
+    fun `api 밖의 경로는 미인증 브라우저 요청이면 로그인 화면으로 리다이렉트한다`() {
         val result = mockMvc.perform(get("/").accept(MediaType.TEXT_HTML)).andReturn()
 
         assertThat(result.response.status).isEqualTo(302)
-        assertThat(result.response.redirectedUrl).contains("/oauth2/authorization/google")
+        assertThat(result.response.redirectedUrl).endsWith("/login")
     }
 
     @Test

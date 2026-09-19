@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('로그인')}"></head>
+<body>
+<main class="narrow">
+  <h1>credit</h1>
+
+  <p class="notice error" th:if="${loginError}">허용되지 않은 계정입니다. 로그인할 수 없습니다.</p>
+  <p class="notice" th:if="${loggedOut}">로그아웃했습니다.</p>
+  <p class="notice" th:if="${expired}">세션이 만료되었습니다. 다시 로그인하세요.</p>
+
+  <!-- 폼 POST 가 아니라 링크다. 구글로의 리다이렉트가 CSP form-action 에 걸리지 않게 한다. -->
+  <p><a class="button" th:href="@{/oauth2/authorization/google}">구글로 로그인</a></p>
+
+  <section th:if="${devLoginEnabled}" class="dev-login">
+    <h2>개발 로그인</h2>
+    <p class="muted">로컬 전용(app.auth.dev-login.enabled). 허용 목록의 이메일로 세션에 로그인한다.</p>
+    <form th:action="@{/dev-login}" method="post">
+      <label for="dev-email">이메일</label>
+      <input id="dev-email" name="email" type="email" list="dev-emails" required autocomplete="off">
+      <datalist id="dev-emails">
+        <option th:each="e : ${devLoginEmails}" th:value="${e}"></option>
+      </datalist>
+      <button type="submit">개발 로그인</button>
+    </form>
+  </section>
+</main>
+</body>
+</html>

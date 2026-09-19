@@ -1,6 +1,7 @@
 package com.example.credit_system_kotlin.auth.config
 
 import com.example.credit_system_kotlin.auth.login.AllowlistOidcUserService
+import com.example.credit_system_kotlin.auth.login.DevLoginAuthenticator
 import com.example.credit_system_kotlin.auth.login.DevLoginFilter
 import com.example.credit_system_kotlin.auth.login.UserAccountProvisioner
 import com.example.credit_system_kotlin.auth.web.SecurityErrorWriter
@@ -23,7 +24,11 @@ import org.springframework.security.web.util.matcher.RequestMatcher
  *
  * - `/api` 아래: 인증 필요. 미인증 401, 권한 부족·CSRF 실패 403. 둘 다 [SecurityErrorWriter] 의 JSON 이고 리다이렉트하지 않는다
  * - `/api/admin` 아래: 운영자(ROLE_ADMIN) 전용. 운영자 경로는 전부 이 아래에 둔다
- * - 그 밖의 경로: 인증 필요. 미인증이면 구글 로그인으로 보낸다
+ * - `/admin` 화면: 운영자 전용(API 와 같은 기준)
+ * - 그 밖의 경로(화면): 인증 필요. 미인증이면 `/login` 화면으로 보낸다. `/login` 과 정적 리소스는 열어 둔다.
+ *   `/login` 을 열어 두지 않으면 로그인 화면이 다시 로그인을 요구하는 리다이렉트 루프가 된다
+ * - `/dev-login`: 열어 두되 핸들러는 개발 로그인이 켜졌을 때만 있다(꺼져 있으면 404). CSRF 는 면제하지 않는다
+ * - CSP: 같은 출처의 스크립트·스타일만 허용한다. 인라인 스크립트·스타일·외부 CDN 을 쓰지 않는다
  * - CSRF: 세션 쿠키로 인증하므로 켠다. 개발 로그인 헤더로 인증되는 요청만 뺀다(쿠키 인증이 아니다)
  * - 로그아웃: `POST /logout`
  *
@@ -59,11 +64,20 @@ class SecurityConfig {
                 }
                 authorize(EndpointRequest.toAnyEndpoint(), denyAll)
                 authorize("/error", permitAll)
+                authorize("/login", permitAll)
+                authorize("/dev-login", permitAll)
+                authorize("/css/**", permitAll)
+                authorize("/js/**", permitAll)
+                authorize("/favicon.ico", permitAll)
                 authorize("/api/admin/**", hasRole("ADMIN"))
+                authorize("/admin", hasRole("ADMIN"))
+                authorize("/admin/**", hasRole("ADMIN"))
                 authorize("/api/**", authenticated)
                 authorize(anyRequest, authenticated)
             }
             oauth2Login {
+                // 실패(허용 목록 밖 등)는 /login?error, 로그아웃 성공은 /login?logout 으로 돌아온다.
+                loginPage = "/login"
                 userInfoEndpoint {
                     this.oidcUserService = oidcUserService
                 }
@@ -76,14 +90,31 @@ class SecurityConfig {
                     ignoringRequestMatchers(devLoginHeader)
                 }
             }
+            headers {
+                contentSecurityPolicy {
+                    policyDirectives = CONTENT_SECURITY_POLICY
+                }
+            }
             exceptionHandling {
                 defaultAuthenticationEntryPointFor(errorWriter.unauthenticatedEntryPoint(), api)
                 defaultAccessDeniedHandlerFor(errorWriter.forbiddenHandler(), api)
             }
             if (authProperties.devLogin.enabled) {
-                addFilterBefore<AnonymousAuthenticationFilter>(DevLoginFilter(authProperties, provisioner, errorWriter))
+                addFilterBefore<AnonymousAuthenticationFilter>(
+                    DevLoginFilter(DevLoginAuthenticator(authProperties, provisioner), errorWriter)
+                )
             }
         }
         return http.build()
+    }
+
+    companion object {
+        /**
+         * 스크립트·스타일은 `static/js`, `static/css` 의 같은 출처 파일만. 인라인은 막는다(XSS 가 새도 실행되지 않게).
+         * 이미지도 같은 출처만 — 생성 결과 URL 은 아직 이미지로 그리지 않는다(step12).
+         */
+        const val CONTENT_SECURITY_POLICY =
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; " +
+                "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     }
 }

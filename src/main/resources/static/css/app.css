@@ -1,0 +1,32 @@
+/* 꾸미기는 목표가 아니다. 읽히면 충분하다. 인라인 style 은 CSP 가 막으므로 전부 여기에 둔다. */
+:root { color-scheme: light; --fg: #1d1d1f; --muted: #6b6b70; --line: #d9d9de; --err: #b3261e; --accent: #1f5fbf; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; color: var(--fg); background: #fafafa; }
+main { max-width: 960px; margin: 0 auto; padding: 16px; }
+main.narrow { max-width: 420px; padding-top: 48px; }
+h1 { font-size: 1.6rem; }
+h2 { font-size: 1.15rem; margin-top: 1.6em; }
+a { color: var(--accent); }
+.topbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: #fff; }
+.topbar nav { display: flex; gap: 16px; }
+.who { display: flex; gap: 12px; align-items: center; color: var(--muted); }
+form.inline { display: inline; margin: 0; }
+button, .button { font: inherit; padding: 6px 14px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; color: var(--fg); text-decoration: none; display: inline-block; }
+button:disabled { opacity: .5; cursor: default; }
+button.link { border: 0; padding: 0; background: none; color: var(--accent); text-decoration: underline; }
+label { display: block; margin: 10px 0 4px; }
+input, textarea { font: inherit; width: 100%; max-width: 520px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+form button[type="submit"] { margin-top: 10px; }
+.balance { font-size: 1.4rem; margin: 0; }
+.muted { color: var(--muted); }
+.notice { padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.notice.error, .message.error { color: var(--err); }
+.message { min-height: 1.5em; }
+.dev-login { margin-top: 32px; padding-top: 8px; border-top: 1px dashed var(--line); }
+table.list { width: 100%; border-collapse: collapse; background: #fff; display: block; overflow-x: auto; }
+table.list th, table.list td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.c-prompt, dd.c-prompt { white-space: pre-wrap; word-break: break-word; }
+td.c-result, dd.c-result { word-break: break-all; color: var(--muted); }
+dl.detail { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
+dl.detail dt { color: var(--muted); }
+dl.detail dd { margin: 0; }

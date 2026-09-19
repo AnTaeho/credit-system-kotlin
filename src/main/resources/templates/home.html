@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('홈')}"></head>
+<body>
+<header th:replace="~{fragments :: topbar}"></header>
+<main>
+  <section>
+    <h2>잔액</h2>
+    <p class="balance"><span id="balance" th:text="${balance}">0</span> 크레딧</p>
+  </section>
+
+  <section>
+    <h2>생성 요청</h2>
+    <form id="job-form" novalidate>
+      <label for="prompt">프롬프트</label>
+      <textarea id="prompt" name="prompt" rows="3" maxlength="1000" required></textarea>
+      <button type="submit">요청</button>
+    </form>
+    <p id="job-form-message" class="message" role="status"></p>
+  </section>
+
+  <section>
+    <h2>최근 요청</h2>
+    <table class="list">
+      <thead>
+      <tr><th>id</th><th>상태</th><th>프롬프트</th><th>결과</th><th>갱신</th></tr>
+      </thead>
+      <tbody id="job-rows">
+      <tr th:each="job : ${jobs.items}" class="job-row"
+          th:attr="data-job-id=${job.id},data-status=${job.status}">
+        <td><a class="c-id" th:href="@{/jobs/{id}(id=${job.id})}" th:text="${job.id}">1</a></td>
+        <td class="c-status" th:text="${job.status}">HOLDING</td>
+        <td class="c-prompt" th:text="${job.prompt}">prompt</td>
+        <!-- 결과 URL 은 텍스트로만 보여 준다. 가짜 생성기의 주소는 존재하지 않는 도메인이다. step12 에서 실제 결과물 표시로 바뀔 자리. -->
+        <td class="c-result" th:text="${job.resultUrl} ?: '-'">-</td>
+        <td class="c-updated" th:text="${job.updatedAt}">-</td>
+      </tr>
+      </tbody>
+    </table>
+    <p class="muted" id="job-empty" th:hidden="${!jobs.items.isEmpty()}">아직 요청이 없습니다.</p>
+    <button type="button" id="job-more" th:hidden="${jobs.nextCursor == null}"
+            th:attr="data-cursor=${jobs.nextCursor}">더 보기</button>
+    <p id="job-list-message" class="message" role="status"></p>
+  </section>
+
+  <template id="job-row-template">
+    <tr class="job-row">
+      <td><a class="c-id"></a></td>
+      <td class="c-status"></td>
+      <td class="c-prompt"></td>
+      <td class="c-result"></td>
+      <td class="c-updated"></td>
+    </tr>
+  </template>
+</main>
+<script th:src="@{/js/home.js}" defer></script>
+</body>
+</html>
