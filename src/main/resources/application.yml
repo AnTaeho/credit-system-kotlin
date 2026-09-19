@@ -24,12 +24,31 @@ spring:
       port: 6379
       timeout: 2s
       connect-timeout: 2s
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            # 로컬 기본값은 자리표시다. 자격증명 없이도 앱은 뜨고, 구글 로그인만 실패한다.
+            # 로컬에서는 개발 로그인(application-local.yml)을 쓴다. 운영은 application-prod.yml 이
+            # 기본값 없이 덮어써서 값이 없으면 부팅에서 죽는다.
+            client-id: ${GOOGLE_CLIENT_ID:local-placeholder}
+            client-secret: ${GOOGLE_CLIENT_SECRET:local-placeholder}
+            scope: openid,email,profile
   task:
     scheduling:
       pool:
         size: 4
 
 app:
+  auth:
+    # 로그인을 허용할 이메일(대소문자 무시). 운영자 목록은 반드시 허용 목록의 부분집합이어야 한다.
+    # 기본은 비어 있다 — 아무도 못 들어온다. 운영은 환경변수로 채운다. 속성의 대시는 빠지므로 APP_AUTH_ALLOWEDEMAILS=a@x.com,b@y.com, APP_AUTH_ADMINEMAILS 처럼 쓴다.
+    allowed-emails: []
+    admin-emails: []
+    dev-login:
+      # 헤더 한 줄로 로그인하는 로컬 전용 장치. 기본은 끈다. prod 에서 켜면 기동이 거부된다.
+      enabled: false
   scheduling:
     enabled: true
     reconciliation-interval-millis: 60000
@@ -38,6 +57,15 @@ app:
     timezone: Asia/Seoul
   idempotency:
     retention-days: 7
+  admin:
+    # 운영자 지급(POST /api/admin/users/{userId}/grants) 1회 상한.
+    max-grant-amount: 1000000
+  rate-limit:
+    job-create:
+      # 사용자별 job 접수(POST /api/jobs) 속도 제한. 분당 이만큼까지, 초당 균등하게 다시 찬다.
+      # 넘으면 hold 전에 429 로 거절한다 — 원장·job·멱등키·잔액 어디에도 흔적이 남지 않는다.
+      enabled: true
+      per-minute: 10
   worker:
     enabled: true
     batch-size: 3
@@ -73,3 +101,10 @@ server:
   # 웹서버가 즉시 끊겨, 응답을 기다리던 hold 요청이 "돈은 묶였는데 jobId 는 못 받은" 상태로
   # 남는다.
   shutdown: graceful
+  servlet:
+    session:
+      cookie:
+        # 세션 쿠키가 곧 로그인이다. 스크립트가 읽지 못하게, 다른 사이트의 POST 에 따라가지 않게 한다.
+        # Secure 는 HTTPS 인 운영에서만 켠다(application-prod.yml).
+        http-only: true
+        same-site: lax

@@ -7,9 +7,9 @@ import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerType
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
-import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import com.example.credit_system_kotlin.support.RecordingEventPublisher
+import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -22,14 +22,14 @@ import java.time.Instant
 @DataJpaTest
 class JobLifecycleServiceTest @Autowired constructor(
     private val jobRepository: JobRepository,
-    private val organizationRepository: OrganizationRepository,
+    private val userRepository: UserRepository,
     private val ledgerRepository: LedgerRepository
 ) {
 
     private val eventPublisher = RecordingEventPublisher()
 
     private val jobLifecycleService =
-        JobLifecycleService(jobRepository, organizationRepository, ledgerRepository, eventPublisher)
+        JobLifecycleService(jobRepository, userRepository, ledgerRepository, eventPublisher)
 
     @Test
     fun `attemptNo가 일치하면 완료 처리되고 ledger가 남는다`() {
@@ -41,7 +41,7 @@ class JobLifecycleServiceTest @Autowired constructor(
         val found = jobRepository.findById(job.persistedId).orElseThrow()
         assertThat(found.status).isEqualTo(JobStatus.COMPLETED)
         assertThat(found.resultUrl).isEqualTo("https://stub/x.png")
-        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(1L)).hasSize(1)
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(1L)).hasSize(1)
     }
 
     @Test
@@ -54,7 +54,7 @@ class JobLifecycleServiceTest @Autowired constructor(
 
         val found = jobRepository.findById(job.persistedId).orElseThrow()
         assertThat(found.status).isEqualTo(JobStatus.PROCESSING)
-        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(1L)).isEmpty()
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(1L)).isEmpty()
     }
 
     @Test
@@ -72,7 +72,7 @@ class JobLifecycleServiceTest @Autowired constructor(
         val found = jobRepository.findById(job.persistedId).orElseThrow()
         assertThat(found.status).isEqualTo(JobStatus.REFUNDED)
         assertThat(found.resultUrl).isNull()
-        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(1L)).isEmpty()
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(1L)).isEmpty()
     }
 
     @Test
@@ -86,7 +86,7 @@ class JobLifecycleServiceTest @Autowired constructor(
         val found = jobRepository.findById(job.persistedId).orElseThrow()
         assertThat(found.status).isEqualTo(JobStatus.COMPLETED)
         assertThat(found.resultUrl).isEqualTo("https://stub/first.png")
-        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(1L)).hasSize(1)
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(1L)).hasSize(1)
     }
 
     @Test
@@ -151,8 +151,8 @@ class JobLifecycleServiceTest @Autowired constructor(
 
     @Test
     fun `FAILED job은 REFUNDED로 전이되고 잔액이 복구된다`() {
-        val organization = organizationRepository.save(Organization("acme", 700L))
-        val job = jobRepository.save(Job.hold(organization.persistedId, 300L, "cat"))
+        val user = userRepository.save(User("acme", 700L))
+        val job = jobRepository.save(Job.hold(user.persistedId, 300L, "cat"))
         jobRepository.transitionIfStatusAndAttemptMatch(
             job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
         )
@@ -160,28 +160,28 @@ class JobLifecycleServiceTest @Autowired constructor(
         jobLifecycleService.finalRefund(jobRepository.findById(job.persistedId).orElseThrow())
 
         val foundJob = jobRepository.findById(job.persistedId).orElseThrow()
-        val foundOrg = organizationRepository.findById(organization.persistedId).orElseThrow()
+        val foundUser = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(foundJob.status).isEqualTo(JobStatus.REFUNDED)
-        assertThat(foundOrg.balance).isEqualTo(1000L)
-        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId))
+        assertThat(foundUser.balance).isEqualTo(1000L)
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId))
             .anyMatch { it.type == LedgerType.REFUND }
     }
 
     @Test
     fun `FAILED 상태가 아니면 환불하지 않는다`() {
-        val organization = organizationRepository.save(Organization("acme", 700L))
-        val job = jobRepository.save(Job.hold(organization.persistedId, 300L, "cat"))
+        val user = userRepository.save(User("acme", 700L))
+        val job = jobRepository.save(Job.hold(user.persistedId, 300L, "cat"))
 
         jobLifecycleService.finalRefund(job)
 
-        val foundOrg = organizationRepository.findById(organization.persistedId).orElseThrow()
-        assertThat(foundOrg.balance).isEqualTo(700L)
+        val foundUser = userRepository.findById(user.persistedId).orElseThrow()
+        assertThat(foundUser.balance).isEqualTo(700L)
     }
 
     @Test
     fun `같은 작업을 두 번 환불해도 잔액과 원장은 한 번만 반영된다`() {
-        val organization = organizationRepository.save(Organization("acme", 700L))
-        val job = jobRepository.save(Job.hold(organization.persistedId, 300L, "cat"))
+        val user = userRepository.save(User("acme", 700L))
+        val job = jobRepository.save(Job.hold(user.persistedId, 300L, "cat"))
         jobRepository.transitionIfStatusAndAttemptMatch(
             job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
         )
@@ -190,9 +190,9 @@ class JobLifecycleServiceTest @Autowired constructor(
         jobLifecycleService.finalRefund(failed)
         jobLifecycleService.finalRefund(failed)
 
-        assertThat(organizationRepository.findById(organization.persistedId).orElseThrow().balance)
+        assertThat(userRepository.findById(user.persistedId).orElseThrow().balance)
             .isEqualTo(1000L)
-        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId))
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId))
             .hasSize(1)
     }
 
@@ -248,8 +248,8 @@ class JobLifecycleServiceTest @Autowired constructor(
 
     @Test
     fun `이미 처리된 job의 최종 환불은 FINAL_REFUND RACED를 발행한다`() {
-        val organization = organizationRepository.save(Organization("acme", 700L))
-        val job = jobRepository.save(Job.hold(organization.persistedId, 300L, "cat"))
+        val user = userRepository.save(User("acme", 700L))
+        val job = jobRepository.save(Job.hold(user.persistedId, 300L, "cat"))
         jobRepository.transitionIfStatusAndAttemptMatch(
             job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
         )

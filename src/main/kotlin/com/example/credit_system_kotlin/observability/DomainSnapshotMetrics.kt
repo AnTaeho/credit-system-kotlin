@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicReference
  * 전부 이 싱글턴 빈의 필드다 — Micrometer 가 상태를 약한 참조로만 물기 때문에, 지역 변수를
  * 넘기면 GC 이후 NaN 이 된다.
  *
- * 태그는 붙이지 않는다. 특히 organizationId 는 카디널리티가 폭발하므로 절대 금지다.
+ * 태그는 붙이지 않는다. 특히 userId 는 카디널리티가 폭발하므로 절대 금지다.
  */
 @Component
 class DomainSnapshotMetrics(
@@ -31,7 +31,7 @@ class DomainSnapshotMetrics(
     private val outstandingHoldCount = AtomicLong(0)
     private val outstandingHoldAmount = AtomicLong(0)
     private val oldestPendingAgeSeconds = AtomicLong(0)
-    private val negativeBalanceOrgs = AtomicLong(0)
+    private val negativeBalanceUsers = AtomicLong(0)
     private val jobsWithoutHold = AtomicLong(0)
     private val unsettledTerminalJobs = AtomicLong(0)
     private val lastTakenAt = AtomicReference<Instant?>(null)
@@ -61,8 +61,8 @@ class DomainSnapshotMetrics(
             .baseUnit("seconds")
             .register(registry)
 
-        Gauge.builder(NEGATIVE_BALANCE_ORGS_METRIC, negativeBalanceOrgs) { it.get().toDouble() }
-            .description("잔액이 음수인 조직 수. 0이 아니면 즉시 사고다")
+        Gauge.builder(NEGATIVE_BALANCE_ORGS_METRIC, negativeBalanceUsers) { it.get().toDouble() }
+            .description("잔액이 음수인 사용자 수. 0이 아니면 즉시 사고다")
             .register(registry)
 
         Gauge.builder(JOBS_WITHOUT_HOLD_METRIC, jobsWithoutHold) { it.get().toDouble() }
@@ -84,7 +84,7 @@ class DomainSnapshotMetrics(
         outstandingHoldCount.set(event.outstandingHoldCount)
         outstandingHoldAmount.set(event.outstandingHoldAmount)
         oldestPendingAgeSeconds.set(event.oldestPendingAgeSeconds)
-        negativeBalanceOrgs.set(event.negativeBalanceOrgs)
+        negativeBalanceUsers.set(event.negativeBalanceUsers)
         jobsWithoutHold.set(event.jobsWithoutHold)
         unsettledTerminalJobs.set(event.unsettledTerminalJobs)
         cyclesCounter.increment()

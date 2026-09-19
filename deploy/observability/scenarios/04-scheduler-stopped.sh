@@ -26,7 +26,7 @@ restart_app_with APP_SCHEDULING_ENABLED=false
 reset_clock
 mark "스케줄러 정지 상태로 재기동 (@ConditionalOnExpression 때문에 워커도 같이 사라진다)"
 
-charge 10000
+grant 10000
 mark "job 3건 생성 — 아무도 처리하지 않는다"
 create_jobs 3
 
@@ -59,6 +59,7 @@ report_row "  같은 시점 DB 실제 미결 나이"    "-"               "${REA
 report_row "CreditSnapshotStale"              "firing 이어야"   "$(alerts | grep -cx CreditSnapshotStale)"
 report_row "CreditReconciliationStale"        "firing 이어야"   "$(alerts | grep -cx CreditReconciliationStale)"
 report_row "firing 알람 전체"                 "-"               "[${FIRING}]"
-report_row "방어 카운터 합"                   "job 생성분 3 뿐"  "$(prom_num 'sum(credit_defense_total)')"
+# job 3건 접수가 hold_balance/applied 3 과 rate_limit/applied 3(step9-D, 접수마다 한 번)을 남긴다.
+report_row "방어 카운터 합"                   "job 생성분 6 뿐"  "$(prom_num 'sum(credit_defense_total)')"
 report_row "recovery 합"                      "0"               "$(prom_num 'sum(credit_job_recovery_total)')"
 report

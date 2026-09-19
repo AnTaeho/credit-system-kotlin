@@ -159,7 +159,7 @@ class DeadJobRecoveryTaskTest {
         val job2 = failedJob(2L, 2)
         whenever(jobRepository.findByStatusOrderByIdAsc(eq(JobStatus.FAILED), any<Pageable>()))
             .thenReturn(listOf(job1, job2))
-        doThrow(IllegalStateException("조직 행 없음")).whenever(jobLifecycleService).finalRefund(job1)
+        doThrow(IllegalStateException("사용자 행 없음")).whenever(jobLifecycleService).finalRefund(job1)
 
         task.scan()
 

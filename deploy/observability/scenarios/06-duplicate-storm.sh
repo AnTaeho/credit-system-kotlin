@@ -7,18 +7,18 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 fresh_stack
-charge 20000
-BEFORE="$(mysql_q "SELECT balance FROM organizations WHERE id=1;")"
+grant 20000
+BEFORE="$(mysql_q "SELECT balance FROM users WHERE id=1;")"
 BASE_HOLD="$(prom_num 'credit_defense_total{point="hold_balance",outcome="applied"}')"
 
 KEY="storm-$(date +%s)"
 reset_clock
 mark "같은 idemKey(${KEY}) 로 100건 동시 발사"
 seq 1 100 | xargs -P 100 -I{} curl -s -o /dev/null -w '%{http_code}\n' \
-  -X POST "${API}/api/jobs" -H "$ORG_HEADER" -H 'Content-Type: application/json' \
+  -X POST "${API}/api/jobs" -H "$USER_HEADER" -H 'Content-Type: application/json' \
   -d "{\"idemKey\":\"${KEY}\",\"prompt\":\"duplicate storm\"}" \
   | sort | uniq -c | sed 's/^/     HTTP /'
-AFTER="$(mysql_q "SELECT balance FROM organizations WHERE id=1;")"
+AFTER="$(mysql_q "SELECT balance FROM users WHERE id=1;")"
 mark "발사 완료. 잔액 ${BEFORE} → ${AFTER} (차이 $(( BEFORE - AFTER )))"
 mark "이 idemKey 로 만들어진 job 행: $(mysql_q "SELECT COUNT(*) FROM jobs;")건, HOLD 원장: $(mysql_q "SELECT COUNT(*) FROM ledger_entries WHERE type='HOLD';")건"
 

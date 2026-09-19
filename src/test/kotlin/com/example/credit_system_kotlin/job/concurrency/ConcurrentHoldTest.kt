@@ -2,8 +2,8 @@ package com.example.credit_system_kotlin.job.concurrency
 
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.job.service.HoldService
-import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @SpringBootTest
 class ConcurrentHoldTest @Autowired constructor(
     private val holdService: HoldService,
-    private val organizationRepository: OrganizationRepository
+    private val userRepository: UserRepository
 ) {
 
     companion object {
@@ -30,7 +30,7 @@ class ConcurrentHoldTest @Autowired constructor(
 
     @Test
     fun `동시에 여러 요청이 들어와도 잔액이 음수가 되지 않는다`() {
-        val organization = organizationRepository.save(Organization("acme", 500L))
+        val user = userRepository.save(User("acme", 500L))
 
         val threadCount = 10
         val successCount = AtomicInteger()
@@ -38,7 +38,7 @@ class ConcurrentHoldTest @Autowired constructor(
 
         runConcurrently(threadCount) { idx ->
             try {
-                holdService.requestGeneration(organization.persistedId, "concurrent-key-$idx", "cat")
+                holdService.requestGeneration(user.persistedId, "concurrent-key-$idx", "cat")
                 successCount.incrementAndGet()
             } catch (e: InsufficientBalanceException) {
                 rejectedCount.incrementAndGet()
@@ -49,7 +49,7 @@ class ConcurrentHoldTest @Autowired constructor(
         assertThat(successCount.get()).isEqualTo(5)
         assertThat(rejectedCount.get()).isEqualTo(5)
 
-        val found = organizationRepository.findById(organization.persistedId).orElseThrow()
+        val found = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(found.balance).isEqualTo(0L)
     }
 }

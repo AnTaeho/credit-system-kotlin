@@ -30,12 +30,45 @@ docker compose -f deploy/observability/docker-compose.yml down -v
 ## 데이터 넣기
 
 ```
-# 조직 id=1 생성 (조직 생성 API 가 없어서 SQL 로 넣는다)
+# 사용자 id=1(email=dev@local.test) 생성 — 시나리오 SQL 이 id=1 을 가정하므로 id 를 못 박아 넣는다
 ./deploy/observability/scripts/seed.sh
 
-# 충전 + job 생성 + 중복/잔액부족 유발, 마지막에 방어 카운터 출력
+# 운영자 지급 + job 생성 + 중복/잔액부족 유발, 마지막에 방어 카운터 출력
 ./deploy/observability/scripts/smoke.sh
 ```
+
+### 누구로 요청하나 (step9 이후)
+
+앱은 `local` 프로필로 뜬다(`SPRING_PROFILES_ACTIVE: local`). 그래서 구글 로그인 없이 **개발 로그인 헤더**
+하나로 신원을 댈 수 있다. 허용 목록은 `application-local.yml` 의 두 계정이다.
+
+| 헤더 | 누구 | 쓰는 곳 |
+|---|---|---|
+| `X-Dev-User: dev@local.test` | 일반 사용자. seed 가 넣은 id=1 행을 이메일로 찾아 들어온다 | job 생성, 잔액·목록 조회 |
+| `X-Dev-User: admin@local.test` | 운영자(ROLE_ADMIN). 첫 요청 때 새 행(id=2)이 생긴다 | 지급 `POST /api/admin/users/1/grants` |
+
+결제 없는 자기 충전 API 는 step9-C 에서 없어졌다. 크레딧은 운영자 지급으로만 생긴다(1회 상한 1,000,000).
+헤더 요청은 CSRF 검사에서 빠지므로 curl 에 토큰이 필요 없다.
+
+```
+curl -X POST http://localhost:8080/api/admin/users/1/grants \
+  -H 'X-Dev-User: admin@local.test' -H 'Content-Type: application/json' \
+  -d '{"idemKey":"grant-1","amount":10000}'
+curl http://localhost:8080/api/users/me/balance -H 'X-Dev-User: dev@local.test'
+```
+
+**속도 제한을 풀어 둔다.** 앱의 job 접수 속도 제한은 사용자별 분당 10 건이 기본이다(step9-D). 시나리오는 한
+사용자로 job 을 몰아 만들고 06 은 100 건을 동시에 던지므로, 그대로 두면 429 가 멱등·잔액 방어보다 먼저 받아
+step7 에서 잰 지표가 다른 이유로 움직인다. compose 는 `APP_RATELIMIT_JOBCREATE_PERMINUTE` 를 100000 으로 준다
+(속성 `app.rate-limit.job-create.per-minute` 의 환경변수 이름 — 완화 바인딩에서 대시가 빠진다). 속도 제한
+자체를 보고 싶으면 낮춰서 올린다.
+
+```
+APP_RATELIMIT_JOBCREATE_PERMINUTE=2 docker compose -f deploy/observability/docker-compose.yml up -d --force-recreate app
+```
+
+방어 지표에는 `point="rate_limit"` 이 생겼다. 대시보드의 방어 패널은 `sum by (point, outcome)` 이라 새 값이 그대로
+보이고, 이 스택에서는 `rejected` 가 0 에 머문다.
 
 ## 접속
 

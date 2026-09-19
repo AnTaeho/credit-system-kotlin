@@ -8,7 +8,20 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD}
   flyway:
     enabled: true
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
   jpa:
     hibernate:
       # 운영에서 Hibernate 가 스키마를 건드리는 일은 없어야 한다. 명시해서 못 박는다.
       ddl-auto: validate
+
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true

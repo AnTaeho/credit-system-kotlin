@@ -1,0 +1,20 @@
+# 로컬 개발용. docker-compose 의 app 서비스와 `SPRING_PROFILES_ACTIVE=local ./gradlew bootRun` 이 쓴다.
+#
+# 구글 자격증명 없이 API 를 두드리려고 개발 로그인을 켠다.
+#   curl -H 'X-Dev-User: dev@local.test' localhost:8080/api/users/me/balance
+# 허용 목록 밖 이메일은 401 이다. 이 프로필을 prod 와 함께 켜면 기동이 거부된다.
+
+app:
+  auth:
+    allowed-emails:
+      - dev@local.test
+      - admin@local.test
+    admin-emails:
+      - admin@local.test
+    dev-login:
+      enabled: true
+
+# 액추에이터는 관리 포트가 따로일 때만 인증 없이 열린다(SecurityConfig). 로컬도 운영과 같은 모양으로 둔다.
+management:
+  server:
+    port: 8081

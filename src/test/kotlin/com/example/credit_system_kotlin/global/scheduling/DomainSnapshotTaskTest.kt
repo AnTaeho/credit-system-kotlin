@@ -6,10 +6,10 @@ import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
-import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
 import com.example.credit_system_kotlin.support.FixedMutableClock
 import com.example.credit_system_kotlin.support.RecordingEventPublisher
+import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.any
@@ -25,7 +25,7 @@ import java.time.Instant
 @DataJpaTest
 class DomainSnapshotTaskTest @Autowired constructor(
     private val jobRepository: JobRepository,
-    private val organizationRepository: OrganizationRepository,
+    private val userRepository: UserRepository,
     private val ledgerRepository: LedgerRepository
 ) {
 
@@ -33,7 +33,7 @@ class DomainSnapshotTaskTest @Autowired constructor(
     private val clock = FixedMutableClock(fixedInstant)
     private val eventPublisher = RecordingEventPublisher()
 
-    private val task = DomainSnapshotTask(jobRepository, organizationRepository, eventPublisher, clock)
+    private val task = DomainSnapshotTask(jobRepository, userRepository, eventPublisher, clock)
 
     @Test
     fun `job 이 없으면 모든 값이 0이고 가장 오래된 미결 나이도 0이다`() {
@@ -43,7 +43,7 @@ class DomainSnapshotTaskTest @Autowired constructor(
         assertThat(snapshot.outstandingHoldCount).isZero()
         assertThat(snapshot.outstandingHoldAmount).isZero()
         assertThat(snapshot.oldestPendingAgeSeconds).isZero()
-        assertThat(snapshot.negativeBalanceOrgs).isZero()
+        assertThat(snapshot.negativeBalanceUsers).isZero()
         assertThat(snapshot.jobsWithoutHold).isZero()
         assertThat(snapshot.unsettledTerminalJobs).isZero()
     }
@@ -87,15 +87,15 @@ class DomainSnapshotTaskTest @Autowired constructor(
     }
 
     @Test
-    fun `잔액이 음수인 조직을 센다`() {
-        organizationRepository.saveAndFlush(Organization("healthy", 1000L))
-        val broken = organizationRepository.saveAndFlush(Organization("broken", 1000L))
+    fun `잔액이 음수인 사용자를 센다`() {
+        userRepository.saveAndFlush(User("healthy", 1000L))
+        val broken = userRepository.saveAndFlush(User("broken", 1000L))
         ReflectionTestUtils.setField(broken, "balance", -50L)
-        organizationRepository.saveAndFlush(broken)
+        userRepository.saveAndFlush(broken)
 
         task.takeSnapshot()
 
-        assertThat(publishedSnapshot().negativeBalanceOrgs).isEqualTo(1)
+        assertThat(publishedSnapshot().negativeBalanceUsers).isEqualTo(1)
     }
 
     @Test
@@ -144,7 +144,7 @@ class DomainSnapshotTaskTest @Autowired constructor(
         whenever(brokenJobRepository.countJobsWithoutHoldEntry())
             .thenThrow(IllegalStateException("DB 연결 끊김"))
         val publisher = RecordingEventPublisher()
-        val brokenTask = DomainSnapshotTask(brokenJobRepository, organizationRepository, publisher, clock)
+        val brokenTask = DomainSnapshotTask(brokenJobRepository, userRepository, publisher, clock)
 
         brokenTask.takeSnapshot()
 

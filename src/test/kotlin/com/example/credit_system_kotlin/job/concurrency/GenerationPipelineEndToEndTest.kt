@@ -4,8 +4,8 @@ import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.HoldService
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
-import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
@@ -29,7 +29,7 @@ class GenerationPipelineEndToEndTest @Autowired constructor(
     private val holdService: HoldService,
     private val jobRepository: JobRepository,
     private val ledgerRepository: LedgerRepository,
-    private val organizationRepository: OrganizationRepository
+    private val userRepository: UserRepository
 ) {
 
     companion object {
@@ -42,10 +42,10 @@ class GenerationPipelineEndToEndTest @Autowired constructor(
 
     @Test
     fun `hold 요청부터 컨펌까지 전체 파이프라인이 실제로 동작한다`() {
-        val organization = organizationRepository.save(Organization("acme", 1000L))
+        val user = userRepository.save(User("acme", 1000L))
 
         val result = holdService.requestGeneration(
-            organization.persistedId, "e2e-key", "a cat wearing sunglasses"
+            user.persistedId, "e2e-key", "a cat wearing sunglasses"
         )
 
         await().atMost(20, TimeUnit.SECONDS).untilAsserted {
@@ -54,9 +54,9 @@ class GenerationPipelineEndToEndTest @Autowired constructor(
             assertThat(job.resultUrl).isNotNull()
         }
 
-        val found = organizationRepository.findById(organization.persistedId).orElseThrow()
+        val found = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(found.balance).isEqualTo(900L)
-        assertThat(ledgerRepository.findByOrganizationIdOrderByIdDesc(organization.persistedId))
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId))
             .extracting<String> { it.type.name }
             .contains("HOLD", "CONFIRM")
     }

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('운영자 지급')}"></head>
+<body>
+<header th:replace="~{fragments :: topbar}"></header>
+<main>
+  <h2>운영자 지급</h2>
+  <p class="muted">결제 충전이 붙기 전까지 크레딧을 만드는 유일한 길이다. 같은 제출의 재시도는 한 번만 반영된다.</p>
+  <p>내 userId: <strong id="my-user-id" th:text="${userId}">1</strong></p>
+  <form id="grant-form" novalidate>
+    <label for="grant-user-id">대상 userId</label>
+    <input id="grant-user-id" name="userId" type="number" min="1" step="1" required th:value="${userId}">
+    <label for="grant-amount">금액</label>
+    <input id="grant-amount" name="amount" type="number" min="1" step="1" required>
+    <button type="submit">지급</button>
+  </form>
+  <p id="grant-message" class="message" role="status"></p>
+</main>
+<script th:src="@{/js/admin.js}" defer></script>
+</body>
+</html>

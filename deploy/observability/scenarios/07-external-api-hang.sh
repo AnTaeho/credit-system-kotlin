@@ -15,7 +15,7 @@ restart_app_with APP_STUB_MIN_DELAY_MILLIS=600000 APP_STUB_MAX_DELAY_MILLIS=6000
 reset_clock
 mark "스텁 지연 600초로 재기동 (실패율은 0.3 그대로지만 실패 판정도 지연 뒤에 난다)"
 
-charge 10000
+grant 10000
 mark "job 3건 생성"
 create_jobs 3
 JOBS_AT="$(date +%s)"

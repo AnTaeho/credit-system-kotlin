@@ -14,14 +14,14 @@ import java.time.Instant
 @Table(
     name = "idempotency_keys",
     uniqueConstraints = [
-        UniqueConstraint(name = "uk_idempotency_org_key", columnNames = ["organizationId", "idemKey"])
+        UniqueConstraint(name = "uk_idempotency_user_key", columnNames = ["userId", "idemKey"])
     ],
     indexes = [Index(name = "idx_idem_created_at", columnList = "createdAt")]
 )
 class IdempotencyKey(
 
     @Column(nullable = false)
-    val organizationId: Long,
+    val userId: Long,
 
     @Column(nullable = false, length = 100)
     val idemKey: String

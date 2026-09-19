@@ -3,7 +3,7 @@ package com.example.credit_system_kotlin.global.scheduling
 import com.example.credit_system_kotlin.global.event.DomainSnapshotTaken
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.ApplicationEventPublisher
@@ -28,7 +28,7 @@ private val log = LoggerFactory.getLogger(DomainSnapshotTask::class.java)
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class DomainSnapshotTask(
     private val jobRepository: JobRepository,
-    private val organizationRepository: OrganizationRepository,
+    private val userRepository: UserRepository,
     private val eventPublisher: ApplicationEventPublisher,
     private val clock: Clock
 ) {
@@ -43,7 +43,7 @@ class DomainSnapshotTask(
             val outstandingHoldCount = jobRepository.countByStatusNotIn(PENDING_EXCLUDED_STATUSES)
             val outstandingHoldAmount = jobRepository.sumHoldAmountByStatusNotIn(PENDING_EXCLUDED_STATUSES)
             val oldestCreatedAt = jobRepository.findOldestCreatedAtByStatusNotIn(PENDING_EXCLUDED_STATUSES)
-            val negativeBalanceOrgs = organizationRepository.countByBalanceLessThan(0L)
+            val negativeBalanceUsers = userRepository.countByBalanceLessThan(0L)
             val jobsWithoutHold = jobRepository.countJobsWithoutHoldEntry()
             val unsettledTerminalJobs = jobRepository.countUnsettledTerminalJobs()
 
@@ -56,17 +56,17 @@ class DomainSnapshotTask(
 
             log.info(
                 "도메인 스냅샷 완료: outstandingHoldCount={}, outstandingHoldAmount={}, " +
-                    "oldestPendingAgeSeconds={}, negativeBalanceOrgs={}, jobsWithoutHold={}, " +
+                    "oldestPendingAgeSeconds={}, negativeBalanceUsers={}, jobsWithoutHold={}, " +
                     "unsettledTerminalJobs={}",
                 outstandingHoldCount, outstandingHoldAmount, oldestPendingAgeSeconds,
-                negativeBalanceOrgs, jobsWithoutHold, unsettledTerminalJobs
+                negativeBalanceUsers, jobsWithoutHold, unsettledTerminalJobs
             )
             eventPublisher.publishEvent(
                 DomainSnapshotTaken(
                     outstandingHoldCount = outstandingHoldCount,
                     outstandingHoldAmount = outstandingHoldAmount,
                     oldestPendingAgeSeconds = oldestPendingAgeSeconds,
-                    negativeBalanceOrgs = negativeBalanceOrgs,
+                    negativeBalanceUsers = negativeBalanceUsers,
                     jobsWithoutHold = jobsWithoutHold,
                     unsettledTerminalJobs = unsettledTerminalJobs,
                     duration = Duration.between(startedAt, takenAt),

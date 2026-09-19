@@ -15,12 +15,32 @@ spring:
     hibernate:
       ddl-auto: create-drop
     open-in-view: false
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: test-client-id
+            client-secret: test-client-secret
 
 app:
+  auth:
+    allowed-emails:
+      - user@test.local
+      - admin@test.local
+    admin-emails:
+      - admin@test.local
+    # 컨트롤러 테스트는 X-Dev-User 헤더로 인증한다.
+    dev-login:
+      enabled: true
   scheduling:
     enabled: false
   idempotency:
     retention-days: 7
+  # 기존 테스트가 속도 제한에 걸리지 않게 넉넉히 둔다. 속도 제한 테스트는 자기 값을 쓴다.
+  rate-limit:
+    job-create:
+      per-minute: 10000
   worker:
     enabled: false
     batch-size: 3

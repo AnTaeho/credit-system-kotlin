@@ -31,8 +31,8 @@ data class DomainSnapshotTaken(
      * 재시도가 나이를 0 으로 리셋해 버려서, 영원히 재시도만 도는 job 을 놓친다.
      */
     val oldestPendingAgeSeconds: Long,
-    /** balance < 0 인 조직 수. 불변식이라 0 이 아니면 즉시 사고다. */
-    val negativeBalanceOrgs: Long,
+    /** balance < 0 인 사용자 수. 불변식이라 0 이 아니면 즉시 사고다. */
+    val negativeBalanceUsers: Long,
     /** HOLD 원장이 없는 job 수. 돈을 묶었다는 기록 없이 job 이 생겼다는 뜻이라 0 이어야 한다. */
     val jobsWithoutHold: Long,
     /** 종결(COMPLETED/REFUNDED)됐는데 정산 원장(CONFIRM/REFUND)이 없는 job 수. 0 이어야 한다. */

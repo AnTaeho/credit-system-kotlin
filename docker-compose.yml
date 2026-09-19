@@ -58,6 +58,8 @@ services:
       SPRING_DATASOURCE_USERNAME: credit
       SPRING_DATASOURCE_PASSWORD: credit
       SPRING_DATA_REDIS_HOST: redis
+      # 개발 로그인(X-Dev-User)과 예시 허용 목록. application-local.yml 참고.
+      SPRING_PROFILES_ACTIVE: local
       # 관리 포트를 애플리케이션 포트에서 떼어낸다(step7 4단계와 같은 경계).
       MANAGEMENT_SERVER_PORT: 8081
     ports:

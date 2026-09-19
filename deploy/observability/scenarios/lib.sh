@@ -15,7 +15,12 @@ DC="docker compose -f ${COMPOSE_FILE}"
 
 API="${API:-http://localhost:8080}"
 PROM="${PROM:-http://localhost:9090}"
-ORG_HEADER="X-Organization-Id: 1"
+# 신원은 개발 로그인 헤더로 댄다(step9-B, local 프로필 전용 — docker-compose.yml 의 app 서비스 참고).
+# dev@local.test 는 seed.sh 가 id=1 로 넣어 둔 사용자다. 시나리오 SQL 은 전부 users.id=1 을 가정한다.
+# 크레딧은 결제가 없으므로 운영자 지급으로만 생긴다(step9-C). admin@local.test 가 운영자다.
+USER_HEADER="X-Dev-User: dev@local.test"
+ADMIN_HEADER="X-Dev-User: admin@local.test"
+USER_ID=1
 
 # ── 출력 ─────────────────────────────────────────────────────────────────────
 say()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
@@ -174,21 +179,22 @@ job_status() { mysql_q "SELECT status, COUNT(*) FROM jobs GROUP BY status;" | tr
 
 # ── 트래픽 ───────────────────────────────────────────────────────────────────
 STAMP=""
-charge() {
+# grant N — 운영자가 사용자 id=1 에게 N 크레딧을 지급한다(1회 상한 1,000,000).
+grant() {
   STAMP="$(date +%s)-$RANDOM"
-  curl -s -o /dev/null -X POST "${API}/api/organizations/me/charge" -H "$ORG_HEADER" \
-    -H 'Content-Type: application/json' -d "{\"idemKey\":\"charge-${STAMP}\",\"amount\":${1:-10000}}"
-  note "충전 ${1:-10000}, 잔액=$(balance)"
+  curl -s -o /dev/null -X POST "${API}/api/admin/users/${USER_ID}/grants" -H "$ADMIN_HEADER" \
+    -H 'Content-Type: application/json' -d "{\"idemKey\":\"grant-${STAMP}\",\"amount\":${1:-10000}}"
+  note "지급 ${1:-10000}, 잔액=$(balance)"
 }
 
-balance() { curl -s "${API}/api/organizations/me/balance" -H "$ORG_HEADER"; }
+balance() { curl -s "${API}/api/users/me/balance" -H "$USER_HEADER"; }
 
 # create_jobs N — job N 건 생성. 충전은 호출자가 미리 해 둔다.
 create_jobs() {
   local n="$1" i key
   key="$(date +%s)-$RANDOM"
   for i in $(seq 1 "$n"); do
-    curl -s -o /dev/null -X POST "${API}/api/jobs" -H "$ORG_HEADER" \
+    curl -s -o /dev/null -X POST "${API}/api/jobs" -H "$USER_HEADER" \
       -H 'Content-Type: application/json' -d "{\"idemKey\":\"job-${key}-${i}\",\"prompt\":\"fault injection ${i}\"}"
   done
   note "job ${n}건 생성 ($(tstamp))"

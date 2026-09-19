@@ -6,8 +6,8 @@ import com.example.credit_system_kotlin.global.exception.InsufficientBalanceExce
 import com.example.credit_system_kotlin.job.concurrency.SharedContainers
 import com.example.credit_system_kotlin.job.concurrency.runConcurrently
 import com.example.credit_system_kotlin.job.service.HoldService
-import com.example.credit_system_kotlin.organization.domain.Organization
-import com.example.credit_system_kotlin.organization.repository.OrganizationRepository
+import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -29,7 +29,7 @@ import org.springframework.test.context.DynamicPropertySource
 @SpringBootTest
 class DefenseMetricsConcurrencyTest @Autowired constructor(
     private val holdService: HoldService,
-    private val organizationRepository: OrganizationRepository,
+    private val userRepository: UserRepository,
     private val globalExceptionHandler: GlobalExceptionHandler,
     private val registry: MeterRegistry
 ) {
@@ -61,12 +61,12 @@ class DefenseMetricsConcurrencyTest @Autowired constructor(
     fun `잔액이 일부만 감당하면 applied와 rejected의 합이 전체 시도 수가 된다`() {
         val threadCount = 10
         val affordable = 4
-        val organization = organizationRepository.save(Organization("acme", COST * affordable))
+        val user = userRepository.save(User("acme", COST * affordable))
         val before = snapshot("hold_balance" to "applied", "hold_balance" to "rejected")
 
         runConcurrently(threadCount) { idx ->
             try {
-                holdService.requestGeneration(organization.persistedId, "defense-key-$idx", "cat")
+                holdService.requestGeneration(user.persistedId, "defense-key-$idx", "cat")
             } catch (e: InsufficientBalanceException) {
                 // 조건부 UPDATE 가 0행을 돌려준 정상 경로다.
             }
@@ -79,7 +79,7 @@ class DefenseMetricsConcurrencyTest @Autowired constructor(
         assertThat(applied + rejected).isEqualTo(threadCount.toDouble())
 
         // 정확히 감당 가능한 만큼만 빠졌다. 카운터와 실제 돈이 같은 이야기를 해야 한다.
-        val found = organizationRepository.findById(organization.persistedId).orElseThrow()
+        val found = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(found.balance).isZero()
     }
 
@@ -91,7 +91,7 @@ class DefenseMetricsConcurrencyTest @Autowired constructor(
     @Test
     fun `같은 idemKey로 동시 요청하면 한 건만 통과하고 나머지는 멱등키가 막는다`() {
         val threadCount = 10
-        val organization = organizationRepository.save(Organization("acme", 10_000L))
+        val user = userRepository.save(User("acme", 10_000L))
         val before = snapshot(
             "hold_balance" to "applied",
             "idem_key" to "app_hit",
@@ -100,7 +100,7 @@ class DefenseMetricsConcurrencyTest @Autowired constructor(
 
         runConcurrently(threadCount) {
             try {
-                holdService.requestGeneration(organization.persistedId, "defense-shared-key", "cat")
+                holdService.requestGeneration(user.persistedId, "defense-shared-key", "cat")
             } catch (e: DuplicateRequestInProgressException) {
                 // 선점한 쪽이 아직 jobId를 붙이기 전에 들어온 요청. 1차 방어가 잡은 정상 경로다.
             } catch (e: DataIntegrityViolationException) {
@@ -113,7 +113,7 @@ class DefenseMetricsConcurrencyTest @Autowired constructor(
         assertThat(appHit + dbUnique).isEqualTo((threadCount - 1).toDouble())
         assertThat(delta(before, "hold_balance", "applied")).isEqualTo(1.0)
 
-        val found = organizationRepository.findById(organization.persistedId).orElseThrow()
+        val found = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(found.balance).isEqualTo(10_000L - COST)
     }
 }

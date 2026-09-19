@@ -62,4 +62,20 @@ class LedgerEntryTest {
         assertThatThrownBy { LedgerEntry.charge(1L, "   ", 500L) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `adminGrant는 CHARGE처럼 양수 금액에 jobId가 없고 idemKey가 채워진다`() {
+        val entry = LedgerEntry.adminGrant(1L, "grant-key-1", 500L)
+
+        assertThat(entry.type).isEqualTo(LedgerType.ADMIN_GRANT)
+        assertThat(entry.amount).isEqualTo(500L)
+        assertThat(entry.jobId).isNull()
+        assertThat(entry.idemKey).isEqualTo("grant-key-1")
+    }
+
+    @Test
+    fun `adminGrant에 idemKey가 공백이면 예외가 발생한다`() {
+        assertThatThrownBy { LedgerEntry.adminGrant(1L, "   ", 500L) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 }

@@ -10,7 +10,7 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 fresh_stack
-charge 10000
+grant 10000
 
 # ─────────────────────────────── A. ZSET 소실 ────────────────────────────────
 say "A. heartbeat ZSET 소실 — 백스톱만 남는다"
@@ -64,7 +64,7 @@ reset_clock
 restart_app_with APP_WORKER_ENABLED=false
 mark "워커 정지 상태로 재기동 (회수 스케줄러만 남긴다). 회수 카운터 리셋"
 
-charge 10000
+grant 10000
 create_jobs 3
 sleep 3
 mysql_q "UPDATE jobs SET status='PROCESSING', updated_at = NOW(6) - INTERVAL 120 SECOND WHERE status='HOLDING';" >/dev/null

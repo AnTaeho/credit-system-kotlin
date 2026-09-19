@@ -12,11 +12,17 @@ import jakarta.persistence.Index
 import jakarta.persistence.Table
 
 @Entity
-@Table(name = "jobs", indexes = [Index(name = "idx_jobs_status_id", columnList = "status, id")])
+@Table(
+    name = "jobs",
+    indexes = [
+        Index(name = "idx_jobs_status_id", columnList = "status, id"),
+        Index(name = "idx_jobs_user_id", columnList = "userId, id")
+    ]
+)
 class Job private constructor(
 
     @Column(nullable = false)
-    val organizationId: Long,
+    val userId: Long,
 
     @Column(nullable = false)
     val holdAmount: Long,
@@ -47,7 +53,7 @@ class Job private constructor(
         protected set
 
     companion object {
-        fun hold(organizationId: Long, holdAmount: Long, prompt: String): Job =
-            Job(organizationId, holdAmount, prompt)
+        fun hold(userId: Long, holdAmount: Long, prompt: String): Job =
+            Job(userId, holdAmount, prompt)
     }
 }

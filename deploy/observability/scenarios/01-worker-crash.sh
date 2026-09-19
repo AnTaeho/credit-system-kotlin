@@ -8,7 +8,7 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 fresh_stack
-charge 10000
+grant 10000
 
 mark "job 6건 생성"
 create_jobs 6

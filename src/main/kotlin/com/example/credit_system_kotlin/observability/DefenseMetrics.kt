@@ -97,7 +97,8 @@ class DefenseMetrics(
             DefensePoint.CONFIRM to setOf(DefenseOutcome.APPLIED, DefenseOutcome.STALE),
             DefensePoint.MARK_FAILED to setOf(DefenseOutcome.APPLIED, DefenseOutcome.STALE),
             DefensePoint.RETRY_CLAIM to setOf(DefenseOutcome.APPLIED, DefenseOutcome.LOST),
-            DefensePoint.FINAL_REFUND to setOf(DefenseOutcome.APPLIED, DefenseOutcome.RACED)
+            DefensePoint.FINAL_REFUND to setOf(DefenseOutcome.APPLIED, DefenseOutcome.RACED),
+            DefensePoint.RATE_LIMIT to setOf(DefenseOutcome.APPLIED, DefenseOutcome.REJECTED)
         )
     }
 }

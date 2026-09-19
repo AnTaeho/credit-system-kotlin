@@ -7,11 +7,13 @@ import org.hibernate.exception.ConstraintViolationException
 import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 private val log = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
 
@@ -28,6 +30,13 @@ class GlobalExceptionHandler(
     fun handleDuplicateInProgress(e: DuplicateRequestInProgressException): ResponseEntity<ErrorResponse> =
         conflict("DUPLICATE_IN_PROGRESS", e.message)
 
+    /** 거절 로그는 속도 제한기가 이미 남겼다(연속 거절은 첫 번만 warn). 여기서 또 찍지 않는다. */
+    @ExceptionHandler(RateLimitedException::class)
+    fun handleRateLimited(e: RateLimitedException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header(HttpHeaders.RETRY_AFTER, e.retryAfterSeconds.toString())
+            .body(ErrorResponse("RATE_LIMITED", e.message))
+
     @ExceptionHandler(InvalidRequestException::class)
     fun handleInvalidRequest(e: InvalidRequestException): ResponseEntity<ErrorResponse> =
         ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", e.message))
@@ -37,6 +46,11 @@ class GlobalExceptionHandler(
         log.info("요청 본문 해석 실패: {}", e.message)
         return ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", "요청 본문의 형식이 올바르지 않습니다."))
     }
+
+    /** 경로·쿼리 파라미터 타입이 안 맞는 요청(예: `/api/jobs/abc`)도 다른 400 과 같은 본문으로 돌려준다. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun handleTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", "${e.name} 값의 형식이 올바르지 않습니다."))
 
     @ExceptionHandler(DataIntegrityViolationException::class)
     fun handleDataIntegrityViolation(e: DataIntegrityViolationException): ResponseEntity<ErrorResponse> {
@@ -58,11 +72,18 @@ class GlobalExceptionHandler(
             .firstOrNull()
             ?.kind == ConstraintViolationException.ConstraintKind.UNIQUE
 
-    @ExceptionHandler(OrganizationNotFoundException::class)
-    fun handleOrganizationNotFound(e: OrganizationNotFoundException): ResponseEntity<ErrorResponse> {
-        log.info("business exception: code=ORGANIZATION_NOT_FOUND, message={}", e.message)
+    @ExceptionHandler(UserNotFoundException::class)
+    fun handleUserNotFound(e: UserNotFoundException): ResponseEntity<ErrorResponse> {
+        log.info("business exception: code=USER_NOT_FOUND, message={}", e.message)
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
-            .body(ErrorResponse("ORGANIZATION_NOT_FOUND", e.message))
+            .body(ErrorResponse("USER_NOT_FOUND", e.message))
+    }
+
+    @ExceptionHandler(JobNotFoundException::class)
+    fun handleJobNotFound(e: JobNotFoundException): ResponseEntity<ErrorResponse> {
+        log.info("business exception: code=JOB_NOT_FOUND, message={}", e.message)
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ErrorResponse("JOB_NOT_FOUND", e.message))
     }
 
     private fun conflict(code: String, message: String): ResponseEntity<ErrorResponse> {

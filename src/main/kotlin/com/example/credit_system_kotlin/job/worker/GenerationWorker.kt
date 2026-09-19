@@ -35,10 +35,11 @@ class GenerationWorker(
     /**
      * 빈 슬롯 수만큼만 읽고 선점한다.
      *
-     * 예전에는 `batchSize` 만큼 읽어 전부 선점한 뒤 executor 에 밀어 넣었다. 풀이 꽉 차 있으면
-     * `execute` 가 거부하고 [rollbackToHolding] 이 되돌리는데, 다음 폴링에서 같은 job 을 다시
-     * 선점하므로 포화 구간 내내 "선점 → 거부 → 롤백" 이 매 주기 반복됐다. DB UPDATE 두 번이
-     * 헛돌고, 그 헛선점이 전부 `worker_claim/applied` 로 세어져 카운터를 처리량으로 읽을 수 없었다.
+     * 예전에는 빈 슬롯을 세지 않고 `batchSize` 만큼 읽은 뒤 한 장씩 선점하고 executor 에 넘겼다.
+     * 풀이 꽉 차 있으면 첫 장을 선점한 직후 `execute` 가 거부하고 [rollbackToHolding] 이 되돌린 뒤
+     * 그 주기를 끝냈는데, 다음 폴링에서 같은 job 을 다시 선점하므로 포화 구간 내내 "선점 → 거부 →
+     * 롤백" 이 매 주기 한 번씩 반복됐다. DB UPDATE 두 번이 헛돌고, 그 헛선점이 전부
+     * `worker_claim/applied` 로 세어져 카운터를 처리량으로 읽을 수 없었다.
      *
      * **경쟁 조건이 없는 이유.** 이 executor 에 task 를 넣는 스레드는 `@Scheduled` 디스패처
      * 하나뿐이다(`fixedDelay` 라 이전 실행이 끝나야 다음이 잡히므로 디스패처가 둘 겹치지도 않는다).

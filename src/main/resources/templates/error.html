@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <title>오류 · credit</title>
+  <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+<main class="narrow">
+  <h1>오류가 발생했습니다</h1>
+  <p>상태 <span th:text="${status}">500</span></p>
+  <p><a th:href="@{/}">홈으로</a></p>
+</main>
+</body>
+</html>

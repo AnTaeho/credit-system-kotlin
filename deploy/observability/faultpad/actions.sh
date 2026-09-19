@@ -34,7 +34,7 @@ action_state() {
   jobs=""; balance=""; pending_cnt=""; pending_age=""
   if [ "$mysql_up" = true ]; then
     jobs="$(job_status)"
-    balance="$(mysql_q 'SELECT balance FROM organizations WHERE id=1;')"
+    balance="$(mysql_q 'SELECT balance FROM users WHERE id=1;')"
     # 게이지와 나란히 놓고 볼 DB 쪽 진실. 04 의 "0 에 얼어붙은 게이지"는 이 값과 비교해야 보인다.
     pending_cnt="$(mysql_q "SELECT COUNT(*) FROM jobs WHERE status IN ('HOLDING','PROCESSING','FAILED');")"
     pending_age="$(mysql_q "SELECT COALESCE(TIMESTAMPDIFF(SECOND, MIN(created_at), NOW(6)), 0) FROM jobs WHERE status IN ('HOLDING','PROCESSING','FAILED');")"
@@ -122,7 +122,7 @@ action_overdraw() {
   key="overdraw-$(date +%s)-$RANDOM"
   say "잔액을 넘기는 job 요청 ${n}건 (현재 잔액 $(balance))"
   for i in $(seq 1 "$n"); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${API}/api/jobs" -H "$ORG_HEADER" \
+    code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${API}/api/jobs" -H "$USER_HEADER" \
       -H 'Content-Type: application/json' -d "{\"idemKey\":\"${key}-${i}\",\"prompt\":\"overdraw ${i}\"}")"
     note "  요청 ${i} → HTTP ${code}"
   done
@@ -185,7 +185,7 @@ action_restart_app() {
 # 원복 정보를 셸 변수에 들고 있을 수가 없다.
 save_good_balance() {
   local b
-  b="$(mysql_q 'SELECT balance FROM organizations WHERE id=1;')"
+  b="$(mysql_q 'SELECT balance FROM users WHERE id=1;')"
   if [ -n "$b" ] && [ ! -f "${STATE_DIR}/balance.txt" ]; then
     echo "$b" > "${STATE_DIR}/balance.txt"
     note "훼손 전 balance=${b} 를 .state/balance.txt 에 저장했다"
@@ -197,15 +197,15 @@ save_good_balance() {
 action_corrupt_balance_minus_one() {
   say "05 (a) — balance = balance - 1"
   save_good_balance
-  mysql_q "UPDATE organizations SET balance = balance - 1 WHERE id=1;" >/dev/null
+  mysql_q "UPDATE users SET balance = balance - 1 WHERE id=1;" >/dev/null
   note "1 크레딧을 원장 없이 증발시켰다. 잔액 = 최초 잔액 + 원장 합계 가 깨졌다"
-  note "지금 balance=$(mysql_q 'SELECT balance FROM organizations WHERE id=1;') — 대사 주기 60초"
+  note "지금 balance=$(mysql_q 'SELECT balance FROM users WHERE id=1;') — 대사 주기 60초"
 }
 
 action_corrupt_balance_negative() {
   say "05 (b) — balance = -1"
   save_good_balance
-  mysql_q "UPDATE organizations SET balance = -1 WHERE id=1;" >/dev/null
+  mysql_q "UPDATE users SET balance = -1 WHERE id=1;" >/dev/null
   note "조건부 UPDATE 의 잔액 가드가 뚫린 것과 같은 상태를 만들었다 — 스냅샷 주기 15초"
 }
 
@@ -218,7 +218,7 @@ action_delete_hold_row() {
     return 1
   fi
   amt="$(mysql_q "SELECT amount FROM ledger_entries WHERE type='HOLD' AND job_id=${victim};")"
-  org="$(mysql_q "SELECT organization_id FROM ledger_entries WHERE type='HOLD' AND job_id=${victim};")"
+  org="$(mysql_q "SELECT user_id FROM ledger_entries WHERE type='HOLD' AND job_id=${victim};")"
   mysql_q "DELETE FROM ledger_entries WHERE type='HOLD' AND job_id=${victim};" >/dev/null
   printf '%s\t%s\t%s\n' "$org" "$victim" "$amt" >> "${STATE_DIR}/deleted_hold.tsv"
   note "jobId=${victim} 의 HOLD 원장(amount=${amt})을 지웠다 — 돈을 안 묶고 처리된 job 이 됐다"
@@ -231,7 +231,7 @@ action_restore_ledger() {
   if [ -f "${STATE_DIR}/deleted_hold.tsv" ]; then
     while IFS=$'\t' read -r org job amt; do
       [ -n "$job" ] || continue
-      mysql_q "INSERT INTO ledger_entries (organization_id, job_id, type, amount, idem_key, created_at)
+      mysql_q "INSERT INTO ledger_entries (user_id, job_id, type, amount, idem_key, created_at)
                VALUES (${org}, ${job}, 'HOLD', ${amt}, NULL, NOW(6));" >/dev/null
       note "HOLD 원장 재삽입: jobId=${job}, amount=${amt}"
     done < "${STATE_DIR}/deleted_hold.tsv"
@@ -244,26 +244,26 @@ action_restore_ledger() {
     rm -f "${STATE_DIR}/balance.txt"
   else
     # 상태 파일이 없으면 등식 자체로 다시 계산한다: 잔액 = 최초 잔액 + 원장 합계.
-    good="$(mysql_q "SELECT o.initial_balance + COALESCE((SELECT SUM(l.amount) FROM ledger_entries l WHERE l.organization_id = o.id), 0) FROM organizations o WHERE o.id=1;")"
+    good="$(mysql_q "SELECT o.initial_balance + COALESCE((SELECT SUM(l.amount) FROM ledger_entries l WHERE l.user_id = o.id), 0) FROM users o WHERE o.id=1;")"
     note "상태 파일이 없어 등식으로 재계산했다: initial_balance + SUM(ledger) = ${good}"
   fi
-  [ -n "$good" ] && mysql_q "UPDATE organizations SET balance = ${good} WHERE id=1;" >/dev/null
-  note "복구 완료. balance=$(mysql_q 'SELECT balance FROM organizations WHERE id=1;')"
+  [ -n "$good" ] && mysql_q "UPDATE users SET balance = ${good} WHERE id=1;" >/dev/null
+  note "복구 완료. balance=$(mysql_q 'SELECT balance FROM users WHERE id=1;')"
   note "불변식은 다음 스냅샷(15초), 대사 불일치는 다음 대사(60초)에 0 으로 돌아온다"
 }
 
 # ── 06 중복 폭풍 ─────────────────────────────────────────────────────────────
 action_duplicate_storm() {
   local n="$1" key before after
-  before="$(mysql_q "SELECT balance FROM organizations WHERE id=1;")"
+  before="$(mysql_q "SELECT balance FROM users WHERE id=1;")"
   key="storm-$(date +%s)-$RANDOM"
   say "06 — 같은 idemKey(${key}) 로 ${n}건 동시 발사"
   reset_clock
   seq 1 "$n" | xargs -P "$n" -I{} curl -s -o /dev/null -w '%{http_code}\n' \
-    -X POST "${API}/api/jobs" -H "$ORG_HEADER" -H 'Content-Type: application/json' \
+    -X POST "${API}/api/jobs" -H "$USER_HEADER" -H 'Content-Type: application/json' \
     -d "{\"idemKey\":\"${key}\",\"prompt\":\"duplicate storm\"}" \
     | sort | uniq -c | sed 's/^/     HTTP /'
-  after="$(mysql_q "SELECT balance FROM organizations WHERE id=1;")"
+  after="$(mysql_q "SELECT balance FROM users WHERE id=1;")"
   mark "잔액 ${before} → ${after} (차이 $(( before - after )))"
   mark "job 행 총 $(mysql_q 'SELECT COUNT(*) FROM jobs;')건, HOLD 원장 총 $(mysql_q "SELECT COUNT(*) FROM ledger_entries WHERE type='HOLD';")건"
   note "카운터가 스크레이프될 때까지 12초 기다린다 (scrape_interval 5초)"
@@ -280,7 +280,7 @@ case "$ACTION" in
   state)                     action_state ;;
   stack_up)                  action_stack_up ;;
   stack_down)                action_stack_down ;;
-  charge)                    charge "${1:-10000}" ;;
+  grant)                     grant "${1:-10000}" ;;
   create_jobs)               say "job ${1:-5}건 생성"; create_jobs "${1:-5}" ;;
   overdraw)                  action_overdraw "${1:-7}" ;;
   smoke)                     action_smoke ;;
