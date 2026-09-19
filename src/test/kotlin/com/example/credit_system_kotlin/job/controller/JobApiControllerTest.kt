@@ -118,6 +118,14 @@ class JobApiControllerTest @Autowired constructor(
     }
 
     @Test
+    fun `숫자가 아닌 job id 는 다른 400 과 같은 본문이다`() {
+        val response = getError("/api/jobs/abc")
+
+        assertThat(response.first).isEqualTo(HttpStatus.BAD_REQUEST)
+        assertThat(response.second?.code).isEqualTo("INVALID_REQUEST")
+    }
+
+    @Test
     fun `단건 조회도 인증 없이 호출하면 401이다`() {
         val job = jobRepository.save(Job.hold(user.persistedId, 100L, "a cat"))
 

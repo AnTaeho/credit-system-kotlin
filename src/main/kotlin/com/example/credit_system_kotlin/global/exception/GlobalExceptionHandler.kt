@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 private val log = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
 
@@ -37,6 +38,11 @@ class GlobalExceptionHandler(
         log.info("요청 본문 해석 실패: {}", e.message)
         return ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", "요청 본문의 형식이 올바르지 않습니다."))
     }
+
+    /** 경로·쿼리 파라미터 타입이 안 맞는 요청(예: `/api/jobs/abc`)도 다른 400 과 같은 본문으로 돌려준다. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun handleTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<ErrorResponse> =
+        ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", "${e.name} 값의 형식이 올바르지 않습니다."))
 
     @ExceptionHandler(DataIntegrityViolationException::class)
     fun handleDataIntegrityViolation(e: DataIntegrityViolationException): ResponseEntity<ErrorResponse> {
