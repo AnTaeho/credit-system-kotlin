@@ -16,4 +16,4 @@ abstract class GenerationException(message: String, cause: Throwable? = null) :
  * "언젠가는 온다"를 기다리지 않고 상한에서 끊는 것이 이 예외의 존재 이유다.
  */
 class GenerationTimeoutException(prompt: String, timeoutMillis: Long) :
-    GenerationException("이미지 생성 타임아웃(${timeoutMillis}ms): prompt=$prompt")
+    GenerationException("이미지 생성 타임아웃(${timeoutMillis}ms): promptChars=${prompt.length}")

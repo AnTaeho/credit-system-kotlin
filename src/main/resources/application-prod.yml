@@ -25,3 +25,12 @@ server:
     session:
       cookie:
         secure: true
+
+logging:
+  # 운영 로그만 JSON 으로 낸다. 로컬·테스트는 사람이 읽는 평문 그대로 둔다 — 개발 중에 한 줄씩
+  # JSON 을 눈으로 파싱하는 것은 순손해다. 별도 인코더 의존성(logstash-logback-encoder 등)은 넣지 않는다.
+  # 부트 자체가 ecs/logstash/gelf 세 형식을 들고 있고, 우리는 ECS 를 쓴다.
+  # MDC 는 ECS 포맷터가 최상위 필드로 펼친다(requestId/jobId/attemptNo 가 각각 JSON 키가 된다).
+  structured:
+    format:
+      console: ecs

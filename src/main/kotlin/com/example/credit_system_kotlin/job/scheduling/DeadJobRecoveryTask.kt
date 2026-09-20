@@ -1,6 +1,7 @@
 package com.example.credit_system_kotlin.job.scheduling
 
 import com.example.credit_system_kotlin.global.config.AppProperties
+import com.example.credit_system_kotlin.global.logging.withJobLogContext
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.heartbeat.HeartbeatState
 import com.example.credit_system_kotlin.heartbeat.JobAttempt
@@ -55,19 +56,26 @@ class DeadJobRecoveryTask(
         }
     }
 
-    /** 한 건의 실패가 같은 주기의 나머지를 막지 않도록 항목 단위로 격리한다. */
+    /**
+     * 한 건의 실패가 같은 주기의 나머지를 막지 않도록 항목 단위로 격리한다.
+     *
+     * 스케줄러 스레드도 풀에서 재사용되므로, 항목 하나를 다루는 동안만 MDC 를 걸고 [withJobLogContext] 가
+     * 되돌린다. 이 경로에는 요청 ID 가 없다 — 회수는 HTTP 요청이 끝난 한참 뒤에 도는 일이다.
+     */
     private fun recoverExpired(attempt: JobAttempt) {
-        try {
-            val updated = jobRepository.failIfProcessing(attempt.jobId, attempt.attemptNo, Instant.now())
-            if (updated == 1) {
-                log.info("heartbeat 만료로 FAILED 전이: jobId={}, attemptNo={}", attempt.jobId, attempt.attemptNo)
-                eventPublisher.publishEvent(
-                    JobRecovered(attempt.jobId, attempt.attemptNo, RecoveryDetector.HEARTBEAT)
-                )
+        withJobLogContext(attempt.jobId, attempt.attemptNo) {
+            try {
+                val updated = jobRepository.failIfProcessing(attempt.jobId, attempt.attemptNo, Instant.now())
+                if (updated == 1) {
+                    log.info("heartbeat 만료로 FAILED 전이: jobId={}, attemptNo={}", attempt.jobId, attempt.attemptNo)
+                    eventPublisher.publishEvent(
+                        JobRecovered(attempt.jobId, attempt.attemptNo, RecoveryDetector.HEARTBEAT)
+                    )
+                }
+                heartbeatRegistry.removeHeartbeat(attempt.jobId, attempt.attemptNo)
+            } catch (e: RuntimeException) {
+                log.warn("heartbeat 만료 job 회수 실패: jobId={}, attemptNo={}", attempt.jobId, attempt.attemptNo, e)
             }
-            heartbeatRegistry.removeHeartbeat(attempt.jobId, attempt.attemptNo)
-        } catch (e: RuntimeException) {
-            log.warn("heartbeat 만료 job 회수 실패: jobId={}, attemptNo={}", attempt.jobId, attempt.attemptNo, e)
         }
     }
 
@@ -96,25 +104,27 @@ class DeadJobRecoveryTask(
      * 회수한다([RecoveryDetector.HARD_CAP]). 근거는 아래 [detectorFor] 주석에 있다.
      */
     private fun recoverStalled(job: Job, hardCapCutoff: Instant) {
-        try {
-            val jobId = job.persistedId
-            val state = heartbeatRegistry.heartbeatState(jobId, job.attemptNo)
-            val detector = detectorFor(state, job.updatedAt.isBefore(hardCapCutoff), jobId, job.attemptNo)
-                ?: return
-            val updated = jobRepository.failIfProcessing(jobId, job.attemptNo, Instant.now())
-            if (updated == 1) {
-                log.info("PROCESSING 정체 job 회수, FAILED 전이: jobId={}, attemptNo={}", jobId, job.attemptNo)
-                eventPublisher.publishEvent(JobRecovered(jobId, job.attemptNo, detector))
-                // 좀비의 종지기는 여기서 지워도 5초 뒤 같은 멤버를 다시 써넣는다. 워커 스레드가
-                // 끝나야 finally 의 stopHeartbeat 가 돌기 때문이다. 즉 ZSET 에 고아 멤버가 남고,
-                // 계속 갱신되므로 findExpiredAttempts 에는 잡히지도 않는다. 무해한 이유는
-                // HeartbeatRegistry.removeHeartbeat 주석 그대로다 — 언젠가 만료돼 다시 집혀도
-                // 그 job 은 이미 PROCESSING 이 아니라 failIfProcessing 이 0행을 돌려준다.
-                // 고아 자체를 없애려면 멈춘 스레드를 깨울 수단이 있어야 한다. 이번 조각 밖이다.
-                heartbeatRegistry.removeHeartbeat(jobId, job.attemptNo)
+        withJobLogContext(job.persistedId, job.attemptNo) {
+            try {
+                val jobId = job.persistedId
+                val state = heartbeatRegistry.heartbeatState(jobId, job.attemptNo)
+                val detector = detectorFor(state, job.updatedAt.isBefore(hardCapCutoff), jobId, job.attemptNo)
+                    ?: return@withJobLogContext
+                val updated = jobRepository.failIfProcessing(jobId, job.attemptNo, Instant.now())
+                if (updated == 1) {
+                    log.info("PROCESSING 정체 job 회수, FAILED 전이: jobId={}, attemptNo={}", jobId, job.attemptNo)
+                    eventPublisher.publishEvent(JobRecovered(jobId, job.attemptNo, detector))
+                    // 좀비의 종지기는 여기서 지워도 5초 뒤 같은 멤버를 다시 써넣는다. 워커 스레드가
+                    // 끝나야 finally 의 stopHeartbeat 가 돌기 때문이다. 즉 ZSET 에 고아 멤버가 남고,
+                    // 계속 갱신되므로 findExpiredAttempts 에는 잡히지도 않는다. 무해한 이유는
+                    // HeartbeatRegistry.removeHeartbeat 주석 그대로다 — 언젠가 만료돼 다시 집혀도
+                    // 그 job 은 이미 PROCESSING 이 아니라 failIfProcessing 이 0행을 돌려준다.
+                    // 고아 자체를 없애려면 멈춘 스레드를 깨울 수단이 있어야 한다. 이번 조각 밖이다.
+                    heartbeatRegistry.removeHeartbeat(jobId, job.attemptNo)
+                }
+            } catch (e: RuntimeException) {
+                log.warn("PROCESSING 정체 job 회수 실패: jobId={}, attemptNo={}", job.id, job.attemptNo, e)
             }
-        } catch (e: RuntimeException) {
-            log.warn("PROCESSING 정체 job 회수 실패: jobId={}, attemptNo={}", job.id, job.attemptNo, e)
         }
     }
 
@@ -172,14 +182,16 @@ class DeadJobRecoveryTask(
 
     /** 한 건의 실패가 같은 주기의 나머지를 막지 않도록 항목 단위로 격리한다. */
     private fun retryOrRefund(job: Job) {
-        try {
-            if (job.attemptNo + 1 < appProperties.generation.maxAttempts) {
-                jobLifecycleService.retry(job)
-            } else {
-                jobLifecycleService.finalRefund(job)
+        withJobLogContext(job.persistedId, job.attemptNo) {
+            try {
+                if (job.attemptNo + 1 < appProperties.generation.maxAttempts) {
+                    jobLifecycleService.retry(job)
+                } else {
+                    jobLifecycleService.finalRefund(job)
+                }
+            } catch (e: RuntimeException) {
+                log.warn("FAILED job 재검토 실패: jobId={}, attemptNo={}", job.id, job.attemptNo, e)
             }
-        } catch (e: RuntimeException) {
-            log.warn("FAILED job 재검토 실패: jobId={}, attemptNo={}", job.id, job.attemptNo, e)
         }
     }
 

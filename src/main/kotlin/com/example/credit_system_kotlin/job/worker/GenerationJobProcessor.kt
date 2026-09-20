@@ -1,5 +1,6 @@
 package com.example.credit_system_kotlin.job.worker
 
+import com.example.credit_system_kotlin.global.logging.withJobLogContext
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.generation.GenerationClient
@@ -18,15 +19,22 @@ class GenerationJobProcessor(
     private val jobLifecycleService: JobLifecycleService
 ) {
 
+    /**
+     * 이 메서드 전체를 [withJobLogContext] 로 감싼다. 여기가 HTTP 밖으로 넘어온 첫 지점이라
+     * 요청 ID 는 없고, 대신 jobId·attemptNo 가 이 스레드의 로그를 묶는 식별자가 된다.
+     * 워커 스레드는 풀에서 재사용되므로 정리를 빠뜨리면 다음 job 의 로그가 이 job 의 것으로 보인다.
+     */
     fun runGeneration(job: Job) {
         val jobId = job.persistedId
         val attemptNo = job.attemptNo
-        val heartbeatFuture = heartbeatRegistry.startHeartbeat(jobId, attemptNo)
-        try {
-            val resultUrl = generateOrMarkFailed(job) ?: return
-            confirm(job, resultUrl)
-        } finally {
-            heartbeatRegistry.stopHeartbeat(jobId, attemptNo, heartbeatFuture)
+        withJobLogContext(jobId, attemptNo) {
+            val heartbeatFuture = heartbeatRegistry.startHeartbeat(jobId, attemptNo)
+            try {
+                val resultUrl = generateOrMarkFailed(job) ?: return@withJobLogContext
+                confirm(job, resultUrl)
+            } finally {
+                heartbeatRegistry.stopHeartbeat(jobId, attemptNo, heartbeatFuture)
+            }
         }
     }
 

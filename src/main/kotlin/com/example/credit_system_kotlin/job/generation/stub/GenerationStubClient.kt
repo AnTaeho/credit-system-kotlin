@@ -49,18 +49,18 @@ class GenerationStubClient(
         if (delayMillis > timeoutMillis) {
             // 상한까지는 실제로 기다린다. "기다리다 끊겼다"와 "즉시 거절"은 다른 사건이다.
             sleep(timeoutMillis)
-            log.info("stub generation timed out: prompt={}, timeoutMillis={}", prompt, timeoutMillis)
+            log.info("stub generation timed out: promptChars={}, timeoutMillis={}", prompt.length, timeoutMillis)
             throw GenerationTimeoutException(prompt, timeoutMillis)
         }
         sleep(delayMillis)
 
         if (ThreadLocalRandom.current().nextDouble() < stub.failureRate) {
-            log.info("stub generation failed: prompt={}", prompt)
+            log.info("stub generation failed: promptChars={}", prompt.length)
             throw StubGenerationException(prompt)
         }
 
         val resultUrl = "https://stub-images.local/${UUID.randomUUID()}.png"
-        log.info("stub generation succeeded: prompt={}, resultUrl={}", prompt, resultUrl)
+        log.info("stub generation succeeded: promptChars={}, resultUrl={}", prompt.length, resultUrl)
         return resultUrl
     }
 
@@ -74,7 +74,7 @@ class GenerationStubClient(
      * 일이 없어야 하므로, 풀려난 호출은 타임아웃으로 끝낸다.
      */
     private fun hangForever(prompt: String, timeoutMillis: Long): Nothing {
-        log.warn("stub generation hanging: prompt={}", prompt)
+        log.warn("stub generation hanging: promptChars={}", prompt.length)
         try {
             hangLatch.await()
         } catch (e: InterruptedException) {

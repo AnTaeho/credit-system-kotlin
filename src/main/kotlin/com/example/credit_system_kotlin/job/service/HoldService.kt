@@ -57,6 +57,10 @@ class HoldService(
         attachIdemKeyToJob(userId, idemKey, jobId)
 
         ledgerRepository.save(LedgerEntry.hold(userId, jobId, cost))
+        // 이 한 줄이 요청 ID 와 jobId 를 잇는 자리다. 아직 HTTP 스레드 위라 MDC 에 requestId 가 있고,
+        // 로그 패턴이 그것을 줄 앞에 붙인다. 여기서 태어난 jobId 를 같은 줄이 찍으므로,
+        // "요청 ID → jobId" 의 연결이 이 줄 하나에 남고 그 뒤 워커·회수 로그는 jobId 로 따라간다.
+        // 요청 ID 자체를 워커까지 들고 가지 않는 이유는 LogContext 문서에 적었다(jobs 컬럼 추가 대비 값어치).
         log.info("hold 완료: userId={}, jobId={}, cost={}", userId, jobId, cost)
         return HoldResult(jobId, false)
     }
