@@ -64,6 +64,11 @@ services:
       MANAGEMENT_SERVER_PORT: 8081
     ports:
       - "8080:8080"
+    # 도커는 SIGTERM 을 보낸 뒤 기본 10초만 기다리고 SIGKILL 한다. 그 기본값으로는 워커
+    # 드레인(GenerationWorkerLifecycle)이 상한 60초(app.processing.timeout-seconds)를
+    # 다 쓰기 전에 잘려, 진행 중이던 job 이 완료가 아니라 회수 경로로 넘어간다.
+    # 60초(드레인) + 웹 graceful shutdown phase 와 부팅 뒷정리 여유 30초 = 90초.
+    stop_grace_period: 90s
     depends_on:
       mysql:
         condition: service_healthy

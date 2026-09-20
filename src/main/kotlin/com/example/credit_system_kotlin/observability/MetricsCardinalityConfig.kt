@@ -55,9 +55,11 @@ class MetricsCardinalityConfig {
     /**
      * `credit.` 접두 미터의 태그 값 개수 상한.
      *
-     * 지금 실제 값은 point 7개, outcome 8개, detector 4개다. 상한 32는 enum 이 지금의 네 배로
-     * 커져도 걸리지 않는 값이고, 그 이상이 관측된다면 enum 이 아니라 자유 문자열이 태그로
-     * 들어갔다는 뜻이다 — 그 시점에 막는 것이 이 필터의 목적이다.
+     * 필터는 미터 이름별이 아니라 `credit.` 접두 **전체**에서 그 태그 키의 값 개수를 센다.
+     * 그래서 outcome 은 한 enum 이 아니라 그 태그를 쓰는 enum 들의 합이다 — 지금 실제 값은
+     * point 7개, outcome 10개(DefenseOutcome 8 + DrainOutcome 2), detector 4개다.
+     * 상한 32는 지금의 세 배로 커져도 걸리지 않는 값이고, 그 이상이 관측된다면 enum 이 아니라
+     * 자유 문자열이 태그로 들어갔다는 뜻이다 — 그 시점에 막는 것이 이 필터의 목적이다.
      */
     @Bean
     fun creditPointTagLimitMeterFilter(): MeterFilter =

@@ -28,6 +28,7 @@ class GenerationWorker(
     private val eventPublisher: ApplicationEventPublisher,
     private val workerSlots: WorkerSlots,
     private val clock: Clock,
+    private val drainGate: WorkerDrainGate,
     workerProperties: WorkerProperties
 ) {
 
@@ -51,6 +52,11 @@ class GenerationWorker(
      */
     @Scheduled(fixedDelayString = "\${app.scheduling.worker-interval-millis:500}")
     fun dispatchPendingJobs() {
+        // 배포 드레인이 시작되면 문이 닫혀 이 주기 전체가 통째로 건너뛰어진다. 조회도 선점도 없다.
+        drainGate.runIfOpen { dispatchCycle() }
+    }
+
+    private fun dispatchCycle() {
         val free = workerSlots.free()
         if (free <= 0) {
             // 넘길 곳이 없으면 조회조차 하지 않는다. 포화 구간의 폴링 비용까지 없앤다.

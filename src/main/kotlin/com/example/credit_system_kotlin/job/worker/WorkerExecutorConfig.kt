@@ -22,6 +22,21 @@ fun interface WorkerSlots {
 @EnableConfigurationProperties(WorkerProperties::class)
 class WorkerExecutorConfig {
 
+    /**
+     * `waitForTasksToCompleteOnShutdown` 을 켜는 것이 드레인의 전제다.
+     *
+     * 기본값(false)이면 `ThreadPoolTaskExecutor` 는 종료할 때 `shutdownNow()` 를 불러
+     * 생성 중인 스레드를 인터럽트한다. 스텁 호출 중이던 job 은 그 자리에서 죽고 PROCESSING
+     * 으로 남아 회수 대상이 된다 — 배포마다 회수를 부르는 것이 정확히 이 단계에서 없애려던
+     * 문제다.
+     *
+     * 켜 두면 부수 효과가 하나 더 있다. `ExecutorConfigurationSupport` 는 이 플래그가 켜져
+     * 있으면 `ContextClosedEvent` 에서 조기 종료를 하지 않고 자신의 `SmartLifecycle.stop` 도
+     * 건너뛴다(`lateShutdown`). 즉 이 풀을 언제 내릴지는 온전히
+     * [GenerationWorkerLifecycle] 이 결정하게 되고, 스프링이 우리보다 먼저 풀을 만지는 창이
+     * 사라진다. 실제 종료는 빈 소멸 시점의 `destroy()` 가 마무리하는데, 그때는 이미
+     * 드레인이 끝나 있어 할 일이 없다.
+     */
     @Bean("generationWorkerExecutor")
     fun generationWorkerExecutor(workerProperties: WorkerProperties): ThreadPoolTaskExecutor =
         ThreadPoolTaskExecutor().apply {
@@ -29,6 +44,7 @@ class WorkerExecutorConfig {
             maxPoolSize = workerProperties.concurrency
             queueCapacity = 0
             setThreadNamePrefix("generation-worker-")
+            setWaitForTasksToCompleteOnShutdown(true)
             initialize()
         }
 
