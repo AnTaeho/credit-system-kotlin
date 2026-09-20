@@ -2,9 +2,10 @@ package com.example.credit_system_kotlin.job.worker
 
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.job.domain.Job
+import com.example.credit_system_kotlin.job.generation.GenerationClient
+import com.example.credit_system_kotlin.job.generation.GenerationException
+import com.example.credit_system_kotlin.job.generation.GenerationTimeoutException
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
-import com.example.credit_system_kotlin.job.stub.GenerationStubClient
-import com.example.credit_system_kotlin.job.stub.StubGenerationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
@@ -13,7 +14,7 @@ private val log = LoggerFactory.getLogger(GenerationJobProcessor::class.java)
 @Component
 class GenerationJobProcessor(
     private val heartbeatRegistry: HeartbeatRegistry,
-    private val stubClient: GenerationStubClient,
+    private val generationClient: GenerationClient,
     private val jobLifecycleService: JobLifecycleService
 ) {
 
@@ -29,11 +30,23 @@ class GenerationJobProcessor(
         }
     }
 
-    /** 생성에 성공하면 resultUrl, 실패하면 FAILED로 기록하고 null */
+    /**
+     * 생성에 성공하면 resultUrl, 실패하면 FAILED로 기록하고 null.
+     *
+     * **타임아웃도 생성 실패와 같은 경로다.** 돈이 묶이지 않게 하려면 "외부가 언젠가 답한다"를
+     * 기다리는 것이 아니라 실패로 확정해 회수·재시도에 태워야 한다. 다만 로그에서는 구분한다.
+     * 실패율이 올라간 것과 외부가 느려진 것은 대응이 다른 사건이기 때문이다.
+     */
     private fun generateOrMarkFailed(job: Job): String? =
         try {
-            stubClient.generate(job.prompt)
-        } catch (_: StubGenerationException) {
+            generationClient.generate(job.prompt)
+        } catch (e: GenerationException) {
+            if (e is GenerationTimeoutException) {
+                log.warn(
+                    "생성 타임아웃, 실패 처리: jobId={}, attemptNo={}, message={}",
+                    job.persistedId, job.attemptNo, e.message
+                )
+            }
             jobLifecycleService.markFailed(job.persistedId, job.attemptNo)
             null
         } catch (e: RuntimeException) {

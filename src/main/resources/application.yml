@@ -67,10 +67,15 @@ app:
   generation:
     cost: 100
     max-attempts: 3
+    # 외부 생성 한 번을 기다려 주는 상한. 이 상한을 지키는 주체는 생성 클라이언트 구현이다.
+    # 기본 지연(3~7초)보다 넉넉히 위에 둔다.
+    timeout-seconds: 20
   stub:
     failure-rate: 0.3
     min-delay-millis: 3000
     max-delay-millis: 7000
+    # 타임아웃조차 먹지 않는 "응답 없음"을 재현하는 장애 주입 손잡이. 기본은 꺼짐.
+    hang: false
   heartbeat:
     timeout-seconds: 10
     refresh-interval-seconds: 5

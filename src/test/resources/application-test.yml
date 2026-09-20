@@ -44,10 +44,12 @@ app:
   generation:
     cost: 100
     max-attempts: 3
+    timeout-seconds: 20
   stub:
     failure-rate: 0.0
     min-delay-millis: 0
     max-delay-millis: 0
+    hang: false
   heartbeat:
     timeout-seconds: 10
     refresh-interval-seconds: 5

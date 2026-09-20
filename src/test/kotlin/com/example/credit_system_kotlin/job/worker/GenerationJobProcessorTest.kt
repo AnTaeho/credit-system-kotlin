@@ -2,9 +2,10 @@ package com.example.credit_system_kotlin.job.worker
 
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.job.domain.Job
+import com.example.credit_system_kotlin.job.generation.GenerationClient
+import com.example.credit_system_kotlin.job.generation.GenerationTimeoutException
+import com.example.credit_system_kotlin.job.generation.stub.StubGenerationException
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
-import com.example.credit_system_kotlin.job.stub.GenerationStubClient
-import com.example.credit_system_kotlin.job.stub.StubGenerationException
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -25,7 +26,7 @@ class GenerationJobProcessorTest {
 
     @Mock lateinit var heartbeatRegistry: HeartbeatRegistry
 
-    @Mock lateinit var stubClient: GenerationStubClient
+    @Mock lateinit var generationClient: GenerationClient
 
     @Mock lateinit var jobLifecycleService: JobLifecycleService
 
@@ -36,7 +37,7 @@ class GenerationJobProcessorTest {
 
     @BeforeEach
     fun setUp() {
-        processor = GenerationJobProcessor(heartbeatRegistry, stubClient, jobLifecycleService)
+        processor = GenerationJobProcessor(heartbeatRegistry, generationClient, jobLifecycleService)
         job = Job.hold(10L, 100L, "cat")
         ReflectionTestUtils.setField(job, "id", 1L)
         doReturn(heartbeatFuture).whenever(heartbeatRegistry).startHeartbeat(1L, 0)
@@ -44,7 +45,7 @@ class GenerationJobProcessorTest {
 
     @Test
     fun `성공하면 confirm하고 heartbeat를 정리한다`() {
-        whenever(stubClient.generate("cat")).thenReturn("https://example.test/cat.png")
+        whenever(generationClient.generate("cat")).thenReturn("https://example.test/cat.png")
 
         processor.runGeneration(job)
 
@@ -54,7 +55,18 @@ class GenerationJobProcessorTest {
 
     @Test
     fun `생성 실패는 FAILED로 기록하고 heartbeat를 정리한다`() {
-        whenever(stubClient.generate("cat")).thenThrow(StubGenerationException("cat"))
+        whenever(generationClient.generate("cat")).thenThrow(StubGenerationException("cat"))
+
+        processor.runGeneration(job)
+
+        verify(jobLifecycleService).markFailed(1L, 0)
+        verify(jobLifecycleService, never()).confirm(job, "https://example.test/cat.png")
+        verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
+    }
+
+    @Test
+    fun `생성 타임아웃도 FAILED로 기록하고 heartbeat를 정리한다`() {
+        whenever(generationClient.generate("cat")).thenThrow(GenerationTimeoutException("cat", 1000L))
 
         processor.runGeneration(job)
 
@@ -65,7 +77,7 @@ class GenerationJobProcessorTest {
 
     @Test
     fun `예기치 못한 런타임예외도 FAILED로 기록하고 heartbeat를 정리한다`() {
-        whenever(stubClient.generate("cat")).thenThrow(IllegalStateException("interrupted"))
+        whenever(generationClient.generate("cat")).thenThrow(IllegalStateException("interrupted"))
 
         processor.runGeneration(job)
 
@@ -76,7 +88,7 @@ class GenerationJobProcessorTest {
 
     @Test
     fun `결과 반영이 실패해도 FAILED로 바꾸지 않고 PROCESSING을 유지한다`() {
-        whenever(stubClient.generate("cat")).thenReturn("https://example.test/cat.png")
+        whenever(generationClient.generate("cat")).thenReturn("https://example.test/cat.png")
         doThrow(DataIntegrityViolationException("constraint violation"))
             .whenever(jobLifecycleService).confirm(job, "https://example.test/cat.png")
 
