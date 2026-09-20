@@ -1,5 +1,6 @@
 package com.example.credit_system_kotlin.job.service
 
+import com.example.credit_system_kotlin.global.config.appProperties
 import com.example.credit_system_kotlin.global.event.DefenseOutcome
 import com.example.credit_system_kotlin.global.event.DefensePoint
 import com.example.credit_system_kotlin.job.domain.Job
@@ -7,6 +8,7 @@ import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.domain.LedgerType
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
+import com.example.credit_system_kotlin.support.FixedMutableClock
 import com.example.credit_system_kotlin.support.RecordingEventPublisher
 import com.example.credit_system_kotlin.user.domain.User
 import com.example.credit_system_kotlin.user.repository.UserRepository
@@ -16,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.util.ReflectionTestUtils
+import java.time.Duration
 import java.time.Instant
 
 @ActiveProfiles("test")
@@ -28,8 +31,12 @@ class JobLifecycleServiceTest @Autowired constructor(
 
     private val eventPublisher = RecordingEventPublisher()
 
-    private val jobLifecycleService =
-        JobLifecycleService(jobRepository, userRepository, ledgerRepository, eventPublisher)
+    /** backoff 기본값(10초 × 4배, 상한 300초)을 그대로 쓴다. 시각은 밀 수 있는 시계로 고정한다. */
+    private val clock = FixedMutableClock(NOW)
+
+    private val jobLifecycleService = JobLifecycleService(
+        jobRepository, userRepository, ledgerRepository, eventPublisher, appProperties(), clock
+    )
 
     @Test
     fun `attemptNo가 일치하면 완료 처리되고 ledger가 남는다`() {
@@ -137,6 +144,37 @@ class JobLifecycleServiceTest @Autowired constructor(
         val found = jobRepository.findById(job.persistedId).orElseThrow()
         assertThat(found.status).isEqualTo(JobStatus.HOLDING)
         assertThat(found.attemptNo).isEqualTo(1)
+    }
+
+    /**
+     * 재시도는 바로 다시 잡히면 안 된다. 첫 재시도는 base(10초), 두 번째는 base × multiplier(40초)
+     * 뒤부터 가능해야 한다 — 잠깐 문제면 빨리, 오래가면 덜 자주 두드린다.
+     */
+    @Test
+    fun `첫 재시도는 10초 뒤, 그다음은 40초 뒤부터 가능하다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        failCurrentAttempt(job.persistedId, 0)
+
+        jobLifecycleService.retry(jobRepository.findById(job.persistedId).orElseThrow())
+
+        assertThat(jobRepository.findById(job.persistedId).orElseThrow().nextAttemptAt)
+            .isEqualTo(NOW.plusSeconds(10))
+
+        clock.advance(Duration.ofSeconds(60))
+        failCurrentAttempt(job.persistedId, 1)
+
+        jobLifecycleService.retry(jobRepository.findById(job.persistedId).orElseThrow())
+
+        val found = jobRepository.findById(job.persistedId).orElseThrow()
+        assertThat(found.attemptNo).isEqualTo(2)
+        assertThat(found.nextAttemptAt).isEqualTo(NOW.plusSeconds(60).plusSeconds(40))
+    }
+
+    /** FAILED 에서 다시 실패 상태로 되돌려, 다음 재시도를 만들 수 있게 한다. */
+    private fun failCurrentAttempt(jobId: Long, attemptNo: Int) {
+        jobRepository.transitionIfStatusAndAttemptMatch(
+            jobId, JobStatus.FAILED, JobStatus.HOLDING, attemptNo, clock.instant()
+        )
     }
 
     @Test
@@ -260,5 +298,9 @@ class JobLifecycleServiceTest @Autowired constructor(
 
         assertThat(eventPublisher.countOf(DefensePoint.FINAL_REFUND, DefenseOutcome.APPLIED)).isEqualTo(1)
         assertThat(eventPublisher.countOf(DefensePoint.FINAL_REFUND, DefenseOutcome.RACED)).isEqualTo(1)
+    }
+
+    companion object {
+        private val NOW: Instant = Instant.parse("2026-09-20T00:00:00Z")
     }
 }

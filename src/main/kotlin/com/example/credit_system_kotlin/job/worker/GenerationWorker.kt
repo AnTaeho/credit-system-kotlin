@@ -15,7 +15,7 @@ import org.springframework.core.task.TaskExecutor
 import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
-import java.time.Instant
+import java.time.Clock
 
 private val log = LoggerFactory.getLogger(GenerationWorker::class.java)
 
@@ -27,6 +27,7 @@ class GenerationWorker(
     @Qualifier("generationWorkerExecutor") private val workerExecutor: TaskExecutor,
     private val eventPublisher: ApplicationEventPublisher,
     private val workerSlots: WorkerSlots,
+    private val clock: Clock,
     workerProperties: WorkerProperties
 ) {
 
@@ -55,8 +56,10 @@ class GenerationWorker(
             // 넘길 곳이 없으면 조회조차 하지 않는다. 포화 구간의 폴링 비용까지 없앤다.
             return
         }
-        val jobs = jobRepository.findByStatusOrderByIdAsc(
-            JobStatus.HOLDING, PageRequest.of(0, minOf(batchSize, free))
+        // 재시도 대기(nextAttemptAt)가 지나지 않은 job 은 여기서 걸러진다. 최초 접수는
+        // nextAttemptAt 이 NULL 이라 예전처럼 즉시 집힌다.
+        val jobs = jobRepository.findDispatchableByStatus(
+            JobStatus.HOLDING, clock.instant(), PageRequest.of(0, minOf(batchSize, free))
         )
         for (job in jobs) {
             if (!claim(job)) {
@@ -71,7 +74,7 @@ class GenerationWorker(
     private fun claim(job: Job): Boolean {
         return try {
             val updated = jobRepository.startProcessingIfAttemptMatches(
-                job.persistedId, job.attemptNo, Instant.now()
+                job.persistedId, job.attemptNo, clock.instant()
             )
             if (updated == 0) {
                 log.info("다른 워커가 선점했거나 무효한 작업 무시: jobId={}, attemptNo={}", job.persistedId, job.attemptNo)
@@ -109,7 +112,7 @@ class GenerationWorker(
 
     private fun rollbackToHolding(job: Job) {
         try {
-            jobRepository.rollbackToHoldingIfProcessing(job.persistedId, job.attemptNo, Instant.now())
+            jobRepository.rollbackToHoldingIfProcessing(job.persistedId, job.attemptNo, clock.instant())
         } catch (e: RuntimeException) {
             log.error("선점 롤백 실패, timeout 회수 대기: jobId={}, attemptNo={}", job.id, job.attemptNo, e)
         }

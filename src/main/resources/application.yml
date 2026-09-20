@@ -70,6 +70,12 @@ app:
     # 외부 생성 한 번을 기다려 주는 상한. 이 상한을 지키는 주체는 생성 클라이언트 구현이다.
     # 기본 지연(3~7초)보다 넉넉히 위에 둔다.
     timeout-seconds: 20
+    # 재시도 사이의 대기. base * multiplier^(재시도 횟수 - 1) 이고 max-seconds 에서 자른다.
+    # max-attempts 가 3 이라 실제로 쓰이는 값은 10초와 40초 두 번이다.
+    retry-backoff:
+      base-seconds: 10
+      multiplier: 4
+      max-seconds: 300
   stub:
     failure-rate: 0.3
     min-delay-millis: 3000

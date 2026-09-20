@@ -6,6 +6,7 @@ import com.example.credit_system_kotlin.global.event.DefensePoint
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.domain.JobStatus
 import com.example.credit_system_kotlin.job.repository.JobRepository
+import com.example.credit_system_kotlin.support.FixedMutableClock
 import com.example.credit_system_kotlin.support.RecordingEventPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
@@ -20,6 +21,7 @@ import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import org.springframework.core.task.SyncTaskExecutor
@@ -28,6 +30,7 @@ import org.springframework.core.task.TaskRejectedException
 import org.springframework.dao.QueryTimeoutException
 import org.springframework.data.domain.Pageable
 import org.springframework.test.util.ReflectionTestUtils
+import java.time.Duration
 import java.time.Instant
 
 @ExtendWith(MockitoExtension::class)
@@ -40,6 +43,8 @@ class GenerationWorkerUnitTest {
     private lateinit var worker: GenerationWorker
     private lateinit var job: Job
 
+    private val clock = FixedMutableClock(NOW)
+
     private val eventPublisher = RecordingEventPublisher()
 
     @BeforeEach
@@ -47,7 +52,7 @@ class GenerationWorkerUnitTest {
         eventPublisher.clear()
         worker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
-            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
+            UNLIMITED_SLOTS, clock, WorkerProperties(true, 20, CONCURRENCY)
         )
         job = Job.hold(10L, 100L, "cat")
         ReflectionTestUtils.setField(job, "id", 1L)
@@ -55,7 +60,7 @@ class GenerationWorkerUnitTest {
 
     @Test
     fun `대기 작업을 DB에서 찾아 선점한 뒤 처리기로 넘긴다`() {
-        whenever(jobRepository.findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any()))
+        whenever(jobRepository.findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any()))
             .thenReturn(listOf(job))
         whenever(jobRepository.startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>()))
             .thenReturn(1)
@@ -67,7 +72,8 @@ class GenerationWorkerUnitTest {
 
     @Test
     fun `다른 워커가 선점한 작업은 외부 처리기로 넘기지 않는다`() {
-        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(listOf(job)).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
         doReturn(0).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
 
         worker.dispatchPendingJobs()
@@ -77,7 +83,8 @@ class GenerationWorkerUnitTest {
 
     @Test
     fun `선점 UPDATE가 반복 실패해도 이후 주기에서 다시 처리한다`() {
-        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(listOf(job)).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
         doThrow(QueryTimeoutException("db unavailable"))
             .whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
 
@@ -97,9 +104,10 @@ class GenerationWorkerUnitTest {
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
             TaskExecutor { throw IllegalStateException("executor shutdown") }, eventPublisher,
-            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
+            UNLIMITED_SLOTS, clock, WorkerProperties(true, 20, CONCURRENCY)
         )
-        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(listOf(job)).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
         doThrow(QueryTimeoutException("db unavailable")).whenever(jobRepository)
             .rollbackToHoldingIfProcessing(eq(1L), eq(0), any<Instant>())
@@ -113,7 +121,8 @@ class GenerationWorkerUnitTest {
     fun `한 작업의 선점 실패가 같은 배치의 나머지 작업을 막지 않는다`() {
         val second = Job.hold(10L, 100L, "dog")
         ReflectionTestUtils.setField(second, "id", 2L)
-        doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(listOf(job, second)).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
         doThrow(QueryTimeoutException("db unavailable"))
             .whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(2L), eq(0), any<Instant>())
@@ -130,9 +139,10 @@ class GenerationWorkerUnitTest {
         val rejectingWorker = GenerationWorker(
             jobRepository, jobProcessor,
             TaskExecutor { throw TaskRejectedException("pool exhausted") }, eventPublisher,
-            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
+            UNLIMITED_SLOTS, clock, WorkerProperties(true, 20, CONCURRENCY)
         )
-        doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(listOf(job, second)).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
 
         rejectingWorker.dispatchPendingJobs()
@@ -148,7 +158,8 @@ class GenerationWorkerUnitTest {
     fun `dispatch에 성공하면 같은 배치의 다음 작업도 처리한다`() {
         val second = Job.hold(10L, 100L, "dog")
         ReflectionTestUtils.setField(second, "id", 2L)
-        doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(listOf(job, second)).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(2L), eq(0), any<Instant>())
 
@@ -160,7 +171,8 @@ class GenerationWorkerUnitTest {
 
     @Test
     fun `선점 성공은 WORKER_CLAIM APPLIED를 발행한다`() {
-        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(listOf(job)).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
         doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
 
         worker.dispatchPendingJobs()
@@ -171,7 +183,8 @@ class GenerationWorkerUnitTest {
 
     @Test
     fun `이미 선점된 job의 claim은 WORKER_CLAIM LOST를 발행한다`() {
-        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(listOf(job)).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
         doReturn(0).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
 
         worker.dispatchPendingJobs()
@@ -180,16 +193,32 @@ class GenerationWorkerUnitTest {
         assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isZero()
     }
 
+    /** 대기 시각 비교의 기준은 주입된 시계다. 테스트가 시계를 밀어 결정적으로 검증할 수 있어야 한다. */
+    @Test
+    fun `디스패치 조회는 주입된 시계의 지금을 넘긴다`() {
+        doReturn(emptyList<Job>())
+            .whenever(jobRepository).findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
+
+        worker.dispatchPendingJobs()
+        clock.advance(Duration.ofSeconds(30))
+        worker.dispatchPendingJobs()
+
+        val captor = argumentCaptor<Instant>()
+        verify(jobRepository, times(2))
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), captor.capture(), any())
+        assertThat(captor.allValues).containsExactly(NOW, NOW.plusSeconds(30))
+    }
+
     @Test
     fun `빈 슬롯이 없으면 DB 조회도 선점도 하지 않는다`() {
         val fullWorker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
-            WorkerSlots { 0 }, WorkerProperties(true, 3, CONCURRENCY)
+            WorkerSlots { 0 }, clock, WorkerProperties(true, 3, CONCURRENCY)
         )
 
         fullWorker.dispatchPendingJobs()
 
-        verify(jobRepository, never()).findByStatusOrderByIdAsc(any(), any())
+        verify(jobRepository, never()).findDispatchableByStatus(any(), any<Instant>(), any())
         verify(jobRepository, never()).startProcessingIfAttemptMatches(any(), any(), any<Instant>())
         assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isZero()
     }
@@ -198,9 +227,10 @@ class GenerationWorkerUnitTest {
     fun `빈 슬롯이 batchSize보다 적으면 슬롯 수만큼만 읽는다`() {
         val slotWorker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
-            WorkerSlots { 2 }, WorkerProperties(true, 3, CONCURRENCY)
+            WorkerSlots { 2 }, clock, WorkerProperties(true, 3, CONCURRENCY)
         )
-        doReturn(emptyList<Job>()).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(emptyList<Job>()).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
 
         slotWorker.dispatchPendingJobs()
 
@@ -211,9 +241,10 @@ class GenerationWorkerUnitTest {
     fun `빈 슬롯이 batchSize보다 많으면 batchSize가 상한이다`() {
         val slotWorker = GenerationWorker(
             jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
-            WorkerSlots { 5 }, WorkerProperties(true, 3, CONCURRENCY)
+            WorkerSlots { 5 }, clock, WorkerProperties(true, 3, CONCURRENCY)
         )
-        doReturn(emptyList<Job>()).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(emptyList<Job>()).whenever(jobRepository)
+            .findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), any())
 
         slotWorker.dispatchPendingJobs()
 
@@ -222,13 +253,15 @@ class GenerationWorkerUnitTest {
 
     private fun capturedPageSize(): Int {
         val captor = argumentCaptor<Pageable>()
-        verify(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), captor.capture())
+        verify(jobRepository).findDispatchableByStatus(eq(JobStatus.HOLDING), any<Instant>(), captor.capture())
         assertThat(captor.firstValue.pageNumber).isZero()
         return captor.firstValue.pageSize
     }
 
     companion object {
         private const val CONCURRENCY = 3
+
+        private val NOW: Instant = Instant.parse("2026-09-20T00:00:00Z")
 
         /** 슬롯 계산과 무관한 기존 단언들이 예전과 똑같이 돌도록 슬롯을 무제한으로 둔다. */
         private val UNLIMITED_SLOTS = WorkerSlots { Int.MAX_VALUE }

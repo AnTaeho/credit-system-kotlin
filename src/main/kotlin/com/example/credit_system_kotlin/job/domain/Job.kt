@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Index
 import jakarta.persistence.Table
+import java.time.Instant
 
 @Entity
 @Table(
@@ -50,6 +51,17 @@ class Job private constructor(
         protected set
 
     var resultUrl: String? = null
+        protected set
+
+    /**
+     * 다음 시도가 가능해지는 시각. `null` 이면 지금 바로 가능하다 — 최초 접수가 그렇다.
+     * 재시도가 [com.example.credit_system_kotlin.global.config.AppProperties.RetryBackoff] 만큼
+     * 미래로 채운다.
+     *
+     * 종결(COMPLETED/REFUNDED)이나 선점(PROCESSING) 때 지우지 않는다. 이 값을 보는 곳은
+     * HOLDING 을 집는 디스패처뿐이고, 다음 재시도가 어차피 덮어쓰기 때문에 남은 값은 무해하다.
+     */
+    var nextAttemptAt: Instant? = null
         protected set
 
     companion object {

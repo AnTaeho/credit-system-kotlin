@@ -45,6 +45,12 @@ app:
     cost: 100
     max-attempts: 3
     timeout-seconds: 20
+    # 테스트에서는 backoff 를 최소로 눕힌다(검증 하한이 1초다). 재시도 타이밍 자체를 보는
+    # 테스트는 시계를 주입해 검증하므로, 통합 테스트까지 10초·40초씩 기다릴 이유가 없다.
+    retry-backoff:
+      base-seconds: 1
+      multiplier: 1
+      max-seconds: 1
   stub:
     failure-rate: 0.0
     min-delay-millis: 0

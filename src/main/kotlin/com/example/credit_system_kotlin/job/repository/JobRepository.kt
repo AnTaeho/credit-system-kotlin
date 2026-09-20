@@ -70,6 +70,7 @@ interface JobRepository : JpaRepository<Job, Long> {
         UPDATE Job j
         SET j.attemptNo = j.attemptNo + 1,
             j.status = JobStatus.HOLDING,
+            j.nextAttemptAt = :nextAttemptAt,
             j.updatedAt = :now
         WHERE j.id = :jobId
           AND j.status = JobStatus.FAILED
@@ -79,10 +80,33 @@ interface JobRepository : JpaRepository<Job, Long> {
     fun incrementAttemptForRetry(
         @Param("jobId") jobId: Long,
         @Param("expectedAttemptNo") expectedAttemptNo: Int,
+        @Param("nextAttemptAt") nextAttemptAt: Instant,
         @Param("now") now: Instant
     ): Int
 
     fun findByStatusOrderByIdAsc(status: JobStatus, pageable: Pageable): List<Job>
+
+    /**
+     * 디스패처가 집을 수 있는 job. `nextAttemptAt` 이 없거나(=최초 접수) 이미 지난 것만 고른다.
+     *
+     * 정렬(id 오름차순)과 `LIMIT`(빈 슬롯 수)는 그대로다. 범위 조건이 붙어 기존
+     * `idx_jobs_status_id (status, id)` 로 조건까지 끝내지는 못하지만, 인덱스를 새로 만들지
+     * 않았다. 근거는 `V5__jobs_next_attempt_at.sql` 머리에 적어 두었다 — 지금 규모에서는
+     * 쓰기 비용만 확실히 늘기 때문이고, 실측으로 느려지는 게 보이면 그때 붙인다.
+     */
+    @Query(
+        """
+        SELECT j FROM Job j
+        WHERE j.status = :status
+          AND (j.nextAttemptAt IS NULL OR j.nextAttemptAt <= :now)
+        ORDER BY j.id ASC
+        """
+    )
+    fun findDispatchableByStatus(
+        @Param("status") status: JobStatus,
+        @Param("now") now: Instant,
+        pageable: Pageable
+    ): List<Job>
 
     fun findByUserIdOrderByIdDesc(userId: Long): List<Job>
 

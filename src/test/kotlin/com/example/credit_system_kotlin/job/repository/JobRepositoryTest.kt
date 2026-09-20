@@ -44,7 +44,7 @@ class JobRepositoryTest @Autowired constructor(
         jobRepository.transitionIfStatusAndAttemptMatch(
             job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
         )
-        jobRepository.incrementAttemptForRetry(job.persistedId, 0, Instant.now())
+        jobRepository.incrementAttemptForRetry(job.persistedId, 0, Instant.now(), Instant.now())
 
         val updated = jobRepository.startProcessingIfAttemptMatches(job.persistedId, 1, Instant.now())
 
@@ -127,18 +127,53 @@ class JobRepositoryTest @Autowired constructor(
     fun `재시도 투입은 FAILED 상태에서만 attemptNo를 증가시킨다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
 
-        val beforeFail = jobRepository.incrementAttemptForRetry(job.persistedId, 0, Instant.now())
+        val beforeFail = jobRepository.incrementAttemptForRetry(job.persistedId, 0, Instant.now(), Instant.now())
         assertThat(beforeFail).isZero()
 
         jobRepository.transitionIfStatusAndAttemptMatch(
             job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
         )
-        val afterFail = jobRepository.incrementAttemptForRetry(job.persistedId, 0, Instant.now())
+        val afterFail = jobRepository.incrementAttemptForRetry(job.persistedId, 0, Instant.now(), Instant.now())
 
         val found = jobRepository.findById(job.persistedId).orElseThrow()
         assertThat(afterFail).isEqualTo(1)
         assertThat(found.status).isEqualTo(JobStatus.HOLDING)
         assertThat(found.attemptNo).isEqualTo(1)
+    }
+
+    /**
+     * 디스패처가 보는 조회다. 재시도 대기(`nextAttemptAt`)가 남은 job 은 시각이 지나기 전에는
+     * 집히지 않고, 지나면 집힌다. 최초 접수는 `nextAttemptAt` 이 없어 예전처럼 즉시 집힌다.
+     */
+    @Test
+    fun `대기 시각이 지나지 않은 job은 집히지 않고 지나면 집힌다`() {
+        val now = Instant.parse("2026-09-20T00:00:00Z")
+        val waiting = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.transitionIfStatusAndAttemptMatch(
+            waiting.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, now
+        )
+        jobRepository.incrementAttemptForRetry(waiting.persistedId, 0, now.plusSeconds(10), now)
+
+        val beforeDue = jobRepository.findDispatchableByStatus(JobStatus.HOLDING, now, PageRequest.of(0, 10))
+        val atDue = jobRepository.findDispatchableByStatus(
+            JobStatus.HOLDING, now.plusSeconds(10), PageRequest.of(0, 10)
+        )
+
+        assertThat(beforeDue).extracting<Long> { it.persistedId }.doesNotContain(waiting.persistedId)
+        assertThat(atDue).extracting<Long> { it.persistedId }.contains(waiting.persistedId)
+    }
+
+    /** 최초 접수는 `nextAttemptAt` 이 NULL 이다. backoff 가 생겨도 즉시 집혀야 한다(회귀). */
+    @Test
+    fun `최초 접수는 대기 시각이 없어 즉시 집힌다`() {
+        val fresh = jobRepository.save(Job.hold(1L, 100L, "cat"))
+
+        val found = jobRepository.findDispatchableByStatus(
+            JobStatus.HOLDING, Instant.parse("2026-09-20T00:00:00Z"), PageRequest.of(0, 10)
+        )
+
+        assertThat(fresh.nextAttemptAt).isNull()
+        assertThat(found).extracting<Long> { it.persistedId }.contains(fresh.persistedId)
     }
 
     @Test
