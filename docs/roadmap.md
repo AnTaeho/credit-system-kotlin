@@ -256,14 +256,20 @@ step10으로 넘기는 것:
 - ~~구글 로그인 실사용 검증~~ — 2026-09-20 완료. OAuth 클라이언트를 만들고 로컬(`http://localhost:8080/login/oauth2/code/google`)에서 실제 계정으로 로그인했다. 배포 주소(`https://credit.papercut.kr/...`)는 같은 클라이언트에 이미 등록해 두었다
 - 운영 환경변수 `GOOGLE_CLIENT_ID`·`GOOGLE_CLIENT_SECRET`·`APP_AUTH_ALLOWEDEMAILS`·`APP_AUTH_ADMINEMAILS`(대시가 빠진다)를 시크릿으로
 
-### step10 — 배포 1대
+### step10 — 배포 1대 (보류, 2026-09-20)
 
-**증명하는 것:** 인터넷에 떠 있고, 배포해도 처리 중이던 job이 회수가 아니라 드레인으로 끝나며, 알람이 나에게 온다.
+**보류 이유.** 서버를 어디에 둘지 정하지 않았다. 무료로 가려면 Oracle Cloud Always Free(가입·ARM 용량 확보가 변수이고 멀티 아키텍처 이미지가 추가로 필요)이고, 바로 하려면 월 5~7천 원짜리 VPS다. 이 서비스는 항상 떠 있어야 하는 프로세스(0.5초 디스패처·5초 순찰·워커 풀·heartbeat)라 잠드는 무료 티어나 서버리스(Vercel 등)와는 모양이 맞지 않는다 — 그쪽으로 가려면 이 프로젝트가 증명하려는 구조를 갈아엎어야 한다.
+
+**미루는 대가는 하나다.** 진짜 도메인·HTTPS·앞단(Caddy) 뒤에서만 드러나는 문제(특히 `server.forward-headers-strategy` 가 없어 구글 리디렉션이 http 로 만들어지는 것)를 아직 못 만난다. 나머지 단계는 전부 로컬에서 진행할 수 있다.
+
+**여기서 들어낸 것:** graceful shutdown(드레인)은 compose 로 로컬에서 검증할 수 있으므로 step11 로 옮긴다. 도메인은 `credit.papercut.kr` 로 확정했고 구글 OAuth 클라이언트에 배포 리디렉션 URI 까지 등록해 두었다.
+
+**증명하는 것:** 인터넷에 떠 있고, 알람이 나에게 온다.
 **규모:** 중간. 인프라 삽질 시간이 예측이 안 되니 넉넉히.
 
 1. VM 1대(Oracle Cloud Always Free ARM 후보). compose로 app + MySQL + Redis + Prometheus + Grafana + Alertmanager + Caddy(TLS). 도메인
 2. CD: GHCR push 뒤 SSH로 `compose pull && compose up`
-3. graceful shutdown: `step8-b-drain-archive`의 드레인 구현을 살린다. 대기 상한은 `processing.timeout`에서 유도
+3. ~~graceful shutdown~~ → step11 로 옮겼다(로컬 compose 로 검증 가능)
 4. Alertmanager → Discord(또는 이메일). 불변식·회수 알람이 실제로 도착하는지 확인
 5. 비밀: 구글 OAuth 클라이언트 비밀, DB 비밀번호(이후 Claude API 키)를 환경변수·파일로. 저장소에 없다
 6. health 재설계: Redis down이 readiness DOWN이 되면 안 된다(백스톱이 있으니 degraded). liveness와 readiness 분리
@@ -278,8 +284,9 @@ step10으로 넘기는 것:
 
 1. `GenerationClient` 인터페이스 분리. 가짜 생성기에 지연·실패·무응답(hang)을 설정으로 주입
 2. 외부 호출 타임아웃. 재시도는 attemptNo 한 곳에서만(결정 11)
-3. 멈춘 워커 구멍: heartbeat 수명 상한 또는 백스톱 절대 상한(LIVE여도 아주 오래된 PROCESSING은 회수). attemptNo CAS가 오회수에서 돈을 지킨다
-4. 재시도 backoff: 회수 직후 바로 HOLDING이 아니라 `다음 시도 가능 시각`을 둔다
+3. 멈춘 워커 구멍: **백스톱 절대 상한**(2026-09-20 결정). heartbeat 가 LIVE 여도 PROCESSING 이 아주 오래되면 회수한다. heartbeat 의 뜻("프로세스가 살아 있다")은 그대로 두고 그물 하나를 더한다. 오회수해도 attemptNo CAS 가 돈을 지킨다 — 대가는 외부 호출 1회
+4. 재시도 backoff: 회수 직후 바로 HOLDING이 아니라 `다음 시도 가능 시각`을 둔다. **지수적으로 늘린다**(2026-09-20 결정, 예: 10초 → 40초 → 160초). 잠깐이면 빨리, 오래가면 덜 자주 두드린다
+4b. graceful shutdown(드레인): `step8-b-drain-archive` 의 구현을 살린다. 대기 상한은 `processing.timeout` 에서 유도하고, compose 의 `stop_grace_period` 를 그 상한보다 크게 잡아 로컬에서 검증한다(도커 기본 10초에 잘리면 드레인 코드만 있고 효과는 없다)
 5. 요청 상관 ID(MDC)와 JSON 구조화 로그. job이 HTTP → 워커 → 외부 호출을 거쳐도 같은 ID
 6. 장애 시나리오: 무응답·연속 실패·지연 폭증을 재현해 회수·환불·워커 슬롯 복귀를 실측
 
@@ -345,9 +352,8 @@ step10으로 넘기는 것:
 - [ ] `max_tokens`에 걸려 잘린 결과를 성공으로 볼지 — 기능별(결정 11)
 - [ ] 거절(`refusal`) 시 서버 측 모델 대체(fallback)를 쓸지 — 대체 모델은 단가가 달라 원가 상한 검증과 충돌할 수 있다
 - [ ] 일일 원가 상한 금액 — step12 착수 때(결정 12)
-- [ ] 멈춘 워커 대책: heartbeat 수명 상한 vs 백스톱 절대 상한 — step11 착수 때 결정
 - [ ] 기존 `docs/step2~7`의 "hold 즉시 차감" 서술: 그대로 두고 step13 문서에 "왜 바꿨나"를 쓴다
-- [ ] VM 제공자와 도메인 — step10 착수 때
+- [ ] VM 제공자 — step10 을 다시 꺼낼 때(도메인은 `credit.papercut.kr` 확정)
 - [x] `GenerationWorker.kt:38` 주석이 옛 헛선점을 "전부 선점"으로 잘못 설명하던 것 — 실제 옛 코드(`e2c489c^`)대로 "첫 장만 선점 → 거부 → 롤백 → 주기 종료"로 고쳤다(step9 첫 커밋)
 
 ---
@@ -394,3 +400,4 @@ step10으로 넘기는 것:
 | 2026-09-20 | 속도 제한(9-D)을 전부 제거(근거는 결정 9·12). 실제 브라우저로 한 바퀴 확인 — 완료 기준의 조건부 충족을 충족으로 갱신. 남은 것은 실제 구글 계정 로그인 |
 | 2026-09-20 | 실제 구글 계정으로 로컬 로그인 확인(첫 로그인 사용자 행 생성). step9 의 미검증 항목이 없어졌다. 도메인은 `credit.papercut.kr` 로 확정, OAuth 클라이언트에 로컬·배포 리디렉션 URI 를 모두 등록 |
 | 2026-09-20 | step9-D 사용자별 속도 제한을 전면 제거. 총량은 잔액이, AI 호출 동시성은 워커 수가 이미 막고, 선결제 잔고를 지키는 진짜 벽은 step12 의 일일 전체 원가 상한이다. 남는 효용("총량이 아니라 속도")이 유지 비용보다 작다고 판단했다. 결정 9·12 의 속도 제한 항목과 step9 계획 5번을 그에 맞게 고침. 테스트 291 → 276 |
+| 2026-09-20 | 실제 배포(step10)를 보류한다 — 서버를 정하지 않았고, 나머지 단계는 로컬에서 할 수 있다. 드레인은 step11 로 옮긴다. step11 의 두 미결을 확정: 멈춘 워커는 백스톱 절대 상한, 재시도는 지수 backoff |
