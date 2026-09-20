@@ -7,7 +7,8 @@
 테스트도 그 단계에 실제로 존재하는 방어만 검증하도록 맞춰져 있다.
 
 히스토리는 `step0 → step7` 순방향 선형이고, `step8-ops` 는 step7 을 머지한 `develop` 위에,
-`step9-auth` 는 step8 을 머지한 `develop` 위에 올라 있다.
+`step9-auth` 는 step8 을 머지한 `develop` 위에, `step11-external` 은 step9 를 머지한 `develop` 위에 올라 있다
+(step10 배포는 보류했다 — [`docs/roadmap.md`](docs/roadmap.md) step10 절).
 한 겹씩 이렇게 본다:
 
 ```
@@ -15,6 +16,7 @@ git diff step0-naive step1-validation
 git log --oneline step0-naive..step7-observability
 git log --oneline develop..step8-ops
 git log --oneline step8-ops..step9-auth
+git log --oneline step9-auth..step11-external
 ```
 
 `main` 은 실제 개발 히스토리를 담은 브랜치다. 동작과 방어 장치는 `step6-resilience` 와 같지만
@@ -303,6 +305,35 @@ step8 까지는 **요청이 스스로 밝힌 신원을 그대로 믿었다.** �
 미인증 POST 는 401 이 아니라 CSRF 403 으로 막힌다. Redis 가 죽으면 health 가 DOWN 이 된다는 것이 CI 첫 실패로
 드러났다 — step10 의 health 재설계 몫이다. 요청 속도 제한은 없다 — 총량은 잔액, 동시성은 워커 수가 막고
 나머지는 step12 의 일일 원가 상한 몫으로 넘겼다.
+
+## step11-external — 외부 호출 안전화
+
+step9 까지 이 서비스의 "외부 호출"은 `Thread.sleep` 이었다. **느려질 수도, 죽을 수도,
+영원히 돌아오지 않을 수도 없는 외부**라서 타임아웃도 재시도 간격도 한 번도 검증된 적이 없었다.
+진짜 Claude 를 붙이기 전에(step12) 그 경계를 만들고, 가짜 생성기로 최악의 경우를 실제로 재현해 재는 단계다.
+
+새로 생긴 것:
+
+- **생성 클라이언트 경계와 호출 타임아웃** — `GenerationClient` 포트와 스텁 어댑터. 타임아웃(기본 20초)은
+  호출자가 아니라 **경계의 구현이 소유한다**. 인터럽트 플래그를 남긴 채 풀로 돌아가는 함정이 구조적으로 없다.
+  타임아웃은 생성 실패와 같은 경로로 흘러가고 로그에서만 구분된다
+- **백스톱 절대 상한** — 워커가 hang 이면 종지기는 워커 상태를 보지 않고 계속 갱신하므로 heartbeat 가
+  영원히 LIVE 다. 두 그물이 모두 놓치고 돈이 영구히 묶였다. `app.processing.absolute-timeout-seconds`(기본 300)가
+  "아무리 살아 있다고 우겨도 이만큼 지났으면 내린다"는 마지막 그물이다. 감지자는 `HARD_CAP`
+- **재시도 지수 backoff** — Flyway V5 의 `jobs.next_attempt_at`. `base * multiplier^(재시도-1)`,
+  기본 10초·4배라 시도 상한 3 에서는 10초와 40초다. 외부가 죽었을 때 상한 3회를 몇 초 만에 태우지 않는다
+- **드레인(graceful shutdown)** — step8 에서 만들어 보관해 둔 구현을 살렸다. 웹서버 → 스케줄러·워커풀 →
+  드레인 → heartbeat 순으로 내려간다. 문은 플래그가 아니라 **락**이라, "닫힌 뒤엔 새 선점이 없다"가
+  상태가 아니라 구조로 보장된다. compose 의 `stop_grace_period` 를 드레인 상한보다 크게 잡아야 효과가 난다
+- **상관 ID 와 구조화 로그** — 요청 ID(HTTP 한 번)와 job 식별자를 나눠 MDC 에 넣고, prod 만 JSON(ECS).
+  프롬프트는 로그·예외 메시지에서 걷어내고 길이만 남겼다 — 예외 메시지는 로그로 번져 나간다
+- **관측** — 07 을 "지연 → 타임아웃"으로 다시 쓰고 진짜 무응답을 08 로 새로 만들었다(시나리오 8개).
+  알람 둘(`CreditHardCapRecovery`, `CreditWorkerSlotsExhausted`)과 슬롯 게이지 패널
+
+이 단계의 관점: **상한이 없는 기다림은 기다림이 아니라 누수다.** 그리고 모든 구멍이 같은 값으로 막히지는 않는다 —
+돈은 절대 상한이 풀지만 **워커 슬롯은 아무도 돌려주지 못한다**. 깨울 수단이 없기 때문이다. 그래서 이 단계는
+막지 못한 것을 지표 하나(`credit_worker_slots_free`)와 알람 하나로 **보이게** 만드는 데까지가 결론이다.
+[`docs/step11-external.md`](docs/step11-external.md) 의 한계 절에 그 목록이 있다.
 
 ---
 

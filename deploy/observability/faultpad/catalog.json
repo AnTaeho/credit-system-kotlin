@@ -1,11 +1,13 @@
 {
-  "_comment": "장애 주입 버튼 패드의 카드 정의. server.py 의 액션 허용 목록이자 index.html 이 그리는 데이터다. expect 의 숫자는 docs/step7-observability.md 6단계 결과 매트릭스와 후속 1 실측에서 그대로 옮긴 것이고, 08 만 미실측이다.",
+  "_comment": "장애 주입 버튼 패드의 카드 정의. server.py 의 액션 허용 목록이자 index.html 이 그리는 데이터다. expect 의 숫자는 docs/step7-observability.md 6단계 결과 매트릭스와 후속 1 실측에서 그대로 옮긴 것이다. 07(지연 → 타임아웃)·08(멈춘 워커)·09(외부 API 전부 실패)는 미실측이다 — 07 은 step11-A 의 타임아웃이 사고의 결과를 바꿔 옛 실측이 더 이상 기대값이 아니고, 08 은 step11 에서 새로 만든 카드다.",
   "env_defaults": {
     "APP_WORKER_ENABLED": "true",
     "APP_SCHEDULING_ENABLED": "true",
     "APP_STUB_FAILURE_RATE": "0.3",
     "APP_STUB_MIN_DELAY_MILLIS": "3000",
-    "APP_STUB_MAX_DELAY_MILLIS": "7000"
+    "APP_STUB_MAX_DELAY_MILLIS": "7000",
+    "APP_STUB_HANG": "false",
+    "APP_PROCESSING_ABSOLUTE_TIMEOUT_SECONDS": "300"
   },
   "cards": [
     {
@@ -270,43 +272,80 @@
     {
       "id": "s07",
       "group": "07 외부 API 지연",
-      "title": "07 — 외부 생성 API 무한 지연",
-      "scenario": "07-external-api-hang.sh",
-      "basis": "6단계 결과 매트릭스 7번",
-      "injects": "스텁 지연을 600초로 올린다. 워커는 job 을 잡고 heartbeat 도 정상 갱신하며, 그저 영원히 돌아오지 않는다.",
-      "note": "\"서버는 완벽히 건강한데 돈이 묶여 있다\" 의 가장 순수한 형태다. CPU 8.65% — 바쁜 것도 아니다.",
+      "title": "07 — 외부 생성 API 지연 폭증 (타임아웃에 걸린다)",
+      "scenario": "07-external-api-timeout.sh",
+      "basis": "미실측 (step11 재실행이 중단돼 07 부터는 아직 다시 재지 못했다)",
+      "unmeasured": true,
+      "injects": "스텁 지연을 600초로 올린다. 사고는 step7 때와 똑같고 바뀐 것은 우리 쪽이다 — step11-A 의 타임아웃(20초)이 먼저 끊는다.",
+      "note": "아래 숫자는 예상이지 실측이 아니다. step7 의 실측(무한 지연·회수 0·380초 뒤에도 돈이 묶인 채)은 타임아웃이 없던 시절의 값이라 더 이상 이 사고의 기대값이 아니다. 근거는 application.yml 의 generation.timeout-seconds=20, max-attempts=3, retry-backoff 10초·4배다.",
       "expect": [
-        { "metric": "credit_job_oldest_pending_age_seconds", "expectation": "단조 증가 (실측 28 → 373)" },
-        { "metric": "credit_defense_total{point=\"worker_claim\",outcome=\"applied\"}", "expectation": "정확히 job 수 (실측 3 — churn 없음)" },
-        { "metric": "Redis ZSET heartbeats", "expectation": "PROCESSING 수와 같다" }
+        { "metric": "credit_defense_total{point=\"mark_failed\",outcome=\"applied\"}", "expectation": "예상(미실측): job 수 × 3 — 타임아웃은 생성 실패와 같은 경로다" },
+        { "metric": "credit_defense_total{point=\"final_refund\",outcome=\"applied\"}", "expectation": "예상(미실측): job 수. 20 + 10 + 20 + 40 + 20 ≈ 110초에 끝난다" },
+        { "metric": "credit_worker_slots_free", "expectation": "예상(미실측): 타임아웃 뒤 3 으로 복귀 — 08 과 갈리는 지점이 정확히 여기다" }
       ],
       "silent": [
-        { "metric": "credit_job_recovery_total{detector=\"heartbeat\"}", "expectation": "0 — heartbeat 가 살아 있으니 회수하지 않는 것이 옳다" },
-        { "metric": "credit_job_recovery_total{detector=\"backstop\"}", "expectation": "0 — 같은 이유" },
-        { "metric": "confirm/applied, mark_failed/applied, 5xx", "expectation": "0" }
+        { "metric": "credit_job_recovery_total 4종", "expectation": "예상(미실측) 0 — 워커가 멀쩡히 돌아왔으니 회수할 것이 없다" },
+        { "metric": "CreditPipelineStalled", "expectation": "예상(미실측): 울리지 않는다. 종결이 300초 안에 난다" },
+        { "metric": "confirm/applied, http 5xx", "expectation": "예상(미실측) 0" }
       ],
-      "alerts": [{ "name": "CreditPipelineStalled", "when": "job 생성 후 379초" }],
+      "alerts": [{ "name": "CreditRetryExhaustionRateHigh", "when": "예상(미실측): 소진율 100% 라 조건은 참이지만 for: 10m 이라 짧은 시나리오에서는 pending 까지만 간다" }],
       "buttons": [
         { "label": "지연 600초로 재기동", "action": "restart_app", "kind": "fault", "env": { "APP_STUB_MIN_DELAY_MILLIS": "600000", "APP_STUB_MAX_DELAY_MILLIS": "600000" } },
         { "label": "지연 기본값(3~7초) 복구", "action": "restart_app", "kind": "restore", "env": { "APP_STUB_MIN_DELAY_MILLIS": "3000", "APP_STUB_MAX_DELAY_MILLIS": "7000" } }
       ],
       "live": [
+        { "label": "worker_slots_free", "promql": "credit_worker_slots_free" },
         { "label": "oldest_pending_age", "promql": "credit_job_oldest_pending_age_seconds" },
         { "label": "outstanding_count", "promql": "credit_hold_outstanding_count" },
-        { "label": "worker_claim/applied", "promql": "credit_defense_total{point=\"worker_claim\",outcome=\"applied\"}" },
-        { "label": "recovery{heartbeat}", "promql": "credit_job_recovery_total{detector=\"heartbeat\"}" },
-        { "label": "recovery{backstop}", "promql": "credit_job_recovery_total{detector=\"backstop\"}" },
-        { "label": "confirm/applied", "promql": "credit_defense_total{point=\"confirm\",outcome=\"applied\"}" }
+        { "label": "mark_failed/applied", "promql": "credit_defense_total{point=\"mark_failed\",outcome=\"applied\"}" },
+        { "label": "final_refund/applied", "promql": "credit_defense_total{point=\"final_refund\",outcome=\"applied\"}" },
+        { "label": "recovery{hard_cap}", "promql": "credit_job_recovery_total{detector=\"hard_cap\"}" }
       ]
     },
     {
       "id": "s08",
-      "group": "08 외부 API 실패",
-      "title": "08 — 외부 생성 API 전부 실패",
+      "group": "08 멈춘 워커",
+      "title": "08 — 멈춘 워커 (타임아웃조차 먹지 않는 무응답)",
+      "scenario": "08-worker-hang.sh",
+      "basis": "미실측 (step11 에서 새로 만든 시나리오. 재실행이 중단돼 아직 한 번도 끝까지 돌지 못했다)",
+      "unmeasured": true,
+      "injects": "APP_STUB_HANG=true. 생성 호출이 영원히 돌아오지 않는다. 워커 스레드는 묶이고, 종지기는 워커 상태를 보지 않으므로 heartbeat 는 영원히 LIVE 다.",
+      "note": "이 카드의 논지는 \"막았다\" 가 아니라 \"막지 못한 것을 보이게 했다\" 이다. 절대 상한은 **돈만 푼다** — 멈춘 스레드를 깨울 수단이 없어 슬롯은 재기동 전까지 돌아오지 않는다. 버튼의 절대 상한 90초는 시나리오용으로 낮춘 값이다(기본 300초면 시도 3회에 15분). 90 인 이유는 app.processing.timeout-seconds(60)보다 커야 하기 때문이고, 그 60 은 드레인 상한이기도 해서 대신 낮추지 않는다.",
+      "expect": [
+        { "metric": "credit_job_recovery_total{detector=\"hard_cap\"}", "expectation": "예상(미실측): 시도 횟수만큼(3) — 절대 상한이 돈을 푼다" },
+        { "metric": "credit_defense_total{point=\"final_refund\",outcome=\"applied\"}", "expectation": "예상(미실측): job 수. 잔액이 원복된다" },
+        { "metric": "credit_worker_slots_free", "expectation": "예상(미실측): 회수될 때마다 하나씩 줄고 **돌아오지 않는다**. 0 에 붙으면 새 job 은 HOLDING 에서 늙는다" }
+      ],
+      "silent": [
+        { "metric": "credit_job_recovery_total{detector=\"heartbeat\"}", "expectation": "예상(미실측) 0 — heartbeat 가 LIVE 라 만료 그물에 안 걸린다" },
+        { "metric": "credit_job_recovery_total{detector=\"backstop\"}", "expectation": "예상(미실측) 0 — 같은 이유. 이 둘이 침묵하는 것이 hard_cap 이 필요한 이유 그 자체다" },
+        { "metric": "credit_invariant_* 4종, http 5xx", "expectation": "예상(미실측) 0 — 돈은 정상 경로로 풀린다" }
+      ],
+      "alerts": [
+        { "name": "CreditHardCapRecovery", "when": "예상(미실측): 첫 회수 직후. 절대 상한 발화 자체가 \"워커가 멈췄다\" 는 신호다" },
+        { "name": "CreditWorkerSlotsExhausted", "when": "예상(미실측): 빈 슬롯이 0 이 되고 5분 뒤. 이 누수를 사람에게 알리는 유일한 장치다" }
+      ],
+      "buttons": [
+        { "label": "무응답(hang) 켜고 절대 상한 90초로 재기동", "action": "restart_app", "kind": "fault", "env": { "APP_STUB_HANG": "true", "APP_PROCESSING_ABSOLUTE_TIMEOUT_SECONDS": "90" } },
+        { "label": "기본값 복구 (hang 끄고 상한 300초)", "action": "restart_app", "kind": "restore", "env": { "APP_STUB_HANG": "false", "APP_PROCESSING_ABSOLUTE_TIMEOUT_SECONDS": "300" } }
+      ],
+      "live": [
+        { "label": "worker_slots_free", "promql": "credit_worker_slots_free" },
+        { "label": "recovery{hard_cap}", "promql": "credit_job_recovery_total{detector=\"hard_cap\"}" },
+        { "label": "recovery{heartbeat}", "promql": "credit_job_recovery_total{detector=\"heartbeat\"}" },
+        { "label": "recovery{backstop}", "promql": "credit_job_recovery_total{detector=\"backstop\"}" },
+        { "label": "final_refund/applied", "promql": "credit_defense_total{point=\"final_refund\",outcome=\"applied\"}" },
+        { "label": "outstanding_count", "promql": "credit_hold_outstanding_count" }
+      ]
+    },
+    {
+      "id": "s09",
+      "group": "09 외부 API 실패",
+      "title": "09 — 외부 생성 API 전부 실패",
       "basis": "미실측 (시나리오 스크립트가 없는 카드다)",
       "unmeasured": true,
       "injects": "스텁 실패율을 1.0 으로 올려 재기동한다. 모든 생성이 실패하고 재시도를 소진한 뒤 최종 환불로 끝난다.",
-      "note": "아래 숫자는 예상이지 실측이 아니다. 근거는 application.yml 의 generation.max-attempts=3, stub.min/max-delay-millis=3000/7000, worker.batch-size=3, worker.concurrency=3 이다. 재시도 간격은 별도 백오프 설정이 없고 회수/디스패치 주기에 따른다.",
+      "note": "아래 숫자는 예상이지 실측이 아니다. 근거는 application.yml 의 generation.max-attempts=3, stub.min/max-delay-millis=3000/7000, worker.batch-size=3, worker.concurrency=3 이다. 재시도 간격은 step11-C 의 지수 backoff 를 탄다 — generation.retry-backoff 가 base 10초·4배라 시도 상한 3 에서는 10초와 40초다. job 하나가 종결까지 최대 +50초를 더 쓴다.",
       "expect": [
         { "metric": "credit_defense_total{point=\"mark_failed\",outcome=\"applied\"}", "expectation": "예상(미실측): job 수 × 시도 횟수(max-attempts 3)" },
         { "metric": "credit_defense_total{point=\"retry_claim\",outcome=\"applied\"}", "expectation": "예상(미실측): job 수 × (3 − 1) = 재시도 횟수만큼" },
@@ -330,9 +369,9 @@
       ]
     },
     {
-      "id": "s09",
-      "group": "09 앱 정지",
-      "title": "09 — 앱 정지",
+      "id": "s10",
+      "group": "10 앱 정지",
+      "title": "10 — 앱 정지",
       "basis": "5단계 알람 규칙 (CreditSystemDown, for: 30s)",
       "injects": "앱을 SIGKILL 하고 그대로 둔다. 관리 포트(8081)에 닿지 않으므로 스크레이프 자체가 없다.",
       "note": "이때 다른 모든 지표는 침묵한다 — 값이 0 이 아니라 시계열이 끊긴다. 아래 \"지금 값\" 이 \"없음\" 으로 바뀌는 것이 그 증거다.",

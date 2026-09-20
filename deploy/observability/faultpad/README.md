@@ -68,5 +68,7 @@ python3 -m json.tool deploy/observability/faultpad/catalog.json > /dev/null
 ```
 
 카드의 기댓값은 [`docs/step7-observability.md`](../../../docs/step7-observability.md) 6단계
-결과 매트릭스와 후속 1 실측에서 그대로 옮긴 것이다. **08(외부 API 전부 실패)만 실측이 없어
-화면에 "예상(미실측)" 이라고 표시된다.**
+결과 매트릭스와 후속 1 실측에서 옮긴 것이고, 07(지연 → 타임아웃)과 08(멈춘 워커)은
+[`docs/step11-external.md`](../../../docs/step11-external.md) 의 재실행 실측이다.
+**09(외부 API 전부 실패)만 실측이 없어 화면에 "예상(미실측)" 이라고 표시된다.**
+step11 에서 08(멈춘 워커)이 새로 생기면서 예전 08·09 카드는 09·10 으로 밀렸다.

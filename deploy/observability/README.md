@@ -84,14 +84,15 @@ docker compose -f deploy/observability/docker-compose.yml exec mysql \
 docker compose -f deploy/observability/docker-compose.yml logs -f app
 ```
 
-## 장애 주입 시나리오 (step7 6단계)
+## 장애 주입 시나리오 (step7 6단계, step11 에서 08 추가)
 
-`scenarios/` 의 7개 스크립트는 사고를 실제로 심고, **어느 지표가 반응하고 어느 지표가
+`scenarios/` 의 8개 스크립트는 사고를 실제로 심고, **어느 지표가 반응하고 어느 지표가
 침묵하는지, 감지까지 몇 초 걸리는지**를 실측한다. 해석과 실측값은
-[`docs/step7-observability.md`](../../docs/step7-observability.md) 의 6단계에 있다.
+[`docs/step7-observability.md`](../../docs/step7-observability.md) 의 6단계에 있고,
+07·08 의 해석과 step11 재실행 상태(01·02 만 실측하고 중단됐다)는 [`docs/step11-external.md`](../../docs/step11-external.md) 에 있다.
 
 ```
-# 전체 (30~50분, 마지막에 down -v 까지 한다)
+# 전체 (40~60분, 마지막에 down -v 까지 한다)
 ./deploy/observability/scenarios/run-all.sh
 
 # 하나만 (각 스크립트가 시작할 때 down -v → up 을 하므로 단독 실행된다)
@@ -106,7 +107,15 @@ docker compose -f deploy/observability/docker-compose.yml logs -f app
 | `04-scheduler-stopped.sh` | 스케줄러 정지(`APP_SCHEDULING_ENABLED=false`) | ~4분 |
 | `05-ledger-corruption.sh` | SQL 로 잔액·원장을 직접 훼손하고 원복 | ~5분 |
 | `06-duplicate-storm.sh` | 같은 idemKey 로 100건 동시 요청 | ~2분 |
-| `07-external-api-hang.sh` | 외부 생성 API 무한 지연(스텁 600초) | ~9분 |
+| `07-external-api-timeout.sh` | 외부 생성 API 지연 폭증(스텁 600초) → 20초 타임아웃에 걸린다 | ~4분(예상) |
+| `08-worker-hang.sh` | 외부 생성 API 무응답(`APP_STUB_HANG=true`) → 절대 상한 회수와 **슬롯 누수** | ~10분(예상) |
+
+07 은 step7 때와 **같은 사고(600초 지연)를 그대로** 심는다. 바뀐 것은 우리 쪽이다 —
+11-A 의 타임아웃(20초)이 먼저 끊으므로 이제 "무한 지연"이 아니라 "느린 외부"다.
+타임아웃조차 먹지 않는 진짜 무응답은 08 이고, 08 은 기본 절대 상한 300초 대신
+`APP_PROCESSING_ABSOLUTE_TIMEOUT_SECONDS=90` 으로 낮춰 돈다(근거는 스크립트 주석).
+08 이 10분을 쓰는 이유는 `CreditWorkerSlotsExhausted` 가 실제로 fire 되는 것(`free==0` 이 5분 지속)까지
+기다리기 때문이다 — 슬롯 누수를 사람에게 알리는 유일한 장치라 pending 까지만 보고 끝내면 의미가 없다.
 
 각 스크립트는 끝에 **기대 vs 관측** 표를 stdout 으로 낸다. 사고 주입에 쓰는 env 는
 `docker-compose.yml` 의 `APP_*` 통과 항목이고, 전부 스크립트 안(`restart_app_with`)에서만

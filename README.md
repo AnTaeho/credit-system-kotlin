@@ -130,7 +130,7 @@ CI 는 GitHub Actions 다. PR 이면 [`ci.yml`](.github/workflows/ci.yml) 이 `t
 
 ## 관측 스택
 
-Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 compose 로 들어 있다. 워커를 죽이고 Redis 를 내리고 원장을 SQL 로 깨서 **어느 지표가 반응하고 어느 지표가 침묵하는지** 실측한 기록이 그 안에 있다.
+Prometheus + Grafana + 알람 규칙 14개 + 장애 주입 시나리오 8개가 별도 compose 로 들어 있다. 워커를 죽이고 Redis 를 내리고 원장을 SQL 로 깨고 외부 생성기를 영원히 멈춰 세워서 **어느 지표가 반응하고 어느 지표가 침묵하는지** 실측한 기록이 그 안에 있다.
 
 → [`deploy/observability/README.md`](deploy/observability/README.md)
 
@@ -142,8 +142,8 @@ Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 comp
 
 | | |
 |---|---|
-| [`STEPS.md`](STEPS.md) | 학습 브랜치 체인 전체 지도. step0(방어 없음) → step9(인증) |
-| [`docs/step0-naive.md`](docs/step0-naive.md) … [`docs/step9-auth.md`](docs/step9-auth.md) | 단계별 상세. 실제 코드 인용, 테스트가 무엇을 단언하는지, 무엇이 남았는지 |
+| [`STEPS.md`](STEPS.md) | 학습 브랜치 체인 전체 지도. step0(방어 없음) → step11(외부 호출 안전화) |
+| [`docs/step0-naive.md`](docs/step0-naive.md) … [`docs/step11-external.md`](docs/step11-external.md) | 단계별 상세. 실제 코드 인용, 테스트가 무엇을 단언하는지, 무엇이 남았는지 |
 | [`docs/roadmap.md`](docs/roadmap.md) | 앞으로. 지금 무엇이 실서비스 수준이 아닌지의 진단표와 step8~14 의 결정·완료 기록 |
 | [`deploy/observability/README.md`](deploy/observability/README.md) | 관측 스택 띄우기·시나리오 |
 
@@ -160,9 +160,12 @@ Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 comp
 | DB | `jdbc:mysql://localhost:3306/credit_system`, `credit` / `credit` |
 | Redis | `localhost:6379` |
 | 생성 비용 / 최대 시도 | 100 크레딧 / 3회 |
-| 스텁 지연 / 실패율 | 3~7초 / 0.3 |
+| 외부 생성 호출 타임아웃 | 20초 (`app.generation.timeout-seconds`) |
+| 재시도 backoff | 10초 · 4배 · 상한 300초 → 시도 3회면 실제로는 10초·40초 |
+| 스텁 지연 / 실패율 / hang | 3~7초 / 0.3 / 꺼짐(`app.stub.hang`, 장애 주입 전용) |
 | heartbeat timeout / 갱신 주기 | 10초 / 5초 |
-| 처리 상한(회수) | 60초 |
+| 처리 상한(회수 후보 선정 = 드레인 상한) | 60초 |
+| 처리 절대 상한(heartbeat 가 LIVE 여도 회수) | 300초 (`app.processing.absolute-timeout-seconds`) |
 | 로그인 허용 목록 / 운영자 | 비어 있음(아무도 못 들어온다). local 프로필은 `dev@local.test` / `admin@local.test` |
 | 운영자 지급 1회 상한 | 1,000,000 |
 
@@ -190,6 +193,8 @@ Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 comp
 
 - **로그인할 수 있는 사람은 허용 목록뿐이다.** 공개 가입이 없다. 실사용자가 나 한 명인 서비스다([로드맵](docs/roadmap.md) 결정 9)
 - **크레딧은 운영자 지급으로만 생긴다.** 결제 충전은 step14 다
-- **생성이 스텁이다.** `GenerationStubClient` 는 `Thread.sleep` + 확률적 실패인 인메모리 시뮬레이션이다. 네트워크 너머로 나가는 것은 step11 이다
+- **생성이 아직 스텁이다.** `GenerationClient` 포트는 step11 에서 생겼지만, 그 자리에 든 구현은 `Thread.sleep` + 확률적 실패인 인메모리 시뮬레이션이다. 진짜 Claude 는 step12 다
+- **멈춘 워커의 슬롯은 재기동 전까지 돌아오지 않는다.** 외부 호출이 타임아웃조차 먹지 않고 멈추면(`app.stub.hang`) 절대 상한이 **돈만 푼다** — job 은 환불까지 흘러가지만 그 워커 스레드는 깨울 수단이 없다. 슬롯이 전부 묶이면 새 job 은 접수만 되고 HOLDING 에서 늙는다
+- **그 누수를 보는 곳은 `credit_worker_slots_free` 하나다.** job 상태 어디에도 적히지 않는다. 5분 연속 0 이면 `CreditWorkerSlotsExhausted`(P2)가 울리고, 대시보드의 "워커 슬롯" 행에 게이지가 있다. 복구는 재기동뿐이다
 - **인스턴스 1대 전제다.** 회수·대사·멱등키 정리 스케줄러에 분산 락이 없다. 실사용자가 한 명이라 서버도 1대로 운영하기로 했다(로드맵 결정 13)
 - **내가 실제로 쓰는 개인 서비스로 가는 중이다.** 원화로 앱 내 크레딧을 충전(mock)하고, 그 크레딧으로 Claude API 요청을 산다(로드맵 v4). 돈이 걸린 시스템에서 무엇이 깨지고 무엇으로 막는지를 코드와 실측으로 남기는 원칙은 그대로다

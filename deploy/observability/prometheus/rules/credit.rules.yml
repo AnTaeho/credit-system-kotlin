@@ -103,6 +103,19 @@ groups:
           summary: "blind backstop 회수 {{ $value }}건"
           description: "heartbeat 저장소에 닿지 않아 updatedAt 만으로 회수했다. Redis 를 확인하라. 이 회수는 오탐일 수 있으며, 오탐이면 credit_defense_total{point=\"confirm\",outcome=\"stale\"} 이 함께 오른다."
 
+      # step11-B 의 절대 상한이 발화했다는 사실 자체가 사건이다. backstop 두 알람과 원인이
+      # 다르므로 따로 둔다 — 저 둘은 heartbeat 가 안 보여서 회수한 것이고, 이쪽은 heartbeat 가
+      # "살아 있다"고 말하는데도 회수한 것, 즉 **워커 스레드가 멈췄다**는 신호다.
+      # 규칙끼리 겹치지 않는다: 세 규칙 모두 detector 값을 정확히 하나씩 짚는다.
+      - alert: CreditHardCapRecovery
+        expr: increase(credit_job_recovery_total{detector="hard_cap"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: P2
+        annotations:
+          summary: "절대 상한 회수 {{ $value }}건 — 워커가 멈췄다"
+          description: "heartbeat 가 LIVE 인데도 PROCESSING 이 app.processing.absolute-timeout-seconds 를 넘겨 회수됐다. 돈은 풀렸지만 **그 워커 슬롯은 재기동 전까지 돌아오지 않는다.** credit_worker_slots_free 를 함께 보라. 정상인데 아주 느린 job 을 잡은 오회수일 수도 있고, 그때 대가는 낭비된 외부 호출 1회다."
+
       - alert: CreditSystemDown
         expr: up{job="credit_system"} == 0
         for: 30s
@@ -137,3 +150,23 @@ groups:
         annotations:
           summary: "선점 후 executor 거부로 롤백 {{ $value }}건"
           description: "후속 2 이후 이 경로는 안전망일 뿐 정상 경로가 아니다. 디스패처가 둘 이상 겹쳤거나 슬롯 계산이 틀렸다. GenerationWorker.dispatchPendingJobs 를 의심하라."
+
+      # step11-B 의 한계를 사람에게 알리는 **유일한** 장치다.
+      # 절대 상한은 돈만 푼다 — 멈춘 워커 스레드를 깨울 수단이 없으므로 슬롯은 재기동 전까지
+      # 하나씩 영구히 사라진다. job 상태 어디에도 그 손실은 적히지 않는다. 남는 흔적이 이 게이지뿐이다.
+      #
+      # 임계값 유도(step7 의 방식 그대로 설정값에서 뽑는다):
+      #   - 값은 `== 0`. "몇 개 남았나"가 아니라 "한 자리도 없나"가 판정이다
+      #   - for 는 app.processing.absolute-timeout-seconds(기본 300초 = 5분)와 같게 둔다.
+      #     그 시간이면 묶인 job 은 절대 상한이 이미 회수해 슬롯이 풀렸어야 한다. 그러고도
+      #     여전히 0 이면 backlog(처리량이 많아 잠깐 꽉 찬 것)가 아니라 **누수**다.
+      #     기본값(concurrency 3, generation.timeout-seconds 20)에서 정상 포화가 5분 연속
+      #     이어지려면 대기열이 45건 넘게 쌓여야 하는데, 사용자 한 명 규모에서는 일어나지 않는다
+      - alert: CreditWorkerSlotsExhausted
+        expr: credit_worker_slots_free == 0
+        for: 5m
+        labels:
+          severity: P2
+        annotations:
+          summary: "워커 빈 슬롯이 5분째 0"
+          description: "워커 스레드가 묶여 돌아오지 않을 가능성이 높다(멈춘 외부 호출). 새 job 은 접수만 되고 디스패치되지 않아 HOLDING 에서 늙는다. credit_job_recovery_total{detector=\"hard_cap\"} 이 함께 올랐으면 확정이다 — 돈은 풀렸지만 슬롯은 재기동으로만 돌아온다. 앱을 재기동하라."
