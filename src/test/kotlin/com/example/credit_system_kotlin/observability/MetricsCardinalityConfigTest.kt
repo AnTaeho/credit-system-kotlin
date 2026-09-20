@@ -1,5 +1,8 @@
 package com.example.credit_system_kotlin.observability
 
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
+import com.example.credit_system_kotlin.job.event.RecoveryDetector
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -62,6 +65,22 @@ class MetricsCardinalityConfigTest {
         Counter.builder("credit.defense").tag("point", "confirm").tag("outcome", "stale").register(registry)
 
         assertThat(registry.find("credit.defense").counter()).isNotNull()
+    }
+
+    /**
+     * 상한 주석이 적고 있는 "point 7개, outcome 8개, detector 4개"를 실제와 맞춘다.
+     * 이 프로젝트는 주석의 숫자가 실제와 어긋나는 것을 결함으로 센다(커밋 2dc5b0a).
+     * enum 에 값을 더하면 여기가 먼저 깨져서 주석을 같이 고치게 만든다.
+     */
+    @Test
+    fun `상한 주석이 세는 태그 값 개수가 실제 enum 과 같다`() {
+        assertThat(DefensePoint.entries).hasSize(7)
+        assertThat(DefenseOutcome.entries).hasSize(8)
+        assertThat(RecoveryDetector.entries).hasSize(4)
+
+        // 상한 32는 "enum 이 지금의 네 배가 돼도 안 걸린다"는 뜻이었다. 그 여유가 아직 있는지도 본다.
+        val largest = maxOf(DefensePoint.entries.size, DefenseOutcome.entries.size, RecoveryDetector.entries.size)
+        assertThat(largest * 4).isLessThanOrEqualTo(MetricsCardinalityConfig.MAX_TAG_VALUES)
     }
 
     @Test

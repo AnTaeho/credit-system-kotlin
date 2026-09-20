@@ -52,10 +52,11 @@ class DeadJobRecoveryTaskTest {
         whenever(heartbeatRegistry.findExpiredAttempts()).thenReturn(emptySet())
     }
 
-    private fun staleProcessingJob(id: Long): Job {
+    private fun staleProcessingJob(id: Long, updatedAt: Instant = Instant.now()): Job {
         val job = Job.hold(1L, 100L, "cat")
         ReflectionTestUtils.setField(job, "id", id)
         ReflectionTestUtils.setField(job, "status", JobStatus.PROCESSING)
+        ReflectionTestUtils.setField(job, "updatedAt", updatedAt)
         return job
     }
 
@@ -86,8 +87,12 @@ class DeadJobRecoveryTaskTest {
         verify(heartbeatRegistry).removeHeartbeat(20L, 0)
     }
 
+    /**
+     * 오회수 방지 경계. heartbeat 가 LIVE 이고 `updatedAt` 이 절대 상한(기본 300초) 안이면
+     * 건너뛴다 — 절대 상한이 생겨도 이 기본 동작은 그대로다.
+     */
     @Test
-    fun `정체된 PROCESSING job이라도 live heartbeat가 있으면 회수하지 않는다`() {
+    fun `정체된 PROCESSING job이라도 live heartbeat가 있고 절대 상한 안이면 회수하지 않는다`() {
         val job = staleProcessingJob(21L)
         whenever(
             jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
@@ -273,6 +278,52 @@ class DeadJobRecoveryTaskTest {
                 assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP_BLIND)
                 assertThat(it.jobId).isEqualTo(64L)
             })
+    }
+
+    /**
+     * 멈춘 워커의 구멍. 종지기는 워커를 보지 않고 계속 갱신하므로 heartbeat 는 영원히 LIVE 다.
+     * 절대 상한만이 이 job 의 돈을 푼다.
+     */
+    @Test
+    fun `live heartbeat여도 절대 상한을 넘기면 HARD_CAP으로 회수한다`() {
+        val job = staleProcessingJob(66L, updatedAt = Instant.now().minusSeconds(400))
+        whenever(
+            jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
+                eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
+            )
+        ).thenReturn(listOf(job))
+        whenever(heartbeatRegistry.heartbeatState(66L, 0)).thenReturn(HeartbeatState.LIVE)
+        whenever(jobRepository.failIfProcessing(eq(66L), eq(0), any<Instant>())).thenReturn(1)
+
+        task.scan()
+
+        verify(jobRepository).failIfProcessing(eq(66L), eq(0), any<Instant>())
+        verify(heartbeatRegistry).removeHeartbeat(66L, 0)
+        assertThat(eventPublisher.recoveryEvents())
+            .singleElement()
+            .satisfies({
+                assertThat(it.detector).isEqualTo(RecoveryDetector.HARD_CAP)
+                assertThat(it.jobId).isEqualTo(66L)
+            })
+    }
+
+    /** 절대 상한을 넘겼어도 heartbeat 를 못 본 회수는 여전히 Redis 장애 신호로 남아야 한다. */
+    @Test
+    fun `절대 상한을 넘긴 job이라도 heartbeat를 못 보면 BACKSTOP_BLIND다`() {
+        val job = staleProcessingJob(67L, updatedAt = Instant.now().minusSeconds(400))
+        whenever(
+            jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
+                eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
+            )
+        ).thenReturn(listOf(job))
+        whenever(heartbeatRegistry.heartbeatState(67L, 0)).thenReturn(HeartbeatState.UNKNOWN)
+        whenever(jobRepository.failIfProcessing(eq(67L), eq(0), any<Instant>())).thenReturn(1)
+
+        task.scan()
+
+        assertThat(eventPublisher.recoveryEvents())
+            .singleElement()
+            .satisfies({ assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP_BLIND) })
     }
 
     @Test

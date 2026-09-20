@@ -80,7 +80,11 @@ app:
     timeout-seconds: 10
     refresh-interval-seconds: 5
   processing:
+    # PROCESSING 정체 회수의 후보 선정 기준. 이보다 오래 PROCESSING 이면 스캔에 걸린다.
     timeout-seconds: 60
+    # heartbeat 가 LIVE 여도 이만큼 지났으면 내린다. 멈춘 워커의 종지기는 영원히 갱신하므로
+    # 이 상한이 없으면 돈이 held 에 영구히 묶인다. timeout-seconds 보다 반드시 커야 한다.
+    absolute-timeout-seconds: 300
 
 management:
   endpoints:

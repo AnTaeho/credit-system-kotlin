@@ -72,12 +72,14 @@ class DeadJobRecoveryTask(
     }
 
     private fun markStalledJobsAsFailed() {
-        val cutoff = Instant.now().minusSeconds(appProperties.processing.timeoutSeconds)
+        val now = Instant.now()
+        val cutoff = now.minusSeconds(appProperties.processing.timeoutSeconds)
+        val hardCapCutoff = now.minusSeconds(appProperties.processing.absoluteTimeoutSeconds)
         val stalled = jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
             JobStatus.PROCESSING, cutoff, PageRequest.of(0, SCAN_BATCH_SIZE)
         )
         for (job in stalled) {
-            recoverStalled(job)
+            recoverStalled(job, hardCapCutoff)
         }
     }
 
@@ -89,24 +91,26 @@ class DeadJobRecoveryTask(
      * 회수를 멈추면 장치가 스스로를 부정한다. 대신 오탐 가능성을 라벨로 남긴다 —
      * 살아 있는 job 을 잘못 내려도 attemptNo CAS 가 돈을 지키고(원래 워커의 confirm 은 0행),
      * 비용은 낭비된 외부 호출 1회다.
+     *
+     * heartbeat 가 LIVE 여도 [AppProperties.Processing.absoluteTimeoutSeconds] 를 넘겼으면
+     * 회수한다([RecoveryDetector.HARD_CAP]). 근거는 아래 [detectorFor] 주석에 있다.
      */
-    private fun recoverStalled(job: Job) {
+    private fun recoverStalled(job: Job, hardCapCutoff: Instant) {
         try {
             val jobId = job.persistedId
             val state = heartbeatRegistry.heartbeatState(jobId, job.attemptNo)
-            if (state == HeartbeatState.LIVE) {
-                return
-            }
-            if (state == HeartbeatState.UNKNOWN) {
-                log.warn(
-                    "heartbeat 저장소에 닿지 않아 updatedAt 만으로 회수: jobId={}, attemptNo={}",
-                    jobId, job.attemptNo
-                )
-            }
+            val detector = detectorFor(state, job.updatedAt.isBefore(hardCapCutoff), jobId, job.attemptNo)
+                ?: return
             val updated = jobRepository.failIfProcessing(jobId, job.attemptNo, Instant.now())
             if (updated == 1) {
                 log.info("PROCESSING 정체 job 회수, FAILED 전이: jobId={}, attemptNo={}", jobId, job.attemptNo)
-                eventPublisher.publishEvent(JobRecovered(jobId, job.attemptNo, detectorFor(state)))
+                eventPublisher.publishEvent(JobRecovered(jobId, job.attemptNo, detector))
+                // 좀비의 종지기는 여기서 지워도 5초 뒤 같은 멤버를 다시 써넣는다. 워커 스레드가
+                // 끝나야 finally 의 stopHeartbeat 가 돌기 때문이다. 즉 ZSET 에 고아 멤버가 남고,
+                // 계속 갱신되므로 findExpiredAttempts 에는 잡히지도 않는다. 무해한 이유는
+                // HeartbeatRegistry.removeHeartbeat 주석 그대로다 — 언젠가 만료돼 다시 집혀도
+                // 그 job 은 이미 PROCESSING 이 아니라 failIfProcessing 이 0행을 돌려준다.
+                // 고아 자체를 없애려면 멈춘 스레드를 깨울 수단이 있어야 한다. 이번 조각 밖이다.
                 heartbeatRegistry.removeHeartbeat(jobId, job.attemptNo)
             }
         } catch (e: RuntimeException) {
@@ -114,8 +118,46 @@ class DeadJobRecoveryTask(
         }
     }
 
-    private fun detectorFor(state: HeartbeatState): RecoveryDetector = when (state) {
-        HeartbeatState.UNKNOWN -> RecoveryDetector.BACKSTOP_BLIND
+    /**
+     * 회수할지, 한다면 무엇이 잡은 것으로 셀지 판정한다. `null` 이면 이번 주기에는 건너뛴다.
+     *
+     * - LIVE + 절대 상한 이내 → 건너뜀. 워커가 살아 있다고 믿는다. 여기가 기본 동작이다.
+     * - LIVE + 절대 상한 초과 → [RecoveryDetector.HARD_CAP]. heartbeat 는 "이 프로세스가
+     *   살아 있다"만 말할 뿐 워커 스레드가 일하고 있다는 뜻이 아니다. 멈춘 워커의
+     *   종지기는 영원히 갱신하므로 이 상한이 없으면 돈이 영구히 묶인다.
+     * - ABSENT → [RecoveryDetector.BACKSTOP]. heartbeat 누수 신호.
+     * - UNKNOWN → [RecoveryDetector.BACKSTOP_BLIND]. Redis 장애 신호.
+     *
+     * HARD_CAP 은 **정상인데 아주 느린 job 도 잡는다.** 그 대가를 알고 받아들인다 — 잘못
+     * 내려도 attemptNo CAS 가 돈을 지키고(원래 워커의 confirm/markFailed 는 0행 = STALE),
+     * 비용은 낭비된 외부 호출 1회다. 반대로 상한이 없으면 대가는 영구히 묶인 돈이다.
+     */
+    private fun detectorFor(
+        state: HeartbeatState,
+        pastHardCap: Boolean,
+        jobId: Long,
+        attemptNo: Int
+    ): RecoveryDetector? = when {
+        state == HeartbeatState.LIVE && !pastHardCap -> null
+
+        state == HeartbeatState.LIVE -> {
+            log.warn(
+                "heartbeat 는 LIVE 지만 절대 상한을 넘겨 회수한다(멈춘 워커로 판정). " +
+                    "정상인데 느린 job 이었다면 원래 워커의 전이가 0행으로 막히고 외부 호출 1회를 버린다: " +
+                    "jobId={}, attemptNo={}, updatedAt 기준 상한={}초",
+                jobId, attemptNo, appProperties.processing.absoluteTimeoutSeconds
+            )
+            RecoveryDetector.HARD_CAP
+        }
+
+        state == HeartbeatState.UNKNOWN -> {
+            log.warn(
+                "heartbeat 저장소에 닿지 않아 updatedAt 만으로 회수: jobId={}, attemptNo={}",
+                jobId, attemptNo
+            )
+            RecoveryDetector.BACKSTOP_BLIND
+        }
+
         else -> RecoveryDetector.BACKSTOP
     }
 

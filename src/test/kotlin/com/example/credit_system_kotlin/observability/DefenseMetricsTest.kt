@@ -81,6 +81,12 @@ class DefenseMetricsTest {
         assertThat(recoveryCount("backstop_blind"))
             .describedAs("backstop_blind 도 RecoveryDetector.entries 를 따라 0으로 깔려 있어야 한다")
             .isZero()
+        assertThat(recoveryCount("hard_cap"))
+            .describedAs("hard_cap 도 RecoveryDetector.entries 를 따라 0으로 깔려 있어야 한다")
+            .isZero()
+        assertThat(registry.get(DefenseMetrics.RECOVERY_METRIC).counters())
+            .describedAs("detector 태그 값 개수는 enum 과 정확히 같아야 한다")
+            .hasSize(RecoveryDetector.entries.size)
 
         val registeredCombinations = registry.get(DefenseMetrics.DEFENSE_METRIC).counters().size
         assertThat(registeredCombinations).isEqualTo(expected.values.sumOf { it.size })

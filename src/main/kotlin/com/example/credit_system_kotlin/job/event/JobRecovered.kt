@@ -1,7 +1,7 @@
 package com.example.credit_system_kotlin.job.event
 
 /**
- * 죽은 job 을 되살린 감지 장치. 두 겹으로 두고, 어느 쪽이 잡았는지를 구분해서 센다.
+ * 죽은 job 을 되살린 감지 장치. 여러 겹으로 두고, 어느 쪽이 잡았는지를 구분해서 센다.
  *
  * 백스톱이 둘로 갈리는 것은 **판정의 확신도가 다르기 때문**이다. heartbeat 를 조회해 보고
  * 없다고 확인한 회수와, 조회 자체를 못 한 채 `updatedAt` 만 믿고 내린 회수는 같은 사실이 아니다.
@@ -23,7 +23,22 @@ enum class RecoveryDetector {
      * 판정했을 가능성이 남는다. 오탐이면 원래 워커가 뒤늦게 돌아왔을 때
      * attemptNo CAS 가 0행으로 막아 `confirm/stale` 이 함께 오른다.
      */
-    BACKSTOP_BLIND
+    BACKSTOP_BLIND,
+
+    /**
+     * heartbeat 는 **LIVE 인데도** `updatedAt` 이 절대 상한을 넘겨 회수했다.
+     *
+     * heartbeat 는 "이 프로세스가 살아 있다"만 말한다. 워커 스레드가 외부 호출에 멈춰도
+     * 종지기 스레드는 워커를 보지 않고 계속 갱신하므로 heartbeat 는 영원히 LIVE 다.
+     * 그래서 HEARTBEAT 도 BACKSTOP 도 잡지 못하는 구멍이 생긴다 — **멈춘 워커 신호**다.
+     *
+     * 이 값이 오르면 돈은 풀렸지만 **워커 스레드는 돌아오지 않았다.** 슬롯 누수를 같이
+     * 봐야 하므로 `credit.worker.slots.free` 게이지를 함께 읽는다.
+     *
+     * 정상인데 아주 느린 job 을 잘못 잡았을 수도 있다. 그때도 attemptNo CAS 가 돈을
+     * 지키고(원래 워커의 전이는 0행 = `stale`), 대가는 낭비된 외부 호출 1회다.
+     */
+    HARD_CAP
 }
 
 /**

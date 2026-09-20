@@ -55,3 +55,4 @@ app:
     refresh-interval-seconds: 5
   processing:
     timeout-seconds: 60
+    absolute-timeout-seconds: 300

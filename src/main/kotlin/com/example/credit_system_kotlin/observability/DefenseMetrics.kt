@@ -78,7 +78,9 @@ class DefenseMetrics(
         Counter.builder(RECOVERY_METRIC)
             .description(
                 "죽은 job 을 FAILED 로 회수한 횟수. detector=backstop 이 0이 아니면 heartbeat 누수, " +
-                    "backstop_blind 는 heartbeat 저장소 장애 중 updatedAt 만으로 회수한 것이다"
+                    "backstop_blind 는 heartbeat 저장소 장애 중 updatedAt 만으로 회수한 것이다. " +
+                    "hard_cap 은 heartbeat 가 LIVE 인데도 절대 상한을 넘겨 회수한 것 — 멈춘 워커 신호이며, " +
+                    "돈은 풀렸지만 스레드는 묶여 있으므로 credit.worker.slots.free 를 같이 읽어야 한다"
             )
             .tag("detector", detector.name.lowercase())
             .register(registry)
