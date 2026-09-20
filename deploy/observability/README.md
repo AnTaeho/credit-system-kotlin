@@ -57,19 +57,6 @@ curl -X POST http://localhost:8080/api/admin/users/1/grants \
 curl http://localhost:8080/api/users/me/balance -H 'X-Dev-User: dev@local.test'
 ```
 
-**속도 제한을 풀어 둔다.** 앱의 job 접수 속도 제한은 사용자별 분당 10 건이 기본이다(step9-D). 시나리오는 한
-사용자로 job 을 몰아 만들고 06 은 100 건을 동시에 던지므로, 그대로 두면 429 가 멱등·잔액 방어보다 먼저 받아
-step7 에서 잰 지표가 다른 이유로 움직인다. compose 는 `APP_RATELIMIT_JOBCREATE_PERMINUTE` 를 100000 으로 준다
-(속성 `app.rate-limit.job-create.per-minute` 의 환경변수 이름 — 완화 바인딩에서 대시가 빠진다). 속도 제한
-자체를 보고 싶으면 낮춰서 올린다.
-
-```
-APP_RATELIMIT_JOBCREATE_PERMINUTE=2 docker compose -f deploy/observability/docker-compose.yml up -d --force-recreate app
-```
-
-방어 지표에는 `point="rate_limit"` 이 생겼다. 대시보드의 방어 패널은 `sum by (point, outcome)` 이라 새 값이 그대로
-보이고, 이 스택에서는 `rejected` 가 0 에 머문다.
-
 ## 접속
 
 | | URL |

@@ -24,15 +24,7 @@ enum class DefensePoint {
     RETRY_CLAIM,
 
     /** 최종 환불(step5). 늦게 살아난 워커가 먼저 확정하면 환불을 취소한다 */
-    FINAL_REFUND,
-
-    /**
-     * job 접수 속도 제한(step9). 사용자별 토큰 버킷이 hold 전에 요청을 거른다.
-     *
-     * 위에서 말한 "조건부 UPDATE" 모양의 예외다 — DB 를 건드리지 않고 앱 메모리의 버킷만 본다.
-     * 결과는 [DefenseOutcome.APPLIED](통과) 와 [DefenseOutcome.REJECTED](거절) 둘뿐이다.
-     */
-    RATE_LIMIT
+    FINAL_REFUND
 }
 
 /**
@@ -45,10 +37,7 @@ enum class DefenseOutcome {
     /** 조건부 UPDATE 가 1행을 바꿨다. 이 시도가 이겼다 */
     APPLIED,
 
-    /**
-     * 잔액이 모자라 0행. 처음부터 부족했는지 경쟁에서 밀렸는지는 구분할 수 없다.
-     * [DefensePoint.RATE_LIMIT] 에서는 버킷이 비어 접수를 거절했다는 뜻이다.
-     */
+    /** 잔액이 모자라 0행. 처음부터 부족했는지 경쟁에서 밀렸는지는 구분할 수 없다 */
     REJECTED,
 
     /** 멱등키 1차 방어. 애플리케이션이 기존 키를 조회로 먼저 찾았다 */

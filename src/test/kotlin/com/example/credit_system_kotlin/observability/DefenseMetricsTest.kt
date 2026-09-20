@@ -66,8 +66,7 @@ class DefenseMetricsTest {
             "confirm" to listOf("applied", "stale"),
             "mark_failed" to listOf("applied", "stale"),
             "retry_claim" to listOf("applied", "lost"),
-            "final_refund" to listOf("applied", "raced"),
-            "rate_limit" to listOf("applied", "rejected")
+            "final_refund" to listOf("applied", "raced")
         )
 
         for ((point, outcomes) in expected) {

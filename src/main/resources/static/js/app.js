@@ -55,7 +55,7 @@ window.App = (function () {
     };
   }
 
-  // fetch 래퍼. 결과는 { status, body, retryAfter }. 네트워크 오류면 status 0.
+  // fetch 래퍼. 결과는 { status, body }. 네트워크 오류면 status 0.
   // 401(세션 만료)은 여기서 곧장 다시 로그인으로 보낸다.
   async function api(method, url, body) {
     const headers = { 'Accept': 'application/json' };
@@ -73,15 +73,15 @@ window.App = (function () {
         redirect: 'manual'
       });
     } catch (e) {
-      return { status: 0, body: null, retryAfter: null };
+      return { status: 0, body: null };
     }
     if (res.status === 401) {
       relogin();
-      return { status: 401, body: null, retryAfter: null, relogin: true };
+      return { status: 401, body: null, relogin: true };
     }
     let parsed = null;
     try { parsed = await res.json(); } catch (e) { parsed = null; }
-    const result = { status: res.status, body: parsed, retryAfter: res.headers.get('Retry-After') };
+    const result = { status: res.status, body: parsed };
     if (res.status === 403 && method !== 'GET') {
       // POST 의 403 은 두 가지다. 세션이 끝나 CSRF 토큰이 무효가 된 경우(CSRF 필터가 인증보다 먼저 막는다)와
       // 진짜 권한 부족. 둘 다 code 가 FORBIDDEN 이라 인증 여부를 한 번 더 물어 구분한다.
@@ -94,10 +94,6 @@ window.App = (function () {
   // 오류 응답을 사람이 읽을 문장으로. relogin 이면 이미 로그인으로 가는 중이다.
   function describeError(r) {
     if (r.status === 0) return '네트워크 오류입니다. 같은 요청으로 다시 시도할 수 있습니다.';
-    if (r.status === 429) {
-      const s = parseInt(r.retryAfter, 10);
-      return (isNaN(s) ? '잠시' : s + '초') + ' 후 다시 시도하세요. (요청이 너무 잦습니다)';
-    }
     if (r.status === 403) return '요청이 거부되었습니다. 권한이 없거나 페이지가 오래되었습니다. 새로고침 후 다시 시도하세요.';
     if (r.body && r.body.message) return r.body.message;
     return '요청을 처리하지 못했습니다. (HTTP ' + r.status + ')';

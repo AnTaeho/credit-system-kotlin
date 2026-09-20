@@ -7,7 +7,6 @@ import org.hibernate.exception.ConstraintViolationException
 import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
@@ -29,13 +28,6 @@ class GlobalExceptionHandler(
     @ExceptionHandler(DuplicateRequestInProgressException::class)
     fun handleDuplicateInProgress(e: DuplicateRequestInProgressException): ResponseEntity<ErrorResponse> =
         conflict("DUPLICATE_IN_PROGRESS", e.message)
-
-    /** 거절 로그는 속도 제한기가 이미 남겼다(연속 거절은 첫 번만 warn). 여기서 또 찍지 않는다. */
-    @ExceptionHandler(RateLimitedException::class)
-    fun handleRateLimited(e: RateLimitedException): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-            .header(HttpHeaders.RETRY_AFTER, e.retryAfterSeconds.toString())
-            .body(ErrorResponse("RATE_LIMITED", e.message))
 
     @ExceptionHandler(InvalidRequestException::class)
     fun handleInvalidRequest(e: InvalidRequestException): ResponseEntity<ErrorResponse> =

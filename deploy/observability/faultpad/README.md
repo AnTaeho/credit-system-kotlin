@@ -52,9 +52,6 @@ job 생성·잔액 조회는 `X-Dev-User: dev@local.test`(seed 가 넣은 사용
 `X-Dev-User: admin@local.test` 로 `POST /api/admin/users/1/grants` 를 부른다. 결제 없는 자기 충전은
 없어졌으므로 크레딧은 이 버튼으로만 생긴다(1회 상한 1,000,000). 헤더와 경로는 전부 `scenarios/lib.sh` 에 있다.
 
-job 접수 속도 제한(기본 분당 10)은 compose 가 크게 풀어 둔다. 패드의 `job 생성`·`잔액 부족 요청`·06 폭풍이
-429 에 먼저 걸리면 보려던 방어 지표가 움직이지 않기 때문이다.
-
 ## 안전장치
 
 - `/api/run` 은 `catalog.json` 의 버튼에 선언된 액션만 받는다. 없는 액션은 400, 실행 중이면 409.

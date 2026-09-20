@@ -58,7 +58,7 @@
         return;
       }
       // 400·409 는 서버가 확정적으로 거절한 것이다(흔적 없음). 다음 제출은 새 키로.
-      // 네트워크 오류·429·5xx 는 같은 제출의 재시도가 될 수 있으니 키를 유지한다.
+      // 네트워크 오류·5xx 는 같은 제출의 재시도가 될 수 있으니 키를 유지한다.
       if (r.status === 400 || r.status === 409) idem.done();
       App.show(formMessage, App.describeError(r), true);
     } finally {

@@ -8,8 +8,7 @@ data class AppProperties(
     val stub: Stub,
     val processing: Processing,
     val idempotency: Idempotency,
-    val admin: Admin = Admin(),
-    val rateLimit: RateLimit = RateLimit()
+    val admin: Admin = Admin()
 ) {
 
     data class Generation(val cost: Long, val maxAttempts: Int)
@@ -31,21 +30,7 @@ data class AppProperties(
         }
     }
 
-    /** 사용자별 속도 제한. 지금은 job 접수(돈을 묶는 유일한 사용자 경로) 하나뿐이다. */
-    data class RateLimit(val jobCreate: JobCreate = JobCreate())
-
-    /** job 접수 속도 제한. 사용자마다 분당 [perMinute] 개까지, 초당 균등하게 다시 채운다. */
-    data class JobCreate(
-        val enabled: Boolean = true,
-        val perMinute: Int = DEFAULT_JOB_CREATE_PER_MINUTE
-    ) {
-        init {
-            require(perMinute >= 1) { "rate-limit job-create per-minute는 1 이상이어야 합니다." }
-        }
-    }
-
     companion object {
         const val DEFAULT_MAX_GRANT_AMOUNT = 1_000_000L
-        const val DEFAULT_JOB_CREATE_PER_MINUTE = 10
     }
 }

@@ -56,11 +56,6 @@ services:
       APP_STUB_FAILURE_RATE: ${APP_STUB_FAILURE_RATE:-0.3}
       APP_STUB_MIN_DELAY_MILLIS: ${APP_STUB_MIN_DELAY_MILLIS:-3000}
       APP_STUB_MAX_DELAY_MILLIS: ${APP_STUB_MAX_DELAY_MILLIS:-7000}
-      # job 접수 속도 제한(step9-D, 기본 분당 10)을 사실상 푼다. 시나리오는 한 사용자로 job 을
-      # 몰아서 만들고(06 은 같은 idemKey 100건 동시), 제한에 걸리면 429 가 멱등·잔액 방어보다 먼저
-      # 받아 step7 에서 잰 지표가 다른 이유로 움직인다. 속도 제한 자체를 보려면 낮춰서 올린다.
-      # 속성 app.rate-limit.job-create.per-minute 의 환경변수 이름이다 — 완화 바인딩상 대시가 빠진다.
-      APP_RATELIMIT_JOBCREATE_PERMINUTE: ${APP_RATELIMIT_JOBCREATE_PERMINUTE:-100000}
     ports:
       # 8080 만 호스트로 나간다. 8081 은 compose 네트워크 안에서만 보이고,
       # Prometheus 가 app:8081 로 긁는다. 호스트에서는 /actuator/* 에 닿을 수 없다.

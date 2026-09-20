@@ -86,13 +86,13 @@ curl http://localhost:8080/api/ledger           -H 'X-Dev-User: dev@local.test'
 | | |
 |---|---|
 | `GET /api/users/me/balance` | 내 잔액 |
-| `POST /api/jobs` | 생성 요청(= hold). 본문 `{"idemKey","prompt"}`. 사용자별 분당 10건 |
+| `POST /api/jobs` | 생성 요청(= hold). 본문 `{"idemKey","prompt"}` |
 | `GET /api/jobs/{id}` | 내 job 하나. 남의 것·없는 것은 둘 다 404 |
 | `GET /api/jobs?cursor=&size=` | 내 job 목록. `{items, nextCursor}`, id 내림차순, `size` 기본 20·최대 100 |
 | `GET /api/ledger?cursor=&size=` | 내 원장. 형식은 위와 같다 |
 | `POST /api/admin/users/{userId}/grants` | 운영자 지급. 본문 `{"idemKey","amount"}`. 운영자 전용 |
 
-오류는 `{"code","message"}` 형태다. 입력 오류 400, 미인증 401, 권한 부족·CSRF 토큰 없음 403, 없는 job 404, 잔액 부족·중복 요청 409, 속도 제한 429(`Retry-After`). 세션으로 로그인한 쓰기 요청은 CSRF 토큰이 필요하다(화면이 알아서 싣는다).
+오류는 `{"code","message"}` 형태다. 입력 오류 400, 미인증 401, 권한 부족·CSRF 토큰 없음 403, 없는 job 404, 잔액 부족·중복 요청 409. 세션으로 로그인한 쓰기 요청은 CSRF 토큰이 필요하다(화면이 알아서 싣는다).
 
 OpenAPI 문서는 아직 없다.
 
@@ -164,7 +164,6 @@ Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 comp
 | heartbeat timeout / 갱신 주기 | 10초 / 5초 |
 | 처리 상한(회수) | 60초 |
 | 로그인 허용 목록 / 운영자 | 비어 있음(아무도 못 들어온다). local 프로필은 `dev@local.test` / `admin@local.test` |
-| job 접수 속도 제한 | 사용자별 분당 10 |
 | 운영자 지급 1회 상한 | 1,000,000 |
 
 환경별로 바꿀 때는 Spring 표준 환경변수로 덮어쓴다 — `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_DATA_REDIS_HOST`. `application.yml` 은 건드리지 않는다.
