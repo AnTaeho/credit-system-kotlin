@@ -358,6 +358,16 @@ flowchart TB
 `maxPoolSize - activeCount` 를 돌려준다. 디스패처는 `minOf(batchSize(3), free)` 만큼만 조회한다
 (`GenerationWorker.dispatchCycle`).
 
+**이 설정이 함의하는 처리량 상한.** 동시 실행 3개, 한 건의 stub 지연 3~7초
+(`app.stub.min-delay-millis: 3000`, `max-delay-millis: 7000`)이므로
+`3 / 3~7초 ≈ 초당 0.43 ~ 1.0 건`이다. 타임아웃(`app.generation.timeout-seconds: 20`)까지
+쓰는 건이 섞이면 더 내려간다. 설정값 산술이며 실측이 아니다.
+같은 계산을 로그로 찍는 코드가 JAVA 저장소에는 있었으나(`0880061`, 2026-08-20
+"feat: log the throughput ceiling the worker settings imply") KT 저장소에는 이식되지 않았다
+(`grep -rn "상한\|ceiling" src/main/kotlin/.../job/worker/` 결과 드레인 상한 로그만 나온다).
+접수(S1)는 이 상한과 무관하게 HTTP 요청마다 일어나므로, 접수율이 이 값을 넘으면
+`HOLDING` job 이 DB 에 쌓인다.
+
 **heartbeat.** `heartbeat/HeartbeatRegistry.kt` 는 Redis ZSET 키 `heartbeats` 하나만 쓴다
 (`private const val KEY = "heartbeats"`). 멤버는 `JobAttempt`(jobId, attemptNo),
 score 는 `now + app.heartbeat.timeout-seconds(10)`. 갱신 주기는
@@ -483,6 +493,18 @@ backoff 는 `app.generation.retry-backoff`: `base-seconds: 10`, `multiplier: 4`,
 (`application.yml` 주석과 `RetryBackoffPropertiesTest` 의
 "첫 재시도는 10초 뒤, 그다음은 40초 뒤부터 가능하다" — `JobLifecycleServiceTest`).
 
+**지급 흐름(잔액이 오르는 다른 경로).** 위 S1~S6 은 차감 흐름이다. 잔액이 오르는 경로는
+환불(S6 의 `finalRefund`)과 운영자 지급 둘뿐이다. 지급은
+`user/service/UserService.kt:grant` 하나의 `@Transactional` 이다 —
+`validateRequest`(idemKey 형식, `amount > 0`, `app.admin.max-grant-amount: 1000000` 상한) →
+`ledgerRepository.findByUserIdAndIdemKey` 로 중복 조회(있으면 잔액만 읽어 duplicate 응답) →
+`userRepository.addBalance`(0 행이면 `UserNotFoundException`) →
+`LedgerEntry.adminGrant(userId, idemKey, amount)` INSERT. 멱등성의 2차 방어는 원장의
+유니크 제약 `uk_ledger_user_idem (user_id, idem_key)` 이다.
+호출자는 `user/controller/AdminGrantApiController.kt`
+(`POST /api/admin/users/{userId}/grants`). 결제 연동은 없다 — 이 경로가
+결제 없이 잔액을 올리는 유일한 자리라고 `UserService.grant` 주석이 적고 있다.
+
 ### 3-2. 크래시 지점 표
 
 | ID | 죽는 지점 | DB 에 남는 상태 | 잔액·원장 | 회수 주체와 걸리는 시간 | 최종 결말 | 근거 |
@@ -491,6 +513,7 @@ backoff 는 `app.generation.retry-backoff`: `base-seconds: 10`, `multiplier: 4`,
 | **C2** | S1 커밋 직후, HTTP 응답 전 | `jobs` HOLDING (attemptNo=0), `idempotency_keys` 행(jobId 부착됨), `ledger_entries` HOLD(−100) | 잔액 100 차감됨. 클라이언트는 jobId 를 받지 못함 | 회수 대상 아님 — job 은 정상 대기 상태. 같은 `idemKey` 재요청이 `resolveDuplicateRequest` 로 같은 jobId 를 돌려준다 | 워커가 정상 처리 | `HoldService.resolveDuplicateRequest`. `application.yml` 의 `server.shutdown: graceful` 주석이 이 상태를 명시: "웹서버가 즉시 끊겨, 응답을 기다리던 hold 요청이 \"돈은 묶였는데 jobId 는 못 받은\" 상태로 남는다" |
 | **C3a** | S3 선점 CAS 성공 후, `startHeartbeat` 실행 전 | `jobs` PROCESSING | 잔액 차감 유지, HOLD 원장만 | ZSET 멤버가 없으므로 `findExpiredAttempts` 에 안 잡힘 → 정체 스캔이 `updatedAt < now-60s` 로 집고 `heartbeatState` = ABSENT → `BACKSTOP`. **약 60~65초** | FAILED → 재시도 또는 환불 | `GenerationWorker.claim`(디스패처 스레드) 과 `GenerationJobProcessor.runGeneration`(워커 스레드)의 스레드 경계. `DeadJobRecoveryTask.detectorFor` |
 | **C3b** | `startHeartbeat` 이후, 외부 호출 전 | `jobs` PROCESSING + ZSET 멤버(score = 등록시각+10s) | 위와 같음 | score 만료 후 다음 `scan` 이 `findExpiredAttempts` 로 집음 → `HEARTBEAT`. **약 10~15초** | FAILED → 재시도 또는 환불 | `HeartbeatRegistry.startHeartbeat`(`timeout-seconds: 10`), `DeadJobRecoveryTask.markExpiredJobsAsFailed` |
+| **C3c** | S4 외부 호출이 전송된 뒤, 응답을 받기 전 | `jobs` PROCESSING + ZSET 멤버 | 잔액 차감 유지, HOLD 원장만 | C3b 와 같다 — heartbeat 갱신 스레드가 함께 죽어 score 가 10초 안에 만료된다. **약 10~15초** | FAILED → 재시도 또는 환불 | `GenerationJobProcessor.generateOrMarkFailed` 가 `generationClient.generate` 를 부르는 지점. **C4 와 다른 점은 외부 부작용이 일어났는지를 시스템이 알 수 없다는 것이다** — 호출이 상대에게 닿았는지, 닿았다면 처리됐는지를 기록하는 자리가 코드에 없다(요청 전후로 남기는 것은 로그뿐) |
 | **C4** | **S4 외부 호출 성공 직후, S5 `confirm` 전** | `jobs` PROCESSING. `resultUrl` 은 DB 에 기록되지 않음 | 잔액 차감 유지, HOLD 원장만. CONFIRM 원장 없음 | C3b 와 같은 경로. 프로세스가 죽으면 heartbeat 갱신 스레드도 함께 죽으므로 ZSET score 가 10초 안에 만료되고 다음 `scan` 이 집는다. **약 10~15초**. ZSET 멤버가 사라진 경우(Redis flush 등)에만 정체 스캔의 60초 경로로 간다 | FAILED → `attemptNo+1 < 3` 이면 `retry`(`nextAttemptAt = now+10s`, 다음은 +40s) → **외부 호출이 중복 발생**. 상한(3회) 소진이면 `finalRefund` → 잔액 복구, REFUND 원장. 사용자 잔액은 원상. 이미 만들어진 결과 URL 은 유실 | `GenerationJobProcessor.confirm` 주석("결과 반영에 실패하면 job 은 PROCESSING 으로 남아 정체 회수 대상이 된다"). JAVA `docs/db-job-queue-refactor.md` 5번 항목이 같은 내용을 Java 시절에 이미 적어 뒀다: "이때 중복 생성이 차단되는 것은 아니고 회수 시점까지 지연될 뿐이며, 이미 만들어진 결과 URL은 유실된다" |
 | **C5** | S5 CAS 는 1 행 성공, CONFIRM 원장 INSERT 전 | 결과적으로 PROCESSING (COMPLETED 전이가 **롤백**됨) | 변화 없음 | C4 와 같은 경로 | `JobLifecycleService.confirm` 이 하나의 `@Transactional` 이라 CAS UPDATE 와 ledger INSERT 가 함께 롤백된다 | `JobLifecycleService.confirm` 의 `@Transactional` 이 `completeIfAttemptMatches` 와 `ledgerRepository.save` 를 함께 감싼다 |
 | **C6** | `finalRefund` 트랜잭션 도중 | `jobs` FAILED 유지 | 변화 없음 (CAS·`addBalance`·REFUND 원장 전부 롤백) | 다음 `scan`(5초)이 같은 FAILED job 을 다시 집는다 | 재시도 후 환불 완료 | `JobLifecycleService.finalRefund` 의 `@Transactional`. `ServiceTransactionRollbackTest` "환불할 사용자가 사라졌으면 REFUNDED 전이도 롤백된다" |
@@ -762,7 +785,7 @@ Apple M4 위에 있다. 부하를 걸면 앱 JVM 과 DB 가 같은 CPU 를 두�
 | 디스패처·회수 주기 값의 출처 | `app.scheduling.worker-interval-millis` / 5000ms | 두 키 모두 `application.yml` 에 **없다**. 500ms·5000ms 는 `@Scheduled` 애너테이션의 기본값이다 | `application.yml`, `GenerationWorker.kt`, `DeadJobRecoveryTask.kt` |
 | `ledger_entries` 인덱스 | `idx_ledger_user_id (user_id)` 단일 컬럼만 | 그 인덱스 외에 `uk_ledger_user_idem (user_id, idem_key)` UNIQUE 도 있다 | `V1__baseline.sql`, `V2__organizations_to_users.sql` |
 | C3 | 한 행 | 스레드 경계 때문에 회수 시간이 두 갈래다 — C3a(heartbeat 등록 전, 약 60초 BACKSTOP)와 C3b(등록 후, 약 10초 HEARTBEAT). C4~C9 번호는 브리프 그대로 유지했다 | `GenerationWorker.claim` / `GenerationJobProcessor.runGeneration` |
-| 크래시 지점 수 | C1~C9 | C3 분할(C3a/C3b) 과 신규 2 개(C10 executor 거부+롤백 실패, C11 드레인 상한 초과)를 더해 **12 행**(`grep -c '^| \*\*C' docs/00-inventory.md`) | 본문 3-2 |
+| 크래시 지점 수 | C1~C9 | C3 분할(C3a 선점 후·heartbeat 전, C3b 등록 후·호출 전, C3c 호출 진행 중) 과 신규 2 개(C10 executor 거부+롤백 실패, C11 드레인 상한 초과)를 더해 **13 행**(`grep -c '^| \*\*C' docs/00-inventory.md`) | 본문 3-2 |
 
 ## 부록 C. 교육용 단계 분해 브랜치에 관한 각주
 
