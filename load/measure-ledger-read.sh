@@ -9,7 +9,7 @@
 #
 # 인덱스는 `idx_ledger_user_id (user_id)` 단일 컬럼이다(V1). InnoDB 세컨더리 인덱스는
 # PK 를 접미로 가지므로 실질적으로 (user_id, id) 처럼 쓰일 수 있다 — 그래서 부족한지는
-# EXPLAIN 없이 단정할 수 없다는 것이 docs/02-design.md 의 판단이었다. 여기서 확정한다.
+# EXPLAIN 없이 단정할 수 없다는 것이 `docs/SYSTEM.md` 의 판단이었다. 여기서 확정한다.
 #
 # 사용법: load/measure-ledger-read.sh <userId> <반복 횟수>
 

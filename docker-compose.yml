@@ -26,7 +26,7 @@ services:
       MYSQL_PASSWORD: credit
     # log-bin-trust-function-creators 는 V6(원장 append-only 트리거) 때문에 켠다.
     # 이 이미지는 log_bin=1 이고 마이그레이션을 도는 `credit` 계정에는 SUPER 가 없어서,
-    # 기본값에서는 CREATE TRIGGER 가 ERROR 1419 로 막힌다(docs/02-design.md 1-4).
+    # 기본값에서는 CREATE TRIGGER 가 ERROR 1419 로 막힌다(`docs/SYSTEM.md` 1-4).
     # 운영 DB 서버의 같은 설정은 배포 체크리스트 항목이고 여기서 다루지 않는다.
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --log-bin-trust-function-creators=1
     ports:

@@ -27,7 +27,7 @@ interface LedgerRepository : JpaRepository<LedgerEntry, Long> {
      * `LIMIT` 은 `GROUP BY` **뒤에** 걸린다 — 100명을 얻으려고 원장 전체를 조인·집계한 뒤
      * 100행만 남겼다. 커서가 줄이는 것은 출력이지 스캔이 아니다.
      *
-     * 실측(`load/results/2026-09-23-perf04-large-ledger.md`): 원장 1억 행에서 265초가 지나도
+     * 실측(`docs/SYSTEM.md` 4절): 원장 1억 행에서 265초가 지나도
      * 끝나지 않았고, 그동안 같은 DB 를 쓰는 조회 API 의 p99 가 10ms → 8,489ms 로 올랐다.
      *
      * 그래서 `UserRepository.findIdsAfter` 로 사용자 100명을 먼저 확정하고, 그 100명의 원장만

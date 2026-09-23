@@ -21,7 +21,7 @@ import org.springframework.test.context.DynamicPropertySource
  * 강제 수단은 V6 가 싣는 `BEFORE UPDATE`/`BEFORE DELETE` 트리거 + `SIGNAL` 이다.
  * 권한 REVOKE 로는 성립하지 않는다 — MySQL 권한에는 거부가 없고, 앱·Flyway·테스트가 모두
  * 같은 `credit` 계정이며 [SharedContainers] 셋업이 DB 단위 `GRANT ALL` 을 준다
- * (`docs/02-design.md` gap 표 INV-06 행).
+ * (`docs/SYSTEM.md` gap 표 INV-06 행).
  *
  * H2 를 쓰는 테스트는 Hibernate 가 스키마를 만들어 마이그레이션을 거치지 않으므로,
  * 이 불변식은 실제 MySQL(Testcontainers) 위에서만 증명된다.

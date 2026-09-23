@@ -1,6 +1,6 @@
 # 부하 측정 실행 절차 (Phase 3-C · 3-D)
 
-요구서 `docs/01-requirements.md` 의 **PERF-01~07** 을 실제로 재는 절차다.
+요구서 `docs/SYSTEM.md` 의 **PERF-01~07** 을 실제로 재는 절차다.
 스크립트는 판정을 사람에게 맡기지 않는다 — 목표치는 전부 k6 `thresholds` 에 박혀 있고,
 런이 무효가 되는 조건(401, 시드 부족, 발생기 병목)도 threshold 로 걸려 있다.
 
@@ -506,10 +506,10 @@ docker compose exec -T mysql mysql -ucredit -pcredit \
 
 ## 6. 결과 파일
 
-`load/results/YYYY-MM-DD-<시나리오>.md` 로 만든다. 템플릿은 `load/results/TEMPLATE.md` 다.
+결과는 `docs/SYSTEM.md` 4절에 요약으로 적는다(2026-09-23 통폐합 전에는 `load/results/` 에 런별 파일을 뒀고, 그 원본은 git 이력 태그 `req-v3` 에 있다).
 
 ```bash
-cp load/results/TEMPLATE.md load/results/$(date +%F)-01-tier-a.md
+# 실행 후 수치를 docs/SYSTEM.md 4절에 반영한다
 ```
 
 템플릿의 필수 6칸(요구서 2-2)을 비워 두지 마라. 특히 마지막 칸 —

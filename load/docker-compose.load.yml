@@ -43,7 +43,7 @@ services:
     cpus: 4
     mem_limit: 3g
     # 개발용 compose 의 command 를 통째로 덮어쓴다. 앞의 두 개는 그쪽과 같은 값이고,
-    # log-bin-trust-function-creators 는 V6 트리거 때문에 필요하다(docs/02-design.md 1-4).
+    # log-bin-trust-function-creators 는 V6 트리거 때문에 필요하다(`docs/SYSTEM.md` 1-4).
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci

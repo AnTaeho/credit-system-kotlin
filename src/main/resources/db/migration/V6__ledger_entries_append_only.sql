@@ -7,7 +7,7 @@
 -- (`SharedContainers.createDatabase`)은 DB 단위 `GRANT ALL PRIVILEGES ON <db>.*` 를 주므로
 -- 그 위에 테이블 단위 REVOKE 를 걸어도 남은 DB 단위 권한이 그대로 통과시킨다.
 -- REVOKE 안을 살리려면 Testcontainers·compose·운영 세 곳의 권한 모델을 함께 바꿔야 한다
--- (`docs/02-design.md` gap 표 INV-06 행). 트리거는 마이그레이션이 싣고 테스트가
+-- (`docs/SYSTEM.md` gap 표 INV-06 행). 트리거는 마이그레이션이 싣고 테스트가
 -- 실패 → 통과로 증명할 수 있다.
 --
 -- 전제: 서버 플래그 `log_bin_trust_function_creators=1`.

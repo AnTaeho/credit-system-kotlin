@@ -32,7 +32,7 @@ class LedgerReconciliationTask(
         // 한 페이지를 두 단계로 읽는다. 검사할 사용자 id 를 먼저 확정하고(PK 범위 스캔), 그 id 들의
         // 원장만 집계한다. 예전처럼 조인·집계 쿼리에 LIMIT 100 을 걸면 LIMIT 이 GROUP BY 뒤에 걸려
         // 100명을 얻으려고 원장 전체를 훑었다 — 실측으로 1억 행에서 끝나지 않았고 같은 DB 의 조회
-        // API p99 를 10ms 에서 8,489ms 로 끌어올렸다(load/results/2026-09-23-perf04-large-ledger.md).
+        // API p99 를 10ms 에서 8,489ms 로 끌어올렸다(`docs/SYSTEM.md` 4절).
         // 그래서 종료 판정도 집계 결과 수가 아니라 "읽은 사용자 수"(id 페이지 크기)로 한다.
         do {
             val userIds = userRepository.findIdsAfter(lastId, PageRequest.of(0, RECONCILE_BATCH_SIZE))
