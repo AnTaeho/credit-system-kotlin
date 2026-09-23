@@ -3,11 +3,13 @@ package com.example.credit_system_kotlin.job.worker
 import com.example.credit_system_kotlin.global.logging.withJobLogContext
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.job.domain.Job
+import com.example.credit_system_kotlin.job.event.ExternalGenerationCalled
 import com.example.credit_system_kotlin.job.generation.GenerationClient
 import com.example.credit_system_kotlin.job.generation.GenerationException
 import com.example.credit_system_kotlin.job.generation.GenerationTimeoutException
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Component
 
 private val log = LoggerFactory.getLogger(GenerationJobProcessor::class.java)
@@ -16,7 +18,8 @@ private val log = LoggerFactory.getLogger(GenerationJobProcessor::class.java)
 class GenerationJobProcessor(
     private val heartbeatRegistry: HeartbeatRegistry,
     private val generationClient: GenerationClient,
-    private val jobLifecycleService: JobLifecycleService
+    private val jobLifecycleService: JobLifecycleService,
+    private val eventPublisher: ApplicationEventPublisher
 ) {
 
     /**
@@ -47,6 +50,11 @@ class GenerationJobProcessor(
      */
     private fun generateOrMarkFailed(job: Job): String? =
         try {
+            // INV-04b 계측. 호출 **직전**에 발행한다 — 즉시 던지는 호출도 외부로는 나갔을 수 있고,
+            // 무엇보다 타임아웃된 호출이야말로 중복 원가의 본체이기 때문이다.
+            // 스텁은 prompt 만 받아 jobId 를 모르고 시그니처도 바꾸지 않기로 했으므로
+            // (2026-09-23 확정, docs/02-design.md 1-2), 세는 자리는 jobId·attemptNo 가 있는 여기다.
+            eventPublisher.publishEvent(ExternalGenerationCalled(job.persistedId, job.attemptNo))
             generationClient.generate(job.prompt)
         } catch (e: GenerationException) {
             if (e is GenerationTimeoutException) {

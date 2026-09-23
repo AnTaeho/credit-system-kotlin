@@ -35,6 +35,13 @@ object SharedContainers {
         .withDatabaseName("credit_system")
         .withUsername("credit")
         .withPassword("credit")
+        // V6 가 `ledger_entries` 에 트리거를 만든다. 이 이미지는 log_bin=1 이고 앱 계정
+        // `credit` 에는 SUPER 가 없어서, 기본값(log_bin_trust_function_creators=0)에서는
+        // CREATE TRIGGER 가 ERROR 1419 로 막힌다(docs/02-design.md 1-4 "INV-06 강제 장치").
+        // Flyway 도 같은 계정으로 돌기 때문에 이 플래그가 없으면 마이그레이션 자체가 실패한다.
+        // 이미지 기본 CMD 는 `mysqld` 뿐이라 덮어쓸 다른 옵션이 없다 — 엔트리포인트가
+        // `--` 로 시작하는 인자 앞에 mysqld 를 붙여 준다.
+        .withCommand("--log-bin-trust-function-creators=1")
         .withReuse(true)
 
     private val redis: RedisContainer = RedisContainer(DockerImageName.parse("redis:7-alpine"))

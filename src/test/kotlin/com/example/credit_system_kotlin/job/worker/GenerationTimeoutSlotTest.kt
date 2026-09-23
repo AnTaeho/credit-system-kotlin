@@ -7,6 +7,7 @@ import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.generation.stub.GenerationStubClient
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
+import com.example.credit_system_kotlin.support.RecordingEventPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
@@ -96,7 +97,9 @@ class GenerationTimeoutSlotTest {
         val config = WorkerExecutorConfig()
         val executor = config.generationWorkerExecutor(WorkerProperties(true, 3, CONCURRENCY))
         val slots = config.workerSlots(executor)
-        val processor = GenerationJobProcessor(heartbeatRegistry, stub, jobLifecycleService)
+        val processor = GenerationJobProcessor(
+            heartbeatRegistry, stub, jobLifecycleService, RecordingEventPublisher()
+        )
         val job = Job.hold(10L, 100L, "cat").also { ReflectionTestUtils.setField(it, "id", 1L) }
         doReturn(heartbeatFuture).whenever(heartbeatRegistry).startHeartbeat(1L, 0)
 

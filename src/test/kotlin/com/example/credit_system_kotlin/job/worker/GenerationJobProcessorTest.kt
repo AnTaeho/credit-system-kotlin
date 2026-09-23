@@ -2,10 +2,13 @@ package com.example.credit_system_kotlin.job.worker
 
 import com.example.credit_system_kotlin.heartbeat.HeartbeatRegistry
 import com.example.credit_system_kotlin.job.domain.Job
+import com.example.credit_system_kotlin.job.event.ExternalGenerationCalled
 import com.example.credit_system_kotlin.job.generation.GenerationClient
 import com.example.credit_system_kotlin.job.generation.GenerationTimeoutException
 import com.example.credit_system_kotlin.job.generation.stub.StubGenerationException
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
+import com.example.credit_system_kotlin.support.RecordingEventPublisher
+import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -34,10 +37,17 @@ class GenerationJobProcessorTest {
 
     private lateinit var processor: GenerationJobProcessor
     private lateinit var job: Job
+    private lateinit var eventPublisher: RecordingEventPublisher
+
+    private fun externalCallEvents(): List<ExternalGenerationCalled> =
+        eventPublisher.events.filterIsInstance<ExternalGenerationCalled>()
 
     @BeforeEach
     fun setUp() {
-        processor = GenerationJobProcessor(heartbeatRegistry, generationClient, jobLifecycleService)
+        eventPublisher = RecordingEventPublisher()
+        processor = GenerationJobProcessor(
+            heartbeatRegistry, generationClient, jobLifecycleService, eventPublisher
+        )
         job = Job.hold(10L, 100L, "cat")
         ReflectionTestUtils.setField(job, "id", 1L)
         doReturn(heartbeatFuture).whenever(heartbeatRegistry).startHeartbeat(1L, 0)
@@ -51,6 +61,32 @@ class GenerationJobProcessorTest {
 
         verify(jobLifecycleService).confirm(job, "https://example.test/cat.png")
         verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
+    }
+
+    /**
+     * INV-04b 계측이 붙어 있는 자리를 못 박는다. 이벤트가 발행되지 않으면
+     * `credit.generation.external.calls` 가 조용히 0으로 남아, 지표가 사라진 것을 아무도 모른다.
+     */
+    @Test
+    fun `외부 호출 직전에 INV-04b 이벤트를 발행한다`() {
+        whenever(generationClient.generate("cat")).thenReturn("https://example.test/cat.png")
+
+        processor.runGeneration(job)
+
+        assertThat(externalCallEvents()).containsExactly(ExternalGenerationCalled(1L, 0))
+    }
+
+    /**
+     * 호출 **직전**에 발행하므로, 호출이 던져도 이벤트는 그대로 하나다.
+     * 실패한 호출도 외부로는 나갔을 수 있고, 그게 중복 원가의 본체다.
+     */
+    @Test
+    fun `생성이 실패해도 INV-04b 이벤트는 그대로 하나 발행된다`() {
+        whenever(generationClient.generate("cat")).thenThrow(StubGenerationException("cat"))
+
+        processor.runGeneration(job)
+
+        assertThat(externalCallEvents()).containsExactly(ExternalGenerationCalled(1L, 0))
     }
 
     @Test

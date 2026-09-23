@@ -8,6 +8,7 @@ import com.example.credit_system_kotlin.job.generation.GenerationTimeoutExceptio
 import com.example.credit_system_kotlin.job.service.JobLifecycleService
 import com.example.credit_system_kotlin.job.worker.GenerationJobProcessor
 import com.example.credit_system_kotlin.support.MdcSnapshotAppender
+import com.example.credit_system_kotlin.support.RecordingEventPublisher
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -42,7 +43,9 @@ class JobLogContextTest {
 
     @BeforeEach
     fun setUp() {
-        processor = GenerationJobProcessor(heartbeatRegistry, generationClient, jobLifecycleService)
+        processor = GenerationJobProcessor(
+            heartbeatRegistry, generationClient, jobLifecycleService, RecordingEventPublisher()
+        )
         appender = MdcSnapshotAppender()
         appender.start()
         processorLogger = LoggerFactory.getLogger(GenerationJobProcessor::class.java) as Logger

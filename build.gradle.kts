@@ -121,6 +121,32 @@ ktlint {
     version.set("1.8.0")
 }
 
+// ── 부하 직후 검사 ──────────────────────────────────────────────────────────
+// `post-load` 태그가 붙은 테스트는 Testcontainers 가 아니라 compose 로 띄운 로컬 DB
+// (localhost:3306/credit_system)에 붙는다. 부하를 받은 바로 그 DB 를 봐야 하기 때문이다.
+// 평소 `./gradlew test` 에서는 DB 가 없거나 비어 있으므로 제외하고, 부하 직후에만 돌린다.
+val postLoadTag = "post-load"
+
 tasks.named<Test>("test") {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags(postLoadTag)
+    }
+}
+
+tasks.register<Test>("postLoadCheck") {
+    group = "verification"
+    description = "부하 직후 로컬 DB 에 대고 INV-01/INV-02 검사를 돌린다(compose 로 띄운 DB 필요)"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform {
+        includeTags(postLoadTag)
+    }
+    // 부하를 또 준 뒤 다시 돌리는 것이 이 태스크의 쓸모다. 입력이 안 바뀌었다고 건너뛰면
+    // 아무것도 안 찍힌 채 UP-TO-DATE 만 남는다.
+    outputs.upToDateWhen { false }
+    testLogging {
+        events("passed", "failed")
+        showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }

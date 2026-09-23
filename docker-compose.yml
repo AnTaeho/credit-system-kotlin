@@ -24,7 +24,11 @@ services:
       MYSQL_DATABASE: credit_system
       MYSQL_USER: credit
       MYSQL_PASSWORD: credit
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    # log-bin-trust-function-creators 는 V6(원장 append-only 트리거) 때문에 켠다.
+    # 이 이미지는 log_bin=1 이고 마이그레이션을 도는 `credit` 계정에는 SUPER 가 없어서,
+    # 기본값에서는 CREATE TRIGGER 가 ERROR 1419 로 막힌다(docs/02-design.md 1-4).
+    # 운영 DB 서버의 같은 설정은 배포 체크리스트 항목이고 여기서 다루지 않는다.
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --log-bin-trust-function-creators=1
     ports:
       # 관측 스택과 달리 여기서는 publish 한다. 호스트의 앱이 붙어야 하기 때문이다.
       # 로컬에 이미 MySQL 이 3306 을 쓰고 있으면 그쪽을 내리거나 이 줄을 바꿔라.
