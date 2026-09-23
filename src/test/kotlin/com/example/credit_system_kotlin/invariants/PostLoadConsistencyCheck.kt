@@ -49,7 +49,7 @@ class PostLoadConsistencyCheck @Autowired constructor(
     @Test
     fun `대사 결과에 불일치가 없다`() {
         val publisher = RecordingEventPublisher()
-        LedgerReconciliationTask(ledgerRepository, publisher).reconcile()
+        LedgerReconciliationTask(ledgerRepository, userRepository, publisher).reconcile()
 
         val completed = publisher.events.filterIsInstance<LedgerReconciliationCompleted>().single()
 

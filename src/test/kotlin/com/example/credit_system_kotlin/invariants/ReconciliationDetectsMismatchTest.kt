@@ -64,7 +64,7 @@ class ReconciliationDetectsMismatchTest @Autowired constructor(
 
     private fun reconcileMismatchCount(): Long {
         val publisher = RecordingEventPublisher()
-        LedgerReconciliationTask(ledgerRepository, publisher).reconcile()
+        LedgerReconciliationTask(ledgerRepository, userRepository, publisher).reconcile()
         return publisher.events.filterIsInstance<LedgerReconciliationCompleted>().single().mismatchCount.toLong()
     }
 

@@ -539,6 +539,11 @@ expected == balanceCheck.balance
 `User` 와 `LedgerEntry` 를 `LEFT JOIN` 해 `(id, balance, initialBalance, COALESCE(SUM(l.amount),0))`
 로 만든다. 100 건씩 `userId` 커서로 끊어 읽는다(`RECONCILE_BATCH_SIZE = 100`).
 
+> **2026-09-23 갱신.** 이 쿼리는 그 뒤 두 단계로 쪼개졌다(`UserRepository.findIdsAfter` →
+> `LedgerRepository.findBalanceChecksFor`). 여기 적힌 단일 쿼리는 원장 1억 행에서 265초가
+> 지나도 끝나지 않았다 — `LIMIT` 이 `GROUP BY` 뒤에 걸려 100명을 얻으려 전체를 집계했기
+> 때문이다(`load/results/2026-09-23-perf04-large-ledger.md`). 이 문단은 Phase 0 시점의 기록으로 둔다.
+
 `User.initialBalance` 컬럼은 살아 있다 — `user/domain/User.kt` 의
 `var initialBalance: Long = balance`, `V1__baseline.sql` 의 `initial_balance BIGINT NOT NULL`.
 

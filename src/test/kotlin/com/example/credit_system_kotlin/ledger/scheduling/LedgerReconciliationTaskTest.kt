@@ -35,7 +35,7 @@ class LedgerReconciliationTaskTest @Autowired constructor(
 
     private val eventPublisher: ApplicationEventPublisher = mock()
 
-    private val task = LedgerReconciliationTask(ledgerRepository, eventPublisher)
+    private val task = LedgerReconciliationTask(ledgerRepository, userRepository, eventPublisher)
 
     private lateinit var taskLogger: Logger
     private lateinit var logAppender: ListAppender<ILoggingEvent>

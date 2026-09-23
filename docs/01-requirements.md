@@ -248,7 +248,7 @@ DAU 환산은 1-2 의 정정 2 — **DAU 54만**, 또는 DAU 100만의 ×4.3 피
 |---|---|---|
 | C-1 | 연 73억 행 원장이 한 테이블에 쌓인다. 파티셔닝·아카이빙 장치가 없다 | 1-2 정정 1. 파티션 부재는 직접 확인 — `grep -il partition src/main/resources/db/migration/*.sql` 가 V1~V5 다섯 파일 중 한 건도 맞히지 않는다 |
 | C-2 | `ledger_entries` 의 비유니크 인덱스는 `idx_ledger_user_id (user_id)` 단일 컬럼이고, 커서 페이징 쿼리는 `findByUserIdAndIdLessThanOrderByIdDesc` 다. 같은 모양의 `jobs` 쿼리에는 `(user_id, id)` 복합 인덱스가 V4 로 붙어 있다 | 인벤토리 3-5, `ledger/repository/LedgerRepository.kt:18` |
-| C-3 | 대사 배치가 60초마다 `User LEFT JOIN LedgerEntry` 로 사용자별 `SUM(l.amount)` 를 구한다(100건 커서). 원장이 73억 행이면 **대사 자체가 부하다** | 인벤토리 3-3 (`LedgerRepository.findBalanceChecksAfter`) |
+| C-3 | 대사 배치가 60초마다 `User LEFT JOIN LedgerEntry` 로 사용자별 `SUM(l.amount)` 를 구한다(100건 커서). 원장이 73억 행이면 **대사 자체가 부하다** | 인벤토리 3-3 (`LedgerRepository.findBalanceChecksAfter`) **(2026-09-23: 이 쿼리는 1억 행에서 완료되지 않아 두 단계로 쪼갰다 — `docs/04-results.md` 2-4)** |
 | C-4 | 멱등키 보존이 7일(`app.idempotency.retention-days: 7`)이다. 일 1천만 접수면 `idempotency_keys` 에 7천만 행이 상주한다 (10,000,000 × 7) | `application.yml`, 인벤토리 2-1 멱등키 정리 |
 | C-5 | 앱 1대·DB 1대 전제다. 스케줄러 5종이 전부 단일 프로세스 가정이고 분산 락이 없다 | `docs/roadmap.md` 결정 13, 인벤토리 4-3 마지막 행 |
 | C-6 | 워커 처리량 상한이 **초당 0.43~1.0건**이다(동시 3 ÷ 건당 3~7초). 접수율이 이를 넘으면 `HOLDING` 이 무한히 쌓인다 | 인벤토리 2-1 "이 설정이 함의하는 처리량 상한" (설정값 산술) |

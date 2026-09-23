@@ -115,7 +115,7 @@ class TotalOutageRefundTest @Autowired constructor(
 
         // INV-02 세 검사 — 장애가 지나간 DB 에 대고 즉시 돌린다.
         val publisher = RecordingEventPublisher()
-        LedgerReconciliationTask(ledgerRepository, publisher).reconcile()
+        LedgerReconciliationTask(ledgerRepository, userRepository, publisher).reconcile()
         val completed = publisher.events.filterIsInstance<LedgerReconciliationCompleted>().single()
         assertThat(completed.mismatchCount).describedAs("대사 불일치").isZero()
         assertThat(jobRepository.countJobsWithoutHoldEntry()).describedAs("HOLD 누락 job").isZero()
