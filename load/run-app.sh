@@ -34,6 +34,12 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 
 export SPRING_PROFILES_ACTIVE=local
 
+# 측정용 인프라는 3307/6380 에 있다(load/docker-compose.load.yml). 기본값 3306/6379 에는
+# 이 머신의 homebrew mysqld·redis 가 이미 붙어 있어서, 그대로 두면 엉뚱한 DB 를 재게 된다.
+export SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:mysql://127.0.0.1:3307/credit_system}"
+export SPRING_DATA_REDIS_HOST="${SPRING_DATA_REDIS_HOST:-127.0.0.1}"
+export SPRING_DATA_REDIS_PORT="${SPRING_DATA_REDIS_PORT:-6380}"
+
 # 허용 목록. k6 가 쓰는 계정과 운영자를 함께 넣는다(운영자를 빼면 AuthStartupGuard 가 기동을 거부한다).
 LOAD_USERS="${LOAD_USERS:-load01@local.test,load02@local.test,load03@local.test,load04@local.test,load05@local.test}"
 export APP_AUTH_ALLOWEDEMAILS="admin@local.test,dev@local.test,${LOAD_USERS}"
