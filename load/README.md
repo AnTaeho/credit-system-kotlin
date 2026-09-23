@@ -121,6 +121,46 @@ ulimit -n          # 충분히 큰지(수십만) 확인. 작으면 `ulimit -n 65
 
 ---
 
+## 0-B. 환경 고정 (2026-09-23 추가)
+
+측정이 재현되려면 각 층이 쓸 수 있는 자원이 정해져 있어야 한다. 제한이 없으면 두 실행의
+차이가 시스템 변화인지 자원 배분 변화인지 가를 수 없다. 그래서 세 층을 못 박았다.
+
+| 층 | 고정값 | 고정하는 곳 |
+|---|---|---|
+| Docker VM | 8 vCPU / 4 GiB | Docker Desktop 설정(이 저장소 밖). **결과 파일에 적는다** |
+| MySQL 컨테이너 | CPU 4 / 메모리 3 GiB, buffer pool 128 MiB, max_connections 200, performance_schema ON | `load/docker-compose.load.yml` |
+| Redis 컨테이너 | CPU 1 / 메모리 512 MiB | 같은 파일 |
+| 앱 JVM | 힙 2 GiB 고정(`-Xms=-Xmx`), `AlwaysPreTouch`, `ActiveProcessorCount=4`, G1, GC 로그 | `load/run-app.sh` |
+| 커넥션 풀 | **건드리지 않는다** — Hikari 기본 최대 10 이 현재 구현이다 | — |
+
+실행:
+
+```bash
+# 인프라 (오버레이를 얹는다. 개발용 compose 는 그대로 둔다)
+docker compose -f docker-compose.yml -f load/docker-compose.load.yml up -d mysql redis
+
+# 적용 확인
+docker inspect credit-system-kotlin-mysql-1 --format '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}'
+docker exec credit-system-kotlin-mysql-1 mysql -uroot -proot -N \
+  -e "SELECT @@max_connections, @@innodb_buffer_pool_size, @@performance_schema"
+
+# 앱 (프로파일 b: 지연 50~100ms·실패율 0 / a: application.yml 기본값)
+load/run-app.sh b
+```
+
+**세 가지를 일부러 바꾸지 않았다.**
+
+- `innodb_buffer_pool_size` 는 이미지 기본값 128 MiB 를 그대로 다시 적었다. 올리면 PERF-04 가
+  좋아지지만 그때 재는 것은 "현재 구현"이 아니라 "튜닝한 구현"이다. 기준선을 먼저 얻는다.
+- Hikari 최대 10 도 그대로다. 같은 이유다.
+- Docker VM 은 8 vCPU / 4 GiB 인 현재 값을 유지한다. 4 GiB 라 1억 행 원장에서는 페이지 캐시가
+  모자라 **PERF-04 가 IO 바운드로 나올 것이 예상된다** — 그것도 측정 결과이므로 그대로 적는다.
+
+**합이 호스트를 넘는다**(VM 8 + 앱 4 + k6). 일부러 그렇게 둔다. 여기서 정하는 것은 독점이
+아니라 상한이고, 앱과 DB 가 CPU 를 두고 경쟁하는 것은 인벤토리 5절이 기록한 이 환경의 성질이다.
+없애려면 기계가 두 대여야 한다.
+
 ## 1. 준비
 
 ### 1-1. 인프라

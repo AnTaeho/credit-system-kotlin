@@ -1,0 +1,50 @@
+# 측정용 자원 고정 오버레이 — 부하 실측(3-D)에서만 쓴다.
+#
+# 개발용 `docker-compose.yml` 은 그대로 둔다. 이 파일은 그 위에 덮어써서
+# **자원 몫과 DB 설정을 못 박는** 역할만 한다. 쓰는 법:
+#
+#   docker compose -f docker-compose.yml -f load/docker-compose.load.yml up -d mysql redis
+#
+# 왜 고정하나. 측정이 재현되려면 "무엇이 먼저 포화됐는가"를 말할 수 있어야 하고,
+# 그러려면 각 층이 쓸 수 있는 양이 정해져 있어야 한다. 제한이 없으면 MySQL 이 VM 전체를
+# 쓰다가 다음 실행에는 덜 쓰고, 두 실행의 p99 차이가 시스템 변화인지 자원 배분 변화인지
+# 가를 수 없다.
+#
+# ── 이 머신의 자원 배분 (호스트 Apple M4 10코어 / 16GiB)
+#
+#   Docker VM          8 vCPU / 4 GiB   (Docker Desktop 설정, 이 파일 밖)
+#     ├─ mysql         4 vCPU / 3 GiB   (아래)
+#     └─ redis         1 vCPU / 512 MiB (아래)
+#   앱 JVM (호스트)     4 코어 / 힙 2 GiB (load/run-app.sh)
+#   k6 (호스트)         나머지
+#
+# 합이 호스트 코어 수를 넘는다(8+4+@). 일부러 그렇게 둔다 — 여기서 정하는 것은 "독점"이
+# 아니라 **상한**이다. 앱과 DB 가 CPU 를 두고 경쟁한다는 사실 자체는 인벤토리 5절이
+# 기록한 이 환경의 성질이고, 그것을 없애려면 기계가 두 대여야 한다.
+#
+# ── 바꾸지 않은 것
+# `innodb_buffer_pool_size` 는 이미지 기본값 128MiB 를 **명시적으로 다시 적는다.**
+# 올리면 PERF-04(원장 1억 행 조회)가 좋아지겠지만, 그러면 "현재 구현"이 아니라
+# "튜닝한 구현"을 재는 것이 된다. 값을 올리는 실험은 기준선을 얻은 뒤의 일이다.
+# 명시하는 이유는 이미지 기본값이 버전에 따라 바뀔 수 있기 때문이다.
+
+services:
+
+  mysql:
+    cpus: 4
+    mem_limit: 3g
+    # 개발용 compose 의 command 를 통째로 덮어쓴다. 앞의 두 개는 그쪽과 같은 값이고,
+    # log-bin-trust-function-creators 는 V6 트리거 때문에 필요하다(docs/02-design.md 1-4).
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --log-bin-trust-function-creators=1
+      --innodb-buffer-pool-size=134217728
+      --innodb-flush-log-at-trx-commit=1
+      --sync-binlog=1
+      --max-connections=200
+      --performance-schema=ON
+
+  redis:
+    cpus: 1
+    mem_limit: 512m
