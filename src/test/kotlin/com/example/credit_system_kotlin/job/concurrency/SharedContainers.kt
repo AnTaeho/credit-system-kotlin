@@ -41,7 +41,14 @@ object SharedContainers {
         // Flyway 도 같은 계정으로 돌기 때문에 이 플래그가 없으면 마이그레이션 자체가 실패한다.
         // 이미지 기본 CMD 는 `mysqld` 뿐이라 덮어쓸 다른 옵션이 없다 — 엔트리포인트가
         // `--` 로 시작하는 인자 앞에 mysqld 를 붙여 준다.
-        .withCommand("--log-bin-trust-function-creators=1")
+        //
+        // max-connections 를 올린 이유: 이 컨테이너 하나를 **살아 있는 모든 스프링 컨텍스트**가
+        // 공유한다. 컨텍스트는 테스트가 끝나도 캐시에 남고 각자 Hikari 풀(기본 최대 10)을 쥔
+        // 채이므로, 컨테이너를 쓰는 테스트 클래스가 늘수록 열린 커넥션이 단조 증가한다.
+        // MySQL 기본값 151 에 닿으면 그때 뜨던 컨텍스트가 Flyway 단계에서 "Too many connections"
+        // 로 죽는데, 그 실패는 마지막에 뜬 테스트에 찍혀서 원인과 결과가 어긋나 보인다.
+        // 컨테이너 쪽 상한을 올려 그 우연을 없앤다(3-B 에서 불변식 테스트 6개를 붙이며 실제로 닿았다).
+        .withCommand("--log-bin-trust-function-creators=1", "--max-connections=1000")
         .withReuse(true)
 
     private val redis: RedisContainer = RedisContainer(DockerImageName.parse("redis:7-alpine"))
