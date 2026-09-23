@@ -455,6 +455,35 @@ workerExecutor.execute { jobProcessor.runGeneration(job) }
 
 ---
 
+#### INV-06 강제 장치 — 실행으로 확인한 것 (2026-09-23)
+
+매뉴얼 문면이 모호했던 부분을 실제로 돌려 확정했다.
+환경은 인벤토리 5절과 같다: 이미지 `mysql:8.4`(8.4.11), `log_bin=1`,
+`log_bin_trust_function_creators=0`(둘 다 이미지 기본값), 앱 계정 `credit` 에
+`GRANT ALL PRIVILEGES ON credit_system.*`(= `docker-compose.yml`·`SharedContainers` 와 같은 계약).
+
+| # | 시도 | 결과 |
+|---|---|---|
+| 1 | `credit` 계정으로 `CREATE TRIGGER ... BEFORE UPDATE ... SIGNAL` | **실패** — `ERROR 1419 (HY000): You do not have the SUPER privilege and binary logging is enabled` |
+| 2 | `GRANT SET_ANY_DEFINER ON *.* TO 'credit'@'%'` 후 재시도 | **실패** — 같은 `ERROR 1419`. MySQL 8.4 의 이 동적 권한으로는 풀리지 않는다 |
+| 3 | `SET GLOBAL log_bin_trust_function_creators = 1` 후 재시도 | **성공** — 트리거 2개 생성됨 |
+| 4 | 3의 상태에서 삽입만 되는지 검증 | `INSERT` 성공. `UPDATE` 와 `DELETE` 는 각각 **`ERROR 1644 (45000): ledger_entries is append-only`**, 행은 그대로 남았다 |
+| 5 | trust 플래그를 0으로 되돌리고 `GRANT SUPER ON *.* TO 'credit'@'%'` 후 재시도 | **성공** — SUPER 로도 생성된다 |
+
+**따라서 트리거 안은 성립한다. 단 마이그레이션 하나로 끝나지 않고 서버 설정 또는 권한이 함께 간다.**
+선택지는 셋이고 각각의 대가가 다르다.
+
+| 선택지 | 바꿔야 하는 곳 | 대가 |
+|---|---|---|
+| (a) `log_bin_trust_function_creators=1` | `docker-compose.yml` 의 MySQL `command`, 운영 DB 설정, `SharedContainers` 의 컨테이너 `command` | 서버 전역 플래그다. 트리거뿐 아니라 **저장 함수 전체**의 바이너리 로그 안전성 검사를 끈다 |
+| (b) 앱 계정에 `SUPER` | 계정 권한 | 앱 계정이 서버 전역 권한을 갖는다. (a)보다 넓다 |
+| (c) 마이그레이션만 별도 권한 계정으로 | Flyway 자격증명 분리(`spring.flyway.user`) | 계정이 하나 늘고 배포 절차가 복잡해진다. 대신 앱 계정 권한은 그대로다 |
+
+Phase 3 에서 하나를 골라야 한다. **이 문서의 권고는 (a)** 다 — 이 프로젝트에는 저장 함수가
+없고(`grep -rn "CREATE FUNCTION" src/main/resources/db/migration` 일치 없음), 바꾸는 곳이
+설정 파일 세 군데로 끝나며, 앱 계정 권한을 넓히지 않는다. (c)는 운영 계정이 둘이 되는
+대가가 이 규모에서 과하다.
+
 ### 1-5. 원장 파티셔닝 시점
 
 **규모.** 요구서 1-2 의 정정값을 쓴다 — **일 2천만 행, 연 73억 행**
@@ -652,5 +681,6 @@ ShedLock 도입은 이 문서의 결론이 아니라 후보이고, 결정 13 이
 | 7 | (브리프에 없음) | **INV-06 의 강제 수단 선택**(요구서 4-5 가 Phase 2 로 넘긴 항목)이 브리프의 절 배정에 없었다. gap 표 INV-06 행에서 트리거를 권하는 근거와 함께 닫았다 | `application.yml`, `docker-compose.yml`, `SharedContainers.kt` — 앱·Flyway·테스트 모두 `credit` 계정 |
 | 8 | `hangForever` 의 인터럽트 처리만 확인하라 | 확인했고(플래그 복원 후 `IllegalStateException`), **추가로** `GenerationJobProcessor.runGeneration` 이 `finally` 에서 `stopHeartbeat` 를 부른다는 것을 확인했다. 즉 인터럽트가 성공하면 인벤토리 3-2 C7 의 잔여 두 가지(슬롯 미반환, ZSET 고아 멤버)가 **함께** 닫힌다 | `GenerationStubClient.kt:hangForever`, `GenerationJobProcessor.kt:runGeneration` |
 | 9 | (브리프 초안) 인증 트랜잭션 때문에 커넥션 예산이 **절반**이 된다 | **틀렸다.** 두 트랜잭션은 순차이고 외부 대기는 TX-1 쪽에만 들어간다. 인증 트랜잭션은 SELECT 한 번과 커밋이라 커넥션 점유가 밀리초 단위다 — 요청당 커넥션-초는 `0.2초 + ε` 이고 자릿수는 바뀌지 않는다. 초고에 있던 "절반(25 / 2.5 / 1건/s)" 산술을 철회하고 1-2 를 고쳐 썼다 | 요구서 1-4, `auth/login/UserAccountProvisioner.kt:provisionDevUser` |
-| 10 | (브리프에 없음) | **INV-06 트리거 권고에 선행 확인이 하나 붙는다.** `log_bin=1` 이고 `credit` 에 `SUPER` 가 없다. MySQL 8.4 매뉴얼 "Stored Program Binary Logging" 은 함수에 `SUPER` 를 요구하면서(ERROR 1419) "트리거에도 위 서술이 적용된다"고 적어 **문면이 모호하다.** 걸린다면 `log_bin_trust_function_creators=1` 또는 별도 DBA 계정이 필요하다. Docker 미기동으로 실행 확인 불가 | `dev.mysql.com/doc/refman/8.4/en/stored-programs-logging.html`(2026-09-23 열람), 인벤토리 5절 |
+| 10 | (브리프에 없음) | **INV-06 트리거의 선행 확인을 실행으로 끝냈다(2026-09-23).** 결과는 본문 1-4 아래 "INV-06 강제 장치 — 실행으로 확인한 것" 참조. 요약: 기본 설정에서는 `ERROR 1419` 로 막히고, `log_bin_trust_function_creators=1` 또는 `SUPER` 가 있어야 생성된다 | 아래 실행 기록 |
+| 10b | (옛 기록) | **INV-06 트리거 권고에 선행 확인이 하나 붙는다.** `log_bin=1` 이고 `credit` 에 `SUPER` 가 없다. MySQL 8.4 매뉴얼 "Stored Program Binary Logging" 은 함수에 `SUPER` 를 요구하면서(ERROR 1419) "트리거에도 위 서술이 적용된다"고 적어 **문면이 모호하다.** 걸린다면 `log_bin_trust_function_creators=1` 또는 별도 DBA 계정이 필요하다. Docker 미기동으로 실행 확인 불가 | `dev.mysql.com/doc/refman/8.4/en/stored-programs-logging.html`(2026-09-23 열람), 인벤토리 5절 |
 | 11 | (브리프 초안) 낙관적 락은 "과거에 있었고 걷어냈다" | **KT 저장소의 엔티티에 `@Version` 이 쓰인 적이 없다**(`git log -S "@Version" --all` → 일치 0건). JAVA 쪽 일치는 전부 문서 커밋이다. 다만 JAVA `cee4bf8` 본문은 "이 프로젝트가 실제로 가졌던 결함 버전(단일 트랜잭션 내 재시도)"을 언급하고, 세 전략 비교 벤치마크(`BalanceStrategyBenchmark.java`, `OptimisticLockStrategy.java`)가 JAVA 테스트 트리에 남아 있다. ADR-003 의 내용을 베끼지 않기 위해 본문은 **번호로만 가리키고** 논증은 이 요구서(PERF-05)로만 폈다 | `git log -S "@Version" --all` 양쪽, `git grep -il optimistic HEAD -- src`(JAVA) |
