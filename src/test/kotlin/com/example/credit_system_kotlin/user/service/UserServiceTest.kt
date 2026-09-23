@@ -80,7 +80,7 @@ class UserServiceTest @Autowired constructor(
 
     /**
      * Java 원본에는 `charge(id, null, 300L)` 로 null을 넘기는 테스트가 하나 더 있었다.
-     * Kotlin에서 idemKey를 non-null로 닫았으므로(report.md A-4) 그 호출은 컴파일되지 않는다.
+     * Kotlin에서 idemKey를 non-null로 닫았으므로(`git show 589c696^:report.md` A-4) 그 호출은 컴파일되지 않는다.
      * 대신 필드가 없는 JSON이 400으로 거부되는지를
      * AdminGrantApiControllerTest 에서 확인한다(옛 charge 가 grant 로 바뀌었다).
      */

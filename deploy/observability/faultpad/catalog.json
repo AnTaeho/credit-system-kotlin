@@ -1,5 +1,5 @@
 {
-  "_comment": "장애 주입 버튼 패드의 카드 정의. server.py 의 액션 허용 목록이자 index.html 이 그리는 데이터다. expect 의 숫자는 docs/step7-observability.md 6단계 결과 매트릭스와 후속 1 실측에서 그대로 옮긴 것이다. 07(지연 → 타임아웃)·08(멈춘 워커)·09(외부 API 전부 실패)는 미실측이다 — 07 은 step11-A 의 타임아웃이 사고의 결과를 바꿔 옛 실측이 더 이상 기대값이 아니고, 08 은 step11 에서 새로 만든 카드다.",
+  "_comment": "장애 주입 버튼 패드의 카드 정의. server.py 의 액션 허용 목록이자 index.html 이 그리는 데이터다. expect 의 숫자는 `git show req-v3:docs/step7-observability.md` 6단계 결과 매트릭스와 후속 1 실측에서 그대로 옮긴 것이다. 07(지연 → 타임아웃)·08(멈춘 워커)·09(외부 API 전부 실패)는 미실측이다 — 07 은 step11-A 의 타임아웃이 사고의 결과를 바꿔 옛 실측이 더 이상 기대값이 아니고, 08 은 step11 에서 새로 만든 카드다.",
   "env_defaults": {
     "APP_WORKER_ENABLED": "true",
     "APP_SCHEDULING_ENABLED": "true",

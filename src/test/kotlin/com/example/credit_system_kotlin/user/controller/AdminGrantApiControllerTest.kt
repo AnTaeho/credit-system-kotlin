@@ -108,7 +108,7 @@ class AdminGrantApiControllerTest @Autowired constructor(
 
     /**
      * Java 원본은 UserServiceTest 에서 idemKey에 null을 넘겨 이 경계를 확인했다.
-     * Kotlin은 idemKey를 non-null로 닫아(report.md A-4) 그 호출이 컴파일되지 않으므로
+     * Kotlin은 idemKey를 non-null로 닫아(`git show 589c696^:report.md` A-4) 그 호출이 컴파일되지 않으므로
      * 남은 실제 경로 — 필드가 아예 없는 JSON — 를 여기서 확인한다(옛 charge 에서 옮겨 왔다).
      */
     @Test

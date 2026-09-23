@@ -66,7 +66,7 @@ allOpen {
 
 // ── detekt ─────────────────────────────────────────────────────────────────
 // Gradle 플러그인을 쓰지 않고 detekt-cli 를 별도 JVM 에서 돌린다.
-// 이유는 report.md J 절 참고 — detekt 1.23.8 이 물고 있는 Kotlin 2.0.21 은
+// 이유는 `git show 589c696^:report.md` J절 참고 — detekt 1.23.8 이 물고 있는 Kotlin 2.0.21 은
 // 이 머신의 실행 JDK(26)를 거부한다. 플러그인의 Detekt 태스크는 Gradle 데몬 안에서
 // 돌아서 데몬 JDK 를 통째로 내리지 않으면 못 쓴다. JavaExec 로 분리하면
 // 데몬은 26 그대로 두고 detekt 만 17 에서 돌릴 수 있다.

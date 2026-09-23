@@ -1,4 +1,4 @@
-# 도메인 알람 규칙. 기준은 `docs/SYSTEM.md` 1~3단계에서 정한 것 그대로다.
+# 도메인 알람 규칙. 기준은 `git show req-v3:docs/step7-observability.md` 1~3단계에서 정한 것 그대로다.
 #
 # Alertmanager 는 붙이지 않는다. 라우팅(Slack/PagerDuty)은 이번 범위 밖이고,
 # 규칙 자체를 코드로 남겨 Prometheus /alerts 에서 fire 되는 것까지가 목표다.

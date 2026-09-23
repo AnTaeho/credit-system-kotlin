@@ -1,7 +1,7 @@
 # 관측 스택 (Prometheus + Grafana)
 
 step7 5단계에서 만든 로컬 관측 스택이다. 논지·지표 해석·알람 기준의 상세는
-[`docs/SYSTEM.md`](../../`docs/SYSTEM.md`) 의 4·5단계를 봐라.
+`git show req-v3:docs/step7-observability.md` 의 4·5단계를 봐라.
 
 ## 전제
 
@@ -88,8 +88,8 @@ docker compose -f deploy/observability/docker-compose.yml logs -f app
 
 `scenarios/` 의 8개 스크립트는 사고를 실제로 심고, **어느 지표가 반응하고 어느 지표가
 침묵하는지, 감지까지 몇 초 걸리는지**를 실측한다. 해석과 실측값은
-[`docs/SYSTEM.md`](../../`docs/SYSTEM.md`) 의 6단계에 있고,
-07·08 의 해석과 step11 재실행 상태(01·02 만 실측하고 중단됐다)는 [`docs/SYSTEM.md`](../../`docs/SYSTEM.md`) 에 있다.
+`git show req-v3:docs/step7-observability.md` 의 6단계에 있고,
+07·08 의 해석과 step11 재실행 상태(01·02 만 실측하고 중단됐다)는 `git show req-v3:docs/step11-external.md` 에 있다.
 
 ```
 # 전체 (40~60분, 마지막에 down -v 까지 한다)
@@ -122,7 +122,8 @@ docker compose -f deploy/observability/docker-compose.yml logs -f app
 export 되므로 호출한 셸에는 남지 않는다.
 
 Grafana 로 곡선을 보려면 스크립트를 돌리는 동안 <http://localhost:3000> 의
-`credit-domain` 대시보드를 열어 둔다. 어느 시점에 어느 패널을 봐야 하는지는 문서 6단계의
+`credit-domain` 대시보드를 열어 둔다. 어느 시점에 어느 패널을 봐야 하는지는
+`git show req-v3:docs/step7-observability.md` 6단계의
 "포트폴리오 스크린샷 가이드" 절에 있다.
 
 ## 장애 주입 버튼 패드 (step7 후속 3)
@@ -143,4 +144,4 @@ python3 deploy/observability/faultpad/server.py     # http://127.0.0.1:8090
 
 스택은 패드의 `스택 올리기 (fresh)` 버튼으로 올려도 되고 미리 올려 둬도 된다. 상세는
 [`faultpad/README.md`](faultpad/README.md), 설계 근거는
-[`docs/SYSTEM.md`](../../`docs/SYSTEM.md`) 의 `## 후속 3` 에 있다.
+`git show req-v3:docs/step7-observability.md` 의 `## 후속 3` 에 있다.
