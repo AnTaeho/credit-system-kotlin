@@ -249,7 +249,17 @@ fun generate(prompt: String): String
 - INV-04 를 따르면 결정 12 의 "손실을 떠안는다"를 **좁혀야** 한다
   (외부가 멱등키를 지원하는 만큼만 떠안는다).
 
-**이 충돌은 사용자가 닫을 항목이다.** 이 문서는 어느 쪽으로도 조용히 정리하지 않는다.
+**충돌은 2026-09-23 에 닫혔다 — 요구서 쪽이 바뀌었다.**
+가정하는 외부 API(지연 3~7초)는 **멱등키를 지원하지 않는 것으로 고정**했다
+(실제 API 를 붙이지 않으므로 조사 결과가 아니라 가정이다). 그 경계에서는 C3c 가
+원리적으로 닫히지 않으므로, 요구서 INV-04 를 둘로 쪼갰다(요구서 4-3) —
+**INV-04a**(사용자 과금 정확히 1회)는 불변식으로 남고, **INV-04b**(외부 호출 중복)는
+job 당 `max-attempts` 3회를 상한으로 갖는 **손실 지표**가 된다. 결정 12 와 일치한다.
+
+따라서 위의 설계안 (1)·(2)와 `GenerationClient` 시그니처 확장은 **지금 하지 않는다.**
+외부가 멱등키를 지원하는 API 로 바뀌면 그때 INV-04b 를 불변식으로 되돌리는 설계로
+이 절을 그대로 쓸 수 있도록 남겨 둔다. Phase 3 이 이 절에서 실제로 만드는 것은
+**중복 호출을 세는 계측**뿐이다.
 
 ---
 
@@ -573,7 +583,8 @@ UNIQUE KEY uk_ledger_user_idem (user_id, idem_key, created_at)
 
 | 요구서 항목 | 있어야 했던 설계 | 현재 구현 | gap | 닫는 Tier | 닫는 단계 |
 |---|---|---|---|---|---|
-| **INV-04** (실패) | 외부 요청에 `jobId` 멱등키를 싣고, 재시도 전에 reconcile-before-retry 로 외부에 "그 키가 처리됐는지"를 묻는다 | 멱등키 없음. `GenerationClient.generate(prompt: String): String` 에 실을 자리가 없고, `GenerationStubClient` 는 키를 기억하지 못한다(호출마다 `UUID.randomUUID()`) | **인터페이스 변경 + 스텁 확장 없이는 Phase 3 에서 검증조차 불가.** 게다가 요구서 INV-04 와 `docs/roadmap.md` 결정 12(중복 호출을 운영자 손실로 수용)가 **충돌**한다 — 사용자가 닫을 항목 | A | Phase 3 (단, 충돌 해소가 선행) |
+| **INV-04a** (미측정) | 크래시 주입 지점에서도 사용자 잔액이 원상 | 단건 경로는 통과, 크래시 주입 테스트 없음 | fault injection 지점 + 재기동 후 INV-02 세 검사 | A | Phase 3 |
+| **INV-04b** (미측정, 지표) | 외부 호출 중복을 세고 상한 안에 있음을 보인다 | 중복 호출을 세는 계측이 없다 | 카운터 하나. **멱등키·시그니처 변경은 하지 않는다**(2026-09-23 확정, 1-2) | A | Phase 3 |
 | **INV-05** (실패) | 미결이 T 안에 반드시 풀리고, 멈춘 워커의 **슬롯도** 회수된다 | 최악 ≈16.1분(요구서 4-4). hang 슬롯은 회수되지 않아 `concurrency: 3` 이 다 막히면 뒤에 선 job 의 T 에 **상한이 없다** | (i) T 를 맞추려면 `absolute-timeout-seconds ≤ 178`(1-4 산술) 또는 T=17분으로 요구서 수정 — **선택은 사용자** (ii) 슬롯 회수는 `TaskExecutor.execute` → `submit` + `(jobId, attemptNo) → Future` 레지스트리라는 **구조 변경**이 필요하고, 실제 HTTP 클라이언트가 인터럽트에 반응하는지는 **모른다** | A | Phase 3 |
 | **INV-06** (실패) | `ledger_entries` 가 삽입만 되는 테이블 (2026-09-23 사용자 확정, 요구서 합의 5) | 막는 DB 장치가 없다 — 트리거·권한·`CHECK` 어디에도(인벤토리 3-4). 앱 쪽도 강제가 아니라 관행 | 마이그레이션 1개. **수단은 `BEFORE UPDATE`/`BEFORE DELETE` 트리거 + `SIGNAL` 을 권한다** — 앱 DB 계정이 `credit`(`application.yml`, `docker-compose.yml`)이고 Flyway 도 같은 계정으로 도므로, `REVOKE` 는 자기 권한을 스스로 걷는 셈이라 마이그레이션이 실을 수 없고 Testcontainers(`SharedContainers` 도 `credit`)로 증명할 수도 없다. 더구나 **MySQL 권한에는 거부(deny)가 없다** — 권한은 가산되기만 한다. `SharedContainers.createDatabase` 가 `GRANT ALL PRIVILEGES ON $database.* TO 'credit'@'%'` 로 **DB 단위 ALL** 을 주므로, 그 위에 `REVOKE UPDATE ON credit_system.ledger_entries` 를 걸어도 DB 단위 권한이 남아 막히지 않는다. REVOKE 안을 살리려면 DB 단위 GRANT 를 걷고 테이블별로 다시 부여해야 하고, 그것은 Testcontainers 셋업·compose·운영 세 곳의 권한 모델을 함께 바꾸는 일이다. 트리거는 마이그레이션이 싣고 테스트가 실패→통과로 증명할 수 있다. **단 선행 확인이 하나 붙는다** — 이 환경은 `log_bin=1`(인벤토리 5절)이고 `credit` 에는 `SUPER` 가 없다. MySQL 8.4 매뉴얼 "Stored Program Binary Logging"(2026-09-23 열람)은 함수 생성에 `SUPER` 를 요구하고(ERROR 1419), 이어서 "the preceding remarks regarding functions also apply to triggers" 와 "error messages similar to those for stored functions occur with CREATE TRIGGER if you do not have the required privileges" 라고 적는다 — **트리거에도 걸리는지가 문면상 모호하다.** 걸린다면 컨테이너에 `log_bin_trust_function_creators=1` 을 주거나 별도 DBA 계정으로 마이그레이션을 돌려야 한다. Docker 미기동으로 실행 확인 불가(2026-09-23). 이 계정 판단 자체는 설정 파일(`application.yml`, `docker-compose.yml`, `SharedContainers.kt`)로 확인했다 | A | Phase 3 |
 | **PERF-07** | 접수율과 워커 처리량의 격차를 **관리**한다 — 적체 상한, 접수 측 백프레셔, 또는 워커 스케일아웃 | 상한이 없다. 접수는 워커 처리량(**설정값 산술** 0.43~1.0건/s)과 무관하게 계속 성공하고 `HOLDING` 이 무한히 쌓인다(요구서 3-2: 10분 부하로 30만 건, 소진 83~194시간) | 격차 자체를 없애는 장치가 없다. **관측 게이지는 이미 있다** — `DomainSnapshotTask` 의 미결 수·미결 금액·가장 오래된 미결 나이(인벤토리 2-1, `DomainSnapshotTaskTest`). 즉 "보이지만 아무것도 하지 않는다"(인벤토리 3-2 C9 와 같은 모양). 게이지를 부하 중 기록하는 일은 Phase 3 의 측정 절차에 속하고, **이 행의 gap 은 장치 쪽이다** | B | Tier B |
