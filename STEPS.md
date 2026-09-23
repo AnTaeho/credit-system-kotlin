@@ -27,7 +27,7 @@ step0~step6 이 **사고를 막는** 이야기라면, step7 부터는 **밖에�
 이야기다. step6 까지만 읽어도 도메인 방어의 논지는 다 들어온다.
 
 각 브랜치에는 그 단계까지의 **상세 문서**가 `docs/` 아래에 하나씩 들어 있다.
-`step3-idempotency` 를 체크아웃하면 `docs/step0-naive.md` 부터 `docs/step3-idempotency.md` 까지 읽을 수 있다.
+`step3-idempotency` 를 체크아웃하면 `docs/legacy-steps/step0-naive.md` 부터 `docs/legacy-steps/step3-idempotency.md` 까지 읽을 수 있다.
 이 파일은 전체 지도이고, `docs/` 쪽이 단계별 상세다 — 실제 코드 인용, 테스트가 무엇을 단언하는지,
 그 단계의 코드를 어떻게 깨뜨릴 수 있는지가 거기 있다.
 
@@ -292,7 +292,7 @@ step8 까지는 **요청이 스스로 밝힌 신원을 그대로 믿었다.** �
   목록은 `{items, nextCursor}`
 - **사용자별 속도 제한 — 넣었다가 뺐다** — `POST /api/jobs` 에 토큰 버킷을 걸었다가 같은 단계에서 전부 되돌렸다.
   총량은 잔액이, AI 호출 동시성은 워커 수가 이미 막고, 선결제 잔고를 지키는 진짜 벽은 step12 의 일일 원가 상한이다.
-  근거는 [`docs/step9-auth.md`](docs/step9-auth.md) 의 D 절
+  근거는 [`docs/legacy-steps/step9-auth.md`](docs/legacy-steps/step9-auth.md) 의 D 절
 - **최소 화면** — Thymeleaf 서버 렌더링. 로그인·홈·job·원장·운영자 지급. CSRF 는 켜고 CSP 로 인라인 스크립트를 막는다
 - **개발 로그인** — `X-Dev-User: <email>` 헤더(요청 단위, CSRF 면제)와 `/login` 화면의 세션 개발 로그인(CSRF 적용).
   local·test 프로필 전용이고, prod 에서 켜져 있으면 기동을 거부한다. 관측 스택의 스크립트도 이걸로 옮겼다
@@ -333,7 +333,7 @@ step9 까지 이 서비스의 "외부 호출"은 `Thread.sleep` 이었다. **느
 이 단계의 관점: **상한이 없는 기다림은 기다림이 아니라 누수다.** 그리고 모든 구멍이 같은 값으로 막히지는 않는다 —
 돈은 절대 상한이 풀지만 **워커 슬롯은 아무도 돌려주지 못한다**. 깨울 수단이 없기 때문이다. 그래서 이 단계는
 막지 못한 것을 지표 하나(`credit_worker_slots_free`)와 알람 하나로 **보이게** 만드는 데까지가 결론이다.
-[`docs/step11-external.md`](docs/step11-external.md) 의 한계 절에 그 목록이 있다.
+[`docs/legacy-steps/step11-external.md`](docs/legacy-steps/step11-external.md) 의 한계 절에 그 목록이 있다.
 
 ---
 

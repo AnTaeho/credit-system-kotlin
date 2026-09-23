@@ -717,7 +717,7 @@ Advisor 가 `./gradlew cleanTest test` 로 얻은 값과 같다.
 
 `run-all.sh` 가 8 개를 연속 실행하고, `lib.sh` 가 공용 함수를 담는다.
 8 개 전부의 재실행 실측은 `e2a54b4`(2026-09-20, "docs: step11 시나리오 8개 재실행 실측을 채운다")에서
-`docs/step11-external.md` 에 기록됐다.
+`docs/legacy-steps/step11-external.md` 에 기록됐다.
 `deploy/observability/faultpad/`(`server.py`, `index.html`, `catalog.json`, `actions.sh`)는
 버튼 하나가 장애 하나에 대응하는 주입 도구다(KT `b9bb5ca`, 2026-09-06).
 
@@ -795,8 +795,8 @@ Apple M4 위에 있다. 부하를 걸면 앱 JVM 과 DB 가 같은 CPU 를 두�
 **이 문서는 그 구조를 구성 축으로 쓰지 않는다.** 1 절의 시대 구분은 날짜와
 시스템 변화를 축으로 하며, 커밋 메시지에 남은 `step7-3` 같은 접두사는 커밋의 원문일 뿐이다.
 
-저장소에 존재하는 단계 문서: `docs/step0-naive.md`, `docs/step1-validation.md`,
-`docs/step2-atomic-balance.md`, `docs/step3-idempotency.md`, `docs/step4-state-machine.md`,
-`docs/step5-recovery.md`, `docs/step6-resilience.md`, `docs/step7-observability.md`,
-`docs/step8-ops.md`, `docs/step9-auth.md`, `docs/step11-external.md`.
+저장소에 존재하는 단계 문서: `docs/legacy-steps/step0-naive.md`, `docs/legacy-steps/step1-validation.md`,
+`docs/legacy-steps/step2-atomic-balance.md`, `docs/legacy-steps/step3-idempotency.md`, `docs/legacy-steps/step4-state-machine.md`,
+`docs/legacy-steps/step5-recovery.md`, `docs/legacy-steps/step6-resilience.md`, `docs/legacy-steps/step7-observability.md`,
+`docs/legacy-steps/step8-ops.md`, `docs/legacy-steps/step9-auth.md`, `docs/legacy-steps/step11-external.md`.
 이 밖에 `docs/roadmap.md`, 루트의 `README.md`, `STEPS.md` 가 있다.

@@ -172,7 +172,7 @@ PR #2(draft)의 첫 CI 가 **실패했다.** 로컬에서는 전부 초록이었
 
 **아래 실측은 속도 제한이 있던 상태에서 잰 것이다.** D 를 되돌린 지금은 compose 의 `APP_RATELIMIT_JOBCREATE_PERMINUTE` 도, 시나리오가 그것을 풀어 줘야 할 이유도 없다. 스택은 다시 돌리지 않았다(아래 주 1).
 
-시나리오 7개를 `run-all.sh` 로 다시 돌린 결과(판정은 [`docs/step7-observability.md`](step7-observability.md) 6단계 결과 매트릭스·후속 1 의 02 재실측과 비교):
+시나리오 7개를 `run-all.sh` 로 다시 돌린 결과(판정은 [`docs/legacy-steps/step7-observability.md`](step7-observability.md) 6단계 결과 매트릭스·후속 1 의 02 재실측과 비교):
 
 `run-all.sh` 한 번, 약 25분(2026-09-19 23:58 ~ 09-20 00:23). 시나리오 7개 전부 **이전과 같은 판정**이다. 초 단위 값은 스캔·스크레이프·대사 주기의 위상에 따라 몇 초씩 움직인다.
 

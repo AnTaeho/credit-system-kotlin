@@ -67,7 +67,7 @@ step6-resilience 가 만든 원장 대사(`LedgerReconciliationTask`)는 이미 
 | `ledger/scheduling/LedgerReconciliationTaskTest.kt` | 수정 | 생성자 변경(`ApplicationEventPublisher` 추가)에 맞춰 mock 을 넘기도록 고치고, 발행된 이벤트의 `checkedCount`/`mismatchCount` 를 검증하는 테스트를 추가 |
 | `observability/LedgerReconciliationMetricsTest.kt` | 신규 | `SimpleMeterRegistry` 로 게이지/카운터/타이머 갱신을 순수 단위 테스트로 검증 |
 | `observability/PrometheusEndpointTest.kt` | 신규 | `@SpringBootTest` + MockMvc 로 `/actuator/prometheus` 응답에 지표가 실제로 노출되는지 확인 |
-| `docs/step7-observability.md` | 신규 | 이 문서 |
+| `docs/legacy-steps/step7-observability.md` | 신규 | 이 문서 |
 
 ### 지표 표
 

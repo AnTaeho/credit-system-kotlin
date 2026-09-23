@@ -276,7 +276,7 @@ Gradle 표준 배치를 쓰므로 실제 경로는 `src/test/kotlin/com/example/
 - [x] **사용자별 속도 제한이 없다.** 2026-09-19 도입 → 2026-09-20 제거, 하루 만이다.
   제거 판단에 수치는 없었고 비교된 것은 유지 비용의 항목 수다 —
   `docs/adr/ADR-006-per-user-rate-limit-added-and-removed.md`.
-- [x] **일일 원가 상한이 없다.** ADR-006 이 인용한 `docs/step9-auth.md` 는 "진짜 벽은 step12 의
+- [x] **일일 원가 상한이 없다.** ADR-006 이 인용한 `docs/legacy-steps/step9-auth.md` 는 "진짜 벽은 step12 의
   일일 원가 상한"이라고 적는데 그 장치가 코드에 없다 —
   `grep -rin "원가|daily|budget|cost-limit|spend" src/main/kotlin` 가 맞히는 것은 주석 3줄뿐이고
   (`ExternalCallMetrics.kt:37`, `GenerationJobProcessor.kt:54`, `GenerationClient.kt:15`)

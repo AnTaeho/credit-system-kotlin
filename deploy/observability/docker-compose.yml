@@ -46,7 +46,7 @@ services:
       # 스크립트·버튼 패드가 구글 없이 API 를 두드리는 유일한 방법이다.
       SPRING_PROFILES_ACTIVE: local
       # 노출 경계의 실물. 관리 포트를 애플리케이션 포트에서 떼어낸다.
-      # application.yml 에 쓰지 않고 여기서 주는 이유는 docs/step7-observability.md 4단계 참고.
+      # application.yml 에 쓰지 않고 여기서 주는 이유는 docs/legacy-steps/step7-observability.md 4단계 참고.
       MANAGEMENT_SERVER_PORT: 8081
       # 6단계 장애 주입용 손잡이. 기본값은 application.yml 과 같으므로,
       # 아무것도 지정하지 않고 올리면 5단계까지와 동일한 스택이다.

@@ -181,7 +181,7 @@ Thymeleaf + 약간의 JS. 같은 앱, 같은 배포다.
 
 #### 완료 기록 (2026-09-10, 브랜치 `step8-ops`)
 
-상세는 [`docs/step8-ops.md`](step8-ops.md).
+상세는 [`docs/legacy-steps/step8-ops.md`](step8-ops.md).
 
 | 커밋 | 내용 |
 |---|---|
@@ -189,7 +189,7 @@ Thymeleaf + 약간의 JS. 같은 앱, 같은 배포다.
 | `b804f32` | step8-C — 루트 `Dockerfile`(멀티스테이지)·`docker-compose.yml`, GitHub Actions `ci.yml`/`image.yml` |
 | `c3bdda2` | step8-D — 관측 스택의 DB 자격증명을 루트 compose 계약(`credit_system`/`credit`/`credit`)으로 통일 |
 | `79616b7` | chore — 추적되던 faultpad `__pycache__` 정리 |
-| `bdae77a` | step8-E — README, `docs/step8-ops.md`, STEPS.md, 로드맵 완료 기록 |
+| `bdae77a` | step8-E — README, `docs/legacy-steps/step8-ops.md`, STEPS.md, 로드맵 완료 기록 |
 
 완료 기준 대조:
 
@@ -227,7 +227,7 @@ step10으로 넘기는 것:
 
 #### 완료 기록 (2026-09-20, 브랜치 `step9-auth`)
 
-상세는 [`docs/step9-auth.md`](step9-auth.md).
+상세는 [`docs/legacy-steps/step9-auth.md`](step9-auth.md).
 
 | 커밋 | 내용 |
 |---|---|
@@ -239,7 +239,7 @@ step10으로 넘기는 것:
 | `cbe3dee` | test — 관리 포트 health 테스트가 로컬 Redis 유무에 따라 갈리지 않게(PR #2 첫 CI 실패의 원인) |
 | `eab84fb` | step9-D — 사용자별 job 접수 속도 제한(토큰 버킷, 기본 분당 10, 429 `RATE_LIMITED`), 방어 지표 `rate_limit`. **이후 제거**(`5819011`) |
 | `4b2a618` | step9-F — Thymeleaf 최소 화면(로그인·홈·job·원장·운영자 지급), CSP, local 전용 세션 개발 로그인 |
-| `78851f8` | step9-G — 관측 스택을 개발 로그인·운영자 지급으로 이전, 시나리오 재실행, `docs/step9-auth.md`·README·STEPS.md·이 기록 |
+| `78851f8` | step9-G — 관측 스택을 개발 로그인·운영자 지급으로 이전, 시나리오 재실행, `docs/legacy-steps/step9-auth.md`·README·STEPS.md·이 기록 |
 
 완료 기준 대조:
 
@@ -294,7 +294,7 @@ step10으로 넘기는 것:
 
 #### 완료 기록 (2026-09-20, 브랜치 `step11-external`)
 
-상세는 [`docs/step11-external.md`](step11-external.md).
+상세는 [`docs/legacy-steps/step11-external.md`](step11-external.md).
 
 | 커밋 | 내용 |
 |---|---|
@@ -303,7 +303,7 @@ step10으로 넘기는 것:
 | `e17ed27` | step11-C — 재시도 지수 backoff(Flyway V5 `jobs.next_attempt_at`, 10초·4배 → 실제 10초·40초), 디스패처가 때가 된 job 만 집는다 |
 | `e512b76` | step11-D — 드레인 복원(`step8-b-drain-archive` cherry-pick), 종료 순서와 `WorkerDrainGate`(락), compose `stop_grace_period: 90s` |
 | `66e52e8` | step11-E — 요청 ID·job MDC, prod JSON(ECS) 로그, 프롬프트를 로그·예외 메시지에서 제거(길이만) |
-| `026bdab` | step11-F — 07 을 "지연 → 타임아웃"으로 다시 쓰고 08(멈춘 워커) 신설, 알람 둘(`CreditHardCapRecovery`·`CreditWorkerSlotsExhausted`)·슬롯 패널 추가, `docs/step11-external.md`·README·STEPS.md·이 기록 |
+| `026bdab` | step11-F — 07 을 "지연 → 타임아웃"으로 다시 쓰고 08(멈춘 워커) 신설, 알람 둘(`CreditHardCapRecovery`·`CreditWorkerSlotsExhausted`)·슬롯 패널 추가, `docs/legacy-steps/step11-external.md`·README·STEPS.md·이 기록 |
 | (커밋 전) | 시나리오 8개 재실행 실측을 문서·카탈로그에 채움 |
 
 완료 기준 대조:
@@ -347,7 +347,7 @@ step12 로 넘기는 것:
 4. 대사 태스크: drift 공식을 계정별로 분리(결정 5). 스냅샷 게이지: held 실측 vs Σ job 비교
 5. 알람·대시보드 갱신(`CreditNegativeBalanceOrgs` → available·held 둘 다). 원장과 관련된 장애 시나리오(05 등)만 재실측
 6. **운영 적용 절차:** 백업 → 운영 덤프 복제본에 리허설 → 접수 일시 중지와 드레인 → 적용 → drift 0 확인 → 재개. 되돌리기 절차를 먼저 쓴다
-7. 문서 `docs/step13-ledger.md`에 "왜 바꿨나", 이관 규칙, 운영 적용 기록
+7. 문서 `docs/legacy-steps/step13-ledger.md`에 "왜 바꿨나", 이관 규칙, 운영 적용 기록
 
 **완료 기준:** 기존 테스트 통과(잔액 관련은 재작성). 시나리오 05에서 훼손이 available drift·held drift 중 어느 쪽인지 구분되어 알람이 뜬다. 운영 DB 전환 후 drift 0, 이관 전후 잔액 합계 일치.
 
@@ -382,7 +382,7 @@ step12 로 넘기는 것:
 - [ ] `max_tokens`에 걸려 잘린 결과를 성공으로 볼지 — 기능별(결정 11)
 - [ ] 거절(`refusal`) 시 서버 측 모델 대체(fallback)를 쓸지 — 대체 모델은 단가가 달라 원가 상한 검증과 충돌할 수 있다
 - [ ] 일일 원가 상한 금액 — step12 착수 때(결정 12)
-- [ ] 기존 `docs/step2~7`의 "hold 즉시 차감" 서술: 그대로 두고 step13 문서에 "왜 바꿨나"를 쓴다
+- [ ] 기존 `docs/legacy-steps/step2~7`의 "hold 즉시 차감" 서술: 그대로 두고 step13 문서에 "왜 바꿨나"를 쓴다
 - [ ] VM 제공자 — step10 을 다시 꺼낼 때(도메인은 `credit.papercut.kr` 확정)
 - [x] `GenerationWorker.kt:38` 주석이 옛 헛선점을 "전부 선점"으로 잘못 설명하던 것 — 실제 옛 코드(`e2c489c^`)대로 "첫 장만 선점 → 거부 → 롤백 → 주기 종료"로 고쳤다(step9 첫 커밋)
 
@@ -420,13 +420,13 @@ step12 로 넘기는 것:
 | 2026-09-10 | v1 작성(3단계 마일스톤). 코드 대조로 Kafka 부재·step7 중복 확인 |
 | 2026-09-10 | v2로 전면 재작성. 목표를 "실서비스 수준"으로 바꾸고 step8~13 여섯 단계로 재편. Kafka 제외·원장 유일 진실 확정 |
 | 2026-09-10 | 결정 6·7 확정(외부 생성 선택 가능, 무중단 배포). step8 착수 — 브랜치 `step8-ops` |
-| 2026-09-10 | step8 완료 기록 추가. 완료 기준 3개 중 2개 충족, "PR에서 테스트가 초록"은 push 전이라 미검증. `docs/step8-ops.md`·`README.md` 작성, `STEPS.md`에 step7·step8 항목 추가 |
+| 2026-09-10 | step8 완료 기록 추가. 완료 기준 3개 중 2개 충족, "PR에서 테스트가 초록"은 push 전이라 미검증. `docs/legacy-steps/step8-ops.md`·`README.md` 작성, `STEPS.md`에 step7·step8 항목 추가 |
 | 2026-09-10 | push·PR #1. CI 2분 48초에 초록. 완료 기준 3개 전부 충족(GHCR 은 머지 후). |
 | 2026-09-14 | step8 에서 graceful shutdown 을 들어내 step10 으로 미룬다. 배포 환경이 없는 시점에 검증할 수 없는 코드였고, 무중단 배포와 함께 만드는 편이 맥락이 붙는다. 드레인 구현은 step8-b-drain-archive 브랜치에 보존 |
 | 2026-09-19 | v3. 목표를 "실제로 쓰는 개인 서비스"로 전환. 결정 8~15 확정(개인 사용자, 공개·단독 사용, 구글 로그인+허용 목록, 기능별 고정가, Claude API와 원가 상한·기록, 실패 전액 환불과 손실 지표, 일일 원가 상한·속도 제한, 서버 1대, mock PG 충전·고정 패키지). 결정 4에서 부분 확정 제외, 결정 6·7 대체. step9~13을 원장 → 인증 → Claude 연결 → mock PG → 배포 순으로 재편. 옛 step12(대용량·정산)·step13(토큰 계량) 제외 |
 | 2026-09-19 | step8 PR #1 을 develop 으로 fast-forward 머지(`69a67c5..a4bfb9f`). `image.yml` 첫 실행 성공으로 GHCR push 검증 — step8 완료 기준 전부 충족 |
 | 2026-09-19 | v4. 단계 순서를 "먼저 한 바퀴, 그다음 두껍게"로 재편(결정 16): step9 개인 사용자와 인증(+최소 화면) → 10 배포 1대 → 11 외부 호출 안전화 → 12 진짜 Claude와 원가(첫 실제 기능) → 13 원장 재설계(운영 데이터 위) → 14 mock PG. 화면은 서버 렌더링(결정 17). v3의 거대 step11을 11·12로 분할, 정정 거래 API와 시나리오 전체 재실측 제외 |
-| 2026-09-20 | step9 완료 기록 추가. 관측 스택을 개발 로그인·운영자 지급으로 옮겨 시나리오 재실행, `docs/step9-auth.md` 작성 |
+| 2026-09-20 | step9 완료 기록 추가. 관측 스택을 개발 로그인·운영자 지급으로 옮겨 시나리오 재실행, `docs/legacy-steps/step9-auth.md` 작성 |
 | 2026-09-20 | 속도 제한(9-D)을 전부 제거(근거는 결정 9·12). 실제 브라우저로 한 바퀴 확인 — 완료 기준의 조건부 충족을 충족으로 갱신. 남은 것은 실제 구글 계정 로그인 |
 | 2026-09-20 | 실제 구글 계정으로 로컬 로그인 확인(첫 로그인 사용자 행 생성). step9 의 미검증 항목이 없어졌다. 도메인은 `credit.papercut.kr` 로 확정, OAuth 클라이언트에 로컬·배포 리디렉션 URI 를 모두 등록 |
 | 2026-09-20 | step9-D 사용자별 속도 제한을 전면 제거. 총량은 잔액이, AI 호출 동시성은 워커 수가 이미 막고, 선결제 잔고를 지키는 진짜 벽은 step12 의 일일 전체 원가 상한이다. 남는 효용("총량이 아니라 속도")이 유지 비용보다 작다고 판단했다. 결정 9·12 의 속도 제한 항목과 step9 계획 5번을 그에 맞게 고침. 테스트 291 → 276 |

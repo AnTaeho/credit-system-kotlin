@@ -6,7 +6,7 @@
 
 ## 상황
 
-graceful shutdown 의 워커 드레인은 운영 준비 단계(`docs/step8-ops.md`)에서 **만들어졌지만 머지되지 않았다.**
+graceful shutdown 의 워커 드레인은 운영 준비 단계(`docs/legacy-steps/step8-ops.md`)에서 **만들어졌지만 머지되지 않았다.**
 검증할 배포 환경이 없었기 때문이다.
 
 > | 2026-09-14 | step8 에서 graceful shutdown 을 들어내 step10 으로 미룬다. 배포 환경이 없는 시점에 검증할 수 없는 코드였고, 무중단 배포와 함께 만드는 편이 맥락이 붙는다. 드레인 구현은 step8-b-drain-archive 브랜치에 보존 |
@@ -19,9 +19,9 @@ graceful shutdown 의 워커 드레인은 운영 준비 단계(`docs/step8-ops.m
 
 > | 배포 종료 | 드레인 없음(`step8-b-drain-archive` 에 보관) | 배포할 때마다 진행 중 job 이 회수로 넘어간다. 안전망을 정상 경로로 쓰는 셈이다 |
 
-— 출처: KT `docs/step11-external.md`
+— 출처: KT `docs/legacy-steps/step11-external.md`
 
-2026-09-20, 배포 자체는 다시 미뤄졌고 드레인만 외부 호출 안전화 단계(`docs/step11-external.md`)로 옮겨졌다.
+2026-09-20, 배포 자체는 다시 미뤄졌고 드레인만 외부 호출 안전화 단계(`docs/legacy-steps/step11-external.md`)로 옮겨졌다.
 
 > | 2026-09-20 | 실제 배포(step10)를 보류한다 — 서버를 정하지 않았고, 나머지 단계는 로컬에서 할 수 있다. 드레인은 step11 로 옮긴다. step11 의 두 미결을 확정: 멈춘 워커는 백스톱 절대 상한, 재시도는 지수 backoff |
 
@@ -62,7 +62,7 @@ graceful shutdown 의 워커 드레인은 운영 준비 단계(`docs/step8-ops.m
 >
 > **문은 플래그가 아니라 락이다.** 진행 중인 디스패치 한 바퀴가 끝나야 닫히므로 "닫힌 뒤엔 새 선점이 없다"가 상태가 아니라 구조로 보장된다.
 
-— 출처: KT `docs/step11-external.md`
+— 출처: KT `docs/legacy-steps/step11-external.md`
 
 ## 대안
 
@@ -70,7 +70,7 @@ graceful shutdown 의 워커 드레인은 운영 준비 단계(`docs/step8-ops.m
 - **지우고 나중에 다시 쓰기** — 기각. 브랜치에 보존하는 쪽을 골랐다.
 - **드레인 상한에 전용 설정을 새로 만들기** — 기각. 이유가 문서에 있다:
   "그 시간을 넘긴 PROCESSING job 은 어차피 정체 회수의 대상이라 더 기다려도 얻을 것이 없고,
-  별도 설정을 새로 만들면 두 값이 어긋날 자리가 생긴다."(`docs/step11-external.md`)
+  별도 설정을 새로 만들면 두 값이 어긋날 자리가 생긴다."(`docs/legacy-steps/step11-external.md`)
   그 대가도 같은 문서가 적는다:
 
   > - **`spring.lifecycle.timeout-per-shutdown-phase` 가 드레인 상한과 같은 프로퍼티다.** 둘 다 `app.processing.timeout-seconds` 에서 나오므로 여유가 0 이다. 드레인이 상한을 꽉 채우면 스프링이 같은 순간에 그 phase 를 포기한다.

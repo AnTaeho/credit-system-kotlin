@@ -140,14 +140,45 @@ Prometheus + Grafana + 알람 규칙 14개 + 장애 주입 시나리오 8개가 
 
 ## 문서 지도
 
+이 저장소에는 성격이 다른 두 묶음이 있다. **`docs/00`~`04` 가 이 시스템의 정본**이고,
+`docs/legacy-steps/` 는 같은 코드를 교육용으로 다시 쪼개 설명한 기록이다.
+둘이 어긋나면 **정본과 코드가 맞다** — 학습 문서는 그 시점의 설명으로 두고 고치지 않는다.
+
+### 정본 — 요구서와 검증 (2026-09-22~23)
+
 | | |
 |---|---|
-| [`STEPS.md`](STEPS.md) | 학습 브랜치 체인 전체 지도. step0(방어 없음) → step11(외부 호출 안전화) |
-| [`docs/step0-naive.md`](docs/step0-naive.md) … [`docs/step11-external.md`](docs/step11-external.md) | 단계별 상세. 실제 코드 인용, 테스트가 무엇을 단언하는지, 무엇이 남았는지 |
-| [`docs/roadmap.md`](docs/roadmap.md) | 앞으로. 지금 무엇이 실서비스 수준이 아닌지의 진단표와 step8~14 의 결정·완료 기록 |
-| [`deploy/observability/README.md`](deploy/observability/README.md) | 관측 스택 띄우기·시나리오 |
+| [`docs/00-inventory.md`](docs/00-inventory.md) | 현황. 크레딧 흐름 S1~S6 과 크래시 지점 C1~C11. **사실만, 판단 없음** |
+| [`docs/01-requirements.md`](docs/01-requirements.md) | 성능·안정성 요구서. PERF 7개 · INV 9개 · 용량 등급 Tier A/B/C |
+| [`docs/02-design.md`](docs/02-design.md) | 어떻게 설계했어야 하나와 현재와의 gap 표 |
+| [`docs/adr/`](docs/adr/) | 전환점 7개의 결정 기록. Kafka 도입·제거, 조건부 UPDATE, batch-size, confirm 재시도, 속도 제한, 드레인 |
+| [`docs/03-checklist.md`](docs/03-checklist.md) | 배포 전 체크리스트. **맨 위에 배포 차단 항목** |
+| [`docs/04-results.md`](docs/04-results.md) | **최신 판정 매트릭스**와 "처음부터 다시 한다면 바꿀 결정 3가지" |
+| [`load/`](load/) | k6 시나리오 5개 · 시드 · 실행 절차 · [실측 결과](load/results/) |
 
-읽는 순서를 하나만 고르라면 `STEPS.md` → 관심 가는 단계의 `docs/stepN-*.md` 다.
+읽는 순서를 하나만 고르라면 **`docs/00-inventory.md` 3장 → `docs/04-results.md`** 다.
+전자가 이 시스템이 무엇인지, 후자가 그것이 어디서 무너지는지를 수치로 말한다.
+
+> 요구서(`01`)의 "현재 상태" 칸은 Phase 1 시점(2026-09-22)의 기록이다.
+> **판정의 최신 기준은 `04-results.md`** 다. 목표가 정해진 시점과 결과가 나온 시점을 갈라 둔다.
+
+### 학습 기록 — 단계별 재분해
+
+| | |
+|---|---|
+| [`STEPS.md`](STEPS.md) | 학습 브랜치 체인 지도. step0(방어 없음) → step11(외부 호출 안전화) |
+| [`docs/legacy-steps/`](docs/legacy-steps/) | 단계별 상세 11편. 실제 코드 인용과 테스트가 무엇을 단언하는지 |
+| [`docs/roadmap.md`](docs/roadmap.md) | 결정 로그와 완료 기록 |
+
+`docs/legacy-steps/` 의 step0~step6 은 **새 기능이 아니라** 이미 완성된 코드를 교육용으로
+다시 쪼갠 브랜치 체인이다(2026-08-30 하루에 커밋됐다). 자세한 것은
+[`docs/00-inventory.md` 부록 C](docs/00-inventory.md).
+
+### 그 밖
+
+| | |
+|---|---|
+| [`deploy/observability/README.md`](deploy/observability/README.md) | 관측 스택 띄우기 · 장애 주입 시나리오 8개 |
 
 ---
 
