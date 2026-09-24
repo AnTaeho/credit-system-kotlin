@@ -9,7 +9,8 @@ data class AppProperties(
     val stub: Stub,
     val processing: Processing,
     val idempotency: Idempotency,
-    val admin: Admin = Admin()
+    val admin: Admin = Admin(),
+    val db: Db = Db()
 ) {
 
     /**
@@ -115,7 +116,20 @@ data class AppProperties(
         }
     }
 
+    /**
+     * 접수 경로(`/api` 아래)가 동시에 쓸 수 있는 DB 커넥션 수의 상한(벌크헤드).
+     *
+     * 커넥션 풀은 웹과 배경 작업이 같이 쓴다. 접수가 풀을 전부 점유하면 스냅샷·회수·대사·워커
+     * 디스패처가 커넥션을 못 잡는다. 이 값을 풀 크기보다 낮게 두면, 요청 하나가 커넥션을
+     * 하나만 쓰는 한 그 차이만큼이 배경 작업의 몫으로 남는다.
+     *
+     * **0 이하면 끈다** — 필터가 아예 체인에 들어가지 않는다. 기본이 꺼짐인 이유는 켬/끔을
+     * 나란히 재서 효과를 가려야 하기 때문이다.
+     */
+    data class Db(val intakePermits: Int = DEFAULT_INTAKE_PERMITS)
+
     companion object {
+        const val DEFAULT_INTAKE_PERMITS = 0
         const val DEFAULT_MAX_GRANT_AMOUNT = 1_000_000L
         const val DEFAULT_GENERATION_TIMEOUT_SECONDS = 20L
         const val DEFAULT_ABSOLUTE_TIMEOUT_SECONDS = 300L

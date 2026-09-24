@@ -66,6 +66,11 @@ app:
   admin:
     # 운영자 지급(POST /api/admin/users/{userId}/grants) 1회 상한.
     max-grant-amount: 1000000
+  db:
+    # 접수 경로(/api/**)가 동시에 쓸 수 있는 커넥션 수의 상한. 풀 크기보다 낮게 두면 그 차이가
+    # 스케줄러·워커 몫으로 남는다. 0 이하면 끈다(= 상한 없음). 켜는 것은 측정에서 환경변수
+    # APP_DB_INTAKE_PERMITS 로 한다.
+    intake-permits: 0
   worker:
     enabled: true
     batch-size: 3
