@@ -9,11 +9,34 @@ set -euo pipefail
 
 API="${API:-http://localhost:8080}"
 PROM="${PROM:-http://localhost:9090}"
-# 개발 로그인 헤더(local 프로필 전용). dev@local.test 는 seed.sh 가 넣은 id=1 사용자,
-# admin@local.test 는 운영자다 — 크레딧은 운영자 지급으로만 생긴다(step9-C).
-USER_HEADER="X-Dev-User: dev@local.test"
-ADMIN_HEADER="X-Dev-User: admin@local.test"
+# 신원은 Bearer 액세스 토큰으로 댄다. 계정은 local 프로필이 기동 때 만드는 시드 계정이다
+# (application-local.yml). dev@local.test 는 일반 사용자(새 DB 에서 id=1), admin@local.test 는 운영자다.
+# 크레딧은 운영자 지급으로만 생긴다. 비밀번호는 로컬 전용 고정값이고 환경변수로 덮을 수 있다.
+DEV_EMAIL="${DEV_EMAIL:-dev@local.test}";       DEV_PASSWORD="${DEV_PASSWORD:-local-dev-password}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@local.test}"; ADMIN_PASSWORD="${ADMIN_PASSWORD:-local-admin-password}"
 STAMP="$(date +%s)"
+
+# fetch_token 이메일 비밀번호 → 액세스 JWT. 1초 간격으로 최대 15번 시도한다.
+# 시드 계정은 앱이 UP 이 된 직후에 만들어져서, 기동 직후에는 잠깐 401 이 난다.
+fetch_token() {
+  local email="$1" password="$2" i out code="" body="" token
+  for i in $(seq 1 15); do
+    out="$(curl -s -w '\n%{http_code}' -X POST "${API}/auth/token" -H 'Content-Type: application/json' \
+      -d "{\"email\":\"${email}\",\"password\":\"${password}\"}" || true)"
+    code="${out##*$'\n'}"; body="${out%$'\n'*}"
+    if [ "$code" = "200" ]; then
+      token="$(printf '%s' "$body" | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')"
+      if [ -n "$token" ] && [ "$token" != "$body" ]; then printf '%s' "$token"; return 0; fi
+    fi
+    sleep 1
+  done
+  echo "토큰을 받지 못했다: ${email} (마지막 응답 HTTP ${code:-없음} ${body})" >&2
+  return 1
+}
+
+# 이 스크립트는 몇 초면 끝난다. 토큰 수명(15분) 안이라 처음에 한 번만 받는다.
+USER_HEADER="Authorization: Bearer $(fetch_token "$DEV_EMAIL" "$DEV_PASSWORD")"
+ADMIN_HEADER="Authorization: Bearer $(fetch_token "$ADMIN_EMAIL" "$ADMIN_PASSWORD")"
 
 # post <label> <path> <json> [header]
 post() {

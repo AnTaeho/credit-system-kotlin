@@ -119,6 +119,7 @@ action_stack_down() {
 # overdraw N — 잔액을 넘기는 요청 N 건. hold_balance{rejected} 를 올리는 것이 목적이다.
 action_overdraw() {
   local n="$1" i key code
+  ensure_tokens || return 1
   key="overdraw-$(date +%s)-$RANDOM"
   say "잔액을 넘기는 job 요청 ${n}건 (현재 잔액 $(balance))"
   for i in $(seq 1 "$n"); do
@@ -255,6 +256,7 @@ action_restore_ledger() {
 # ── 06 중복 폭풍 ─────────────────────────────────────────────────────────────
 action_duplicate_storm() {
   local n="$1" key before after
+  ensure_tokens || return 1
   before="$(mysql_q "SELECT balance FROM users WHERE id=1;")"
   key="storm-$(date +%s)-$RANDOM"
   say "06 — 같은 idemKey(${key}) 로 ${n}건 동시 발사"

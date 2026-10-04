@@ -12,6 +12,7 @@ BEFORE="$(mysql_q "SELECT balance FROM users WHERE id=1;")"
 BASE_HOLD="$(prom_num 'credit_defense_total{point="hold_balance",outcome="applied"}')"
 
 KEY="storm-$(date +%s)"
+ensure_tokens   # 아래 xargs 가 $USER_HEADER 를 직접 쓴다
 reset_clock
 mark "같은 idemKey(${KEY}) 로 100건 동시 발사"
 seq 1 100 | xargs -P 100 -I{} curl -s -o /dev/null -w '%{http_code}\n' \
