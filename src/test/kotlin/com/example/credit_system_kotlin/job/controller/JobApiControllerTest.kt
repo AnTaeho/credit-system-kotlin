@@ -1,5 +1,6 @@
 package com.example.credit_system_kotlin.job.controller
 
+import com.example.credit_system_kotlin.auth.token.AccessTokenService
 import com.example.credit_system_kotlin.global.exception.ErrorResponse
 import com.example.credit_system_kotlin.global.paging.CursorPage
 import com.example.credit_system_kotlin.job.domain.Job
@@ -7,6 +8,7 @@ import com.example.credit_system_kotlin.job.dto.HoldResult
 import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.dto.JobResponse
 import com.example.credit_system_kotlin.job.repository.JobRepository
+import com.example.credit_system_kotlin.support.TestTokens
 import com.example.credit_system_kotlin.user.domain.User
 import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
@@ -32,8 +34,11 @@ import org.springframework.test.context.ActiveProfiles
 class JobApiControllerTest @Autowired constructor(
     private val restTemplate: TestRestTemplate,
     private val userRepository: UserRepository,
-    private val jobRepository: JobRepository
+    private val jobRepository: JobRepository,
+    accessTokenService: AccessTokenService
 ) {
+
+    private val tokens = TestTokens(accessTokenService)
 
     @field:LocalServerPort
     private var port: Int = 0
@@ -45,7 +50,7 @@ class JobApiControllerTest @Autowired constructor(
     fun setUp() {
         // 같은 H2 를 쓰는 다른 테스트가 남긴 job 이 이 사용자 id 와 겹치지 않게 비우고 시작한다.
         jobRepository.deleteAll()
-        user = userRepository.save(User("acme", 1000L, email = DEV_USER))
+        user = userRepository.save(User("acme", 1000L, email = "user@test.local"))
         other = userRepository.save(User("other", 1000L, email = "other@test.local"))
     }
 
@@ -218,12 +223,8 @@ class JobApiControllerTest @Autowired constructor(
         return HttpStatus.valueOf(response.statusCode.value()) to response.body
     }
 
-    private fun authHeaders() = HttpHeaders().apply { add("X-Dev-User", DEV_USER) }
+    /** [user] 로 로그인한 요청. Bearer 헤더라 POST 에 CSRF 토큰이 필요 없다. */
+    private fun authHeaders(): HttpHeaders = tokens.bearerHeaders(user)
 
     private fun url(path: String) = "http://localhost:$port$path"
-
-    companion object {
-        /** application-test.yml 의 허용 목록에 있는 이메일. 개발 로그인 헤더로 이 사람이 된다. */
-        private const val DEV_USER = "user@test.local"
-    }
 }

@@ -1,10 +1,14 @@
 package com.example.credit_system_kotlin.observability
 
+import com.example.credit_system_kotlin.auth.token.AccessTokenService
+import com.example.credit_system_kotlin.support.TestTokens
+import com.example.credit_system_kotlin.user.domain.UserRole
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.MockMvc
@@ -20,12 +24,17 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 @AutoConfigureMockMvc
 @SpringBootTest
 class PrometheusEndpointTest @Autowired constructor(
-    private val mockMvc: MockMvc
+    private val mockMvc: MockMvc,
+    accessTokenService: AccessTokenService
 ) {
+
+    private val tokens = TestTokens(accessTokenService)
 
     @Test
     fun `같은 포트에서는 운영자라도 prometheus 엔드포인트에 닿을 수 없다`() {
-        val result = mockMvc.perform(get("/actuator/prometheus").header("X-Dev-User", "admin@test.local")).andReturn()
+        // 액추에이터는 사용자 행을 읽지 않는다. 운영자 역할이 든 토큰이면 충분하다.
+        val admin = tokens.bearer(userId = 1L, role = UserRole.ADMIN)
+        val result = mockMvc.perform(get("/actuator/prometheus").header(HttpHeaders.AUTHORIZATION, admin)).andReturn()
 
         assertThat(result.response.status).isEqualTo(HttpStatus.FORBIDDEN.value())
         assertThat(result.response.contentAsString).doesNotContain("credit_ledger_reconciliation_mismatch")

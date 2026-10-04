@@ -1,10 +1,11 @@
 package com.example.credit_system_kotlin.web
 
-import com.example.credit_system_kotlin.auth.login.AppOidcUser
-import com.example.credit_system_kotlin.auth.login.authoritiesFor
+import com.example.credit_system_kotlin.auth.token.AccessTokenService
 import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.repository.JobRepository
+import com.example.credit_system_kotlin.support.TestTokens
 import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.domain.UserRole
 import com.example.credit_system_kotlin.user.repository.UserRepository
 import jakarta.servlet.RequestDispatcher
 import org.assertj.core.api.Assertions.assertThat
@@ -15,17 +16,14 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.MediaType
-import org.springframework.security.oauth2.core.oidc.OidcIdToken
-import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import java.time.Instant
 
 /**
- * 화면 경로의 보안 규칙과 렌더링. 세션 로그인 주체는 SecurityRulesTest 와 같이 `oidcLogin()` 으로 만든다.
+ * 화면 경로의 보안 규칙과 렌더링. 브라우저처럼 액세스 쿠키로 인증한다(SecurityRulesTest 와 같은 [TestTokens]).
  * 컨텍스트는 SecurityRulesTest 와 같은 조합이라 캐시를 같이 쓴다.
  */
 @ActiveProfiles("test")
@@ -34,8 +32,11 @@ import java.time.Instant
 class PageSecurityTest @Autowired constructor(
     private val mockMvc: MockMvc,
     private val userRepository: UserRepository,
-    private val jobRepository: JobRepository
+    private val jobRepository: JobRepository,
+    accessTokenService: AccessTokenService
 ) {
+
+    private val tokens = TestTokens(accessTokenService)
 
     private lateinit var me: User
     private lateinit var other: User
@@ -43,9 +44,9 @@ class PageSecurityTest @Autowired constructor(
 
     @BeforeEach
     fun setUp() {
-        me = userRepository.save(User("me", 4321L, email = "page-me@test.local", googleSub = "page-sub-me"))
-        other = userRepository.save(User("other", 100L, email = "page-other@test.local", googleSub = "page-sub-other"))
-        admin = userRepository.save(User("admin", 0L, email = "page-admin@test.local", googleSub = "page-sub-admin"))
+        me = userRepository.save(User("me", 4321L, email = "page-me@test.local"))
+        other = userRepository.save(User("other", 100L, email = "page-other@test.local"))
+        admin = userRepository.save(User("admin", 0L, email = "page-admin@test.local", role = UserRole.ADMIN))
     }
 
     @AfterEach
@@ -56,13 +57,39 @@ class PageSecurityTest @Autowired constructor(
     }
 
     @Test
-    fun `미인증 로그인 화면은 리다이렉트 없이 200 이다`() {
+    fun `미인증 로그인 화면은 리다이렉트 없이 200 이고 폼에 CSRF 토큰이 들어 있다`() {
         val result = mockMvc.perform(get("/login").accept(MediaType.TEXT_HTML)).andReturn()
 
         assertThat(result.response.status).isEqualTo(200)
         assertThat(result.response.contentAsString)
-            .contains("구글로 로그인")
-            .contains("/oauth2/authorization/google")
+            .contains("action=\"/login\"")
+            .contains("name=\"email\"")
+            .contains("name=\"password\"")
+            .contains("name=\"_csrf\"")
+            .contains("href=\"/signup\"")
+        // 토큰은 화면이 읽는 순간 만들어져 쿠키로 심긴다. 이 쿠키가 없으면 로그인 POST 가 CSRF 검사를 못 넘는다.
+        assertThat(result.response.getCookie("XSRF-TOKEN")?.value).isNotBlank()
+    }
+
+    @Test
+    fun `미인증 가입 화면은 리다이렉트 없이 200 이고 폼에 CSRF 토큰이 들어 있다`() {
+        val result = mockMvc.perform(get("/signup").accept(MediaType.TEXT_HTML)).andReturn()
+
+        assertThat(result.response.status).isEqualTo(200)
+        assertThat(result.response.contentAsString)
+            .contains("action=\"/signup\"")
+            .contains("name=\"passwordConfirm\"")
+            .contains("name=\"_csrf\"")
+            .contains("href=\"/login\"")
+        assertThat(result.response.getCookie("XSRF-TOKEN")?.value).isNotBlank()
+    }
+
+    @Test
+    fun `이미 로그인한 사람이 로그인 화면에 오면 홈으로 보낸다`() {
+        val result = asMe(get("/login"))
+
+        assertThat(result.response.status).isEqualTo(302)
+        assertThat(result.response.redirectedUrl).isEqualTo("/")
     }
 
     @Test
@@ -84,27 +111,23 @@ class PageSecurityTest @Autowired constructor(
     }
 
     @Test
-    fun `로그인 거부로 돌아오면 거부 안내를 보인다`() {
-        val body = mockMvc.perform(get("/login").param("error", "")).andReturn().response.contentAsString
-
-        assertThat(body).contains("허용되지 않은 계정입니다")
-    }
-
-    @Test
-    fun `로그아웃 뒤와 세션 만료 뒤의 안내를 보인다`() {
+    fun `로그아웃 뒤와 로그인 만료 뒤의 안내를 보인다`() {
         val loggedOut = mockMvc.perform(get("/login").param("logout", "")).andReturn().response.contentAsString
         val expired = mockMvc.perform(get("/login").param("expired", "")).andReturn().response.contentAsString
         val plain = mockMvc.perform(get("/login")).andReturn().response.contentAsString
 
         assertThat(loggedOut).contains("로그아웃했습니다")
-        assertThat(expired).contains("세션이 만료되었습니다")
-        assertThat(plain).doesNotContain("허용되지 않은 계정입니다").doesNotContain("로그아웃했습니다")
+        assertThat(expired).contains("로그인이 만료되었습니다")
+        assertThat(plain)
+            .doesNotContain("로그아웃했습니다")
+            .doesNotContain("로그인이 만료되었습니다")
+            .doesNotContain("맞지 않습니다")
     }
 
     @Test
     fun `응답에 CSP 헤더가 있고 같은 출처만 허용한다`() {
         val login = mockMvc.perform(get("/login")).andReturn()
-        val home = mockMvc.perform(get("/").with(oidcLogin().oidcUser(principal(me, admin = false)))).andReturn()
+        val home = asMe(get("/"))
 
         listOf(login, home).forEach {
             assertThat(it.response.getHeader("Content-Security-Policy"))
@@ -188,8 +211,7 @@ class PageSecurityTest @Autowired constructor(
 
     @Test
     fun `운영자는 운영자 화면에서 자기 userId 를 본다`() {
-        val result = mockMvc.perform(get("/admin").with(oidcLogin().oidcUser(principal(admin, admin = true))))
-            .andReturn()
+        val result = mockMvc.perform(get("/admin").cookie(tokens.accessCookie(admin))).andReturn()
 
         assertThat(result.response.status).isEqualTo(200)
         assertThat(result.response.contentAsString)
@@ -200,8 +222,7 @@ class PageSecurityTest @Autowired constructor(
     @Test
     fun `일반 사용자 화면에는 운영자 메뉴가 없다`() {
         assertThat(asMe(get("/")).response.contentAsString).doesNotContain("href=\"/admin\"")
-        val adminHome = mockMvc.perform(get("/").with(oidcLogin().oidcUser(principal(admin, admin = true))))
-            .andReturn()
+        val adminHome = mockMvc.perform(get("/").cookie(tokens.accessCookie(admin))).andReturn()
         assertThat(adminHome.response.contentAsString).contains("href=\"/admin\"")
     }
 
@@ -221,15 +242,5 @@ class PageSecurityTest @Autowired constructor(
     }
 
     private fun asMe(request: MockHttpServletRequestBuilder): MvcResult =
-        mockMvc.perform(request.with(oidcLogin().oidcUser(principal(me, admin = false)))).andReturn()
-
-    private fun principal(user: User, admin: Boolean): AppOidcUser {
-        val idToken = OidcIdToken(
-            "token",
-            Instant.now(),
-            Instant.now().plusSeconds(60),
-            mapOf("sub" to user.googleSub!!, "email" to user.email!!, "email_verified" to true)
-        )
-        return AppOidcUser(user.persistedId, authoritiesFor(admin = admin), idToken, null)
-    }
+        mockMvc.perform(request.cookie(tokens.accessCookie(me))).andReturn()
 }

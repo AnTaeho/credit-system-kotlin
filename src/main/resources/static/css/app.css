@@ -22,7 +22,8 @@ form button[type="submit"] { margin-top: 10px; }
 .notice { padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .notice.error, .message.error { color: var(--err); }
 .message { min-height: 1.5em; }
-.dev-login { margin-top: 32px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.hint { color: var(--muted); font-size: .85rem; margin: 4px 0 0; }
+.switch { margin-top: 20px; color: var(--muted); }
 table.list { width: 100%; border-collapse: collapse; background: #fff; display: block; overflow-x: auto; }
 table.list th, table.list td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 td.c-prompt, dd.c-prompt { white-space: pre-wrap; word-break: break-word; }

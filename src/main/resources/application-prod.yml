@@ -8,13 +8,6 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD}
   flyway:
     enabled: true
-  security:
-    oauth2:
-      client:
-        registration:
-          google:
-            client-id: ${GOOGLE_CLIENT_ID}
-            client-secret: ${GOOGLE_CLIENT_SECRET}
   jpa:
     hibernate:
       # 운영에서 Hibernate 가 스키마를 건드리는 일은 없어야 한다. 명시해서 못 박는다.
@@ -22,12 +15,8 @@ spring:
 
 app:
   auth:
+    # 운영은 HTTPS 다. 로그인 쿠키가 평문 HTTP 요청에 실려 나가지 않게 한다. 꺼져 있으면 기동이 거부된다.
+    cookie-secure: true
     jwt:
       # 기본값을 주지 않는다(위 datasource 와 같은 원칙). 빠뜨리면 공개된 로컬 키로 서명하게 된다.
       secret: ${APP_AUTH_JWT_SECRET}
-
-server:
-  servlet:
-    session:
-      cookie:
-        secure: true

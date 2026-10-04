@@ -1,6 +1,8 @@
 package com.example.credit_system_kotlin.user.controller
 
+import com.example.credit_system_kotlin.auth.token.AccessTokenService
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
+import com.example.credit_system_kotlin.support.TestTokens
 import com.example.credit_system_kotlin.user.domain.User
 import com.example.credit_system_kotlin.user.dto.BalanceResponse
 import com.example.credit_system_kotlin.user.repository.UserRepository
@@ -14,7 +16,6 @@ import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRe
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.http.HttpEntity
-import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
@@ -25,8 +26,11 @@ import org.springframework.test.context.ActiveProfiles
 class UserApiControllerTest @Autowired constructor(
     private val restTemplate: TestRestTemplate,
     private val userRepository: UserRepository,
-    private val ledgerRepository: LedgerRepository
+    private val ledgerRepository: LedgerRepository,
+    accessTokenService: AccessTokenService
 ) {
+
+    private val tokens = TestTokens(accessTokenService)
 
     @field:LocalServerPort
     private var port: Int = 0
@@ -35,7 +39,7 @@ class UserApiControllerTest @Autowired constructor(
 
     @BeforeEach
     fun setUp() {
-        user = userRepository.save(User("acme", 500L, email = DEV_USER))
+        user = userRepository.save(User("acme", 500L, email = "user@test.local"))
     }
 
     @AfterEach
@@ -46,8 +50,7 @@ class UserApiControllerTest @Autowired constructor(
 
     @Test
     fun `잔액 조회가 정상 동작한다`() {
-        val headers = HttpHeaders()
-        headers.add("X-Dev-User", DEV_USER)
+        val headers = tokens.bearerHeaders(user)
 
         val response = restTemplate.exchange(
             url("/api/users/me/balance"), HttpMethod.GET,
@@ -63,8 +66,7 @@ class UserApiControllerTest @Autowired constructor(
      */
     @Test
     fun `자기 충전 경로는 더 이상 없다`() {
-        val headers = HttpHeaders()
-        headers.add("X-Dev-User", DEV_USER)
+        val headers = tokens.bearerHeaders(user)
         headers.contentType = MediaType.APPLICATION_JSON
 
         val response = restTemplate.exchange(
@@ -78,9 +80,4 @@ class UserApiControllerTest @Autowired constructor(
     }
 
     private fun url(path: String) = "http://localhost:$port$path"
-
-    companion object {
-        /** application-test.yml 의 허용 목록에 있는 이메일. 개발 로그인 헤더로 이 사람이 된다. */
-        private const val DEV_USER = "user@test.local"
-    }
 }

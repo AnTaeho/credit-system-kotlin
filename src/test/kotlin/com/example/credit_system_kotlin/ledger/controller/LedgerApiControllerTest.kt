@@ -1,9 +1,11 @@
 package com.example.credit_system_kotlin.ledger.controller
 
+import com.example.credit_system_kotlin.auth.token.AccessTokenService
 import com.example.credit_system_kotlin.global.paging.CursorPage
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.dto.LedgerResponse
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
+import com.example.credit_system_kotlin.support.TestTokens
 import com.example.credit_system_kotlin.user.domain.User
 import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
@@ -28,8 +30,11 @@ import org.springframework.test.context.ActiveProfiles
 class LedgerApiControllerTest @Autowired constructor(
     private val restTemplate: TestRestTemplate,
     private val userRepository: UserRepository,
-    private val ledgerRepository: LedgerRepository
+    private val ledgerRepository: LedgerRepository,
+    accessTokenService: AccessTokenService
 ) {
+
+    private val tokens = TestTokens(accessTokenService)
 
     @field:LocalServerPort
     private var port: Int = 0
@@ -41,7 +46,7 @@ class LedgerApiControllerTest @Autowired constructor(
     fun setUp() {
         // 같은 H2 를 쓰는 다른 테스트가 남긴 원장이 이 사용자 id 와 겹치지 않게 비우고 시작한다.
         ledgerRepository.deleteAll()
-        user = userRepository.save(User("acme", 1000L, email = DEV_USER))
+        user = userRepository.save(User("acme", 1000L, email = "user@test.local"))
         other = userRepository.save(User("other", 1000L, email = "other@test.local"))
     }
 
@@ -107,12 +112,8 @@ class LedgerApiControllerTest @Autowired constructor(
         return requireNotNull(response.body)
     }
 
-    private fun authHeaders() = HttpHeaders().apply { add("X-Dev-User", DEV_USER) }
+    /** [user] 로 로그인한 요청. */
+    private fun authHeaders(): HttpHeaders = tokens.bearerHeaders(user)
 
     private fun url(path: String) = "http://localhost:$port$path"
-
-    companion object {
-        /** application-test.yml 의 허용 목록에 있는 이메일. 개발 로그인 헤더로 이 사람이 된다. */
-        private const val DEV_USER = "user@test.local"
-    }
 }

@@ -12,7 +12,7 @@ window.App = (function () {
     return el ? el.getAttribute('content') : null;
   }
 
-  // 9-B 의 CSRF 는 세션 저장소다. 쿠키가 아니라 서버가 그려 준 meta 에서 읽는다.
+  // CSRF 토큰 쿠키는 HttpOnly 라 스크립트가 읽지 못한다. 서버가 그려 준 meta 에서 읽는다.
   function csrfHeaders() {
     const header = meta('_csrf_header');
     const token = meta('_csrf');
@@ -56,7 +56,8 @@ window.App = (function () {
   }
 
   // fetch 래퍼. 결과는 { status, body }. 네트워크 오류면 status 0.
-  // 401(세션 만료)은 여기서 곧장 다시 로그인으로 보낸다.
+  // 액세스 토큰이 만료돼도 서버가 리프레시 쿠키로 조용히 갱신하므로 평소에는 401 이 오지 않는다.
+  // 401 은 리프레시까지 못 쓰게 된 것(만료·로그아웃·폐기)이다. 여기서 곧장 다시 로그인으로 보낸다.
   async function api(method, url, body) {
     const headers = { 'Accept': 'application/json' };
     if (method !== 'GET') {
@@ -83,8 +84,8 @@ window.App = (function () {
     try { parsed = await res.json(); } catch (e) { parsed = null; }
     const result = { status: res.status, body: parsed };
     if (res.status === 403 && method !== 'GET') {
-      // POST 의 403 은 두 가지다. 세션이 끝나 CSRF 토큰이 무효가 된 경우(CSRF 필터가 인증보다 먼저 막는다)와
-      // 진짜 권한 부족. 둘 다 code 가 FORBIDDEN 이라 인증 여부를 한 번 더 물어 구분한다.
+      // POST 의 403 은 두 가지다. CSRF 토큰이 맞지 않는 경우(CSRF 필터가 인증보다 먼저 막는다. 로그아웃하면
+      // 토큰 쿠키도 지워진다)와 진짜 권한 부족. 둘 다 code 가 FORBIDDEN 이라 인증 여부를 한 번 더 물어 구분한다.
       const probe = await api('GET', '/api/users/me/balance');
       if (probe.relogin) result.relogin = true;
     }

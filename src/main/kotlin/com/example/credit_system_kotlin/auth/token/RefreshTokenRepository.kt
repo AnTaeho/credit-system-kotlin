@@ -40,6 +40,17 @@ interface RefreshTokenRepository : JpaRepository<RefreshToken, Long> {
     )
     fun revokeFamily(@Param("familyId") familyId: String, @Param("now") now: Instant): Int
 
+    /** 한 사용자의 모든 사슬을 폐기한다. 비밀번호나 역할이 밖에서 바뀌었을 때 이미 나간 로그인을 끊는다. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshToken t
+        SET t.revokedAt = :now, t.updatedAt = :now
+        WHERE t.userId = :userId AND t.revokedAt IS NULL
+        """
+    )
+    fun revokeAllOfUser(@Param("userId") userId: Long, @Param("now") now: Instant): Int
+
     @Query("SELECT t.id FROM RefreshToken t WHERE t.expiresAt < :cutoff ORDER BY t.id")
     fun findIdsExpiredBefore(@Param("cutoff") cutoff: Instant, pageable: Pageable): List<Long>
 

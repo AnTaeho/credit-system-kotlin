@@ -66,6 +66,13 @@ class RefreshTokenService(
      * **조건부 UPDATE 를 조회보다 먼저 한다.** MySQL(REPEATABLE READ)은 트랜잭션의 첫 SELECT 때 스냅샷을 잡는다.
      * 먼저 조회하면, 경쟁에서 진 쪽이 UPDATE 0행 뒤에 다시 읽어도 이긴 쪽의 `rotated_at` 이 보이지 않아
      * 정상 경쟁을 가려내지 못한다. UPDATE 는 항상 최신 행을 보므로 승패를 먼저 가르고, 그 뒤에 읽는다.
+     *
+     * **사슬 폐기와 겹칠 때.** 회전은 쓰던 토큰 행을 조건부 UPDATE 로 잠근 채 새 토큰을 INSERT 하고 한 트랜잭션으로
+     * 커밋한다. 사슬 폐기([RefreshTokenRepository.revokeFamily])는 그 사슬의 폐기되지 않은 행을 모두 고치므로 같은
+     * 행을 잠가야 한다. 그래서 둘은 그 행에서 줄을 선다. 폐기가 먼저면 회전의 UPDATE 가 `revoked_at` 을 보고 0행이
+     * 되어 거절되고, 회전이 먼저면 폐기가 그 커밋을 기다린 뒤 새 토큰까지 고친다. 새 토큰 한 장이 폐기를 피해
+     * 살아남는 일이 없도록 따로 다시 읽지 않는 이유다. `ConcurrentReuseAndRotationTest` 가 MySQL 에서 확인한다.
+     * 회전을 두 트랜잭션으로 쪼개거나 INSERT 를 UPDATE 앞으로 옮기면 이 보장이 깨진다.
      */
     @Transactional
     fun rotate(raw: String): RotationResult {

@@ -7,7 +7,7 @@
 <head th:fragment="head(title)">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- fetch 가 CSRF 헤더를 싣는 근거. 9-B 는 세션 저장소라 쿠키(XSRF-TOKEN)가 없다. -->
+  <!-- fetch 가 CSRF 헤더를 싣는 근거. 토큰 쿠키(XSRF-TOKEN)는 HttpOnly 라 스크립트가 읽지 못한다. 여기 그려 준 값을 읽는다. -->
   <meta name="_csrf" th:if="${_csrf != null}" th:content="${_csrf.token}">
   <meta name="_csrf_header" th:if="${_csrf != null}" th:content="${_csrf.headerName}">
   <title th:text="${title} + ' · credit'">credit</title>

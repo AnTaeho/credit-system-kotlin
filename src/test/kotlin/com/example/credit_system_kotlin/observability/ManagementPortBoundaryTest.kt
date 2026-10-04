@@ -1,5 +1,8 @@
 package com.example.credit_system_kotlin.observability
 
+import com.example.credit_system_kotlin.auth.token.AccessTokenService
+import com.example.credit_system_kotlin.support.TestTokens
+import com.example.credit_system_kotlin.user.domain.UserRole
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -38,10 +41,13 @@ import org.springframework.test.context.ActiveProfiles
     properties = ["management.server.port=0", "management.health.redis.enabled=false"]
 )
 class ManagementPortBoundaryTest @Autowired constructor(
-    restTemplate: TestRestTemplate
+    restTemplate: TestRestTemplate,
+    accessTokenService: AccessTokenService
 ) {
 
-    // 미인증 요청은 구글 로그인으로 리다이렉트된다. 따라가면 테스트가 외부로 나가므로 멈춘다.
+    private val tokens = TestTokens(accessTokenService)
+
+    // 미인증 요청은 로그인 화면으로 리다이렉트된다. 따라가면 로그인 화면의 200 을 보게 되므로 멈춘다.
     private val restTemplate = restTemplate.withRedirects(HttpRedirects.DONT_FOLLOW)
 
     @LocalServerPort
@@ -52,8 +58,9 @@ class ManagementPortBoundaryTest @Autowired constructor(
 
     @Test
     fun `애플리케이션 포트에서는 로그인해도 prometheus 엔드포인트가 없다`() {
+        // 액추에이터는 사용자 행을 읽지 않는다. 운영자 역할이 든 토큰이면 충분하다.
         val headers = HttpHeaders()
-        headers.add("X-Dev-User", "admin@test.local")
+        headers.add(HttpHeaders.AUTHORIZATION, tokens.bearer(userId = 1L, role = UserRole.ADMIN))
 
         val response = restTemplate.exchange(
             "http://localhost:$serverPort/actuator/prometheus", HttpMethod.GET,
@@ -70,8 +77,9 @@ class ManagementPortBoundaryTest @Autowired constructor(
             String::class.java
         )
 
-        // 브라우저(Accept: text/html)면 구글 로그인으로 302, 그 밖의 클라이언트는 401 이다. 어느 쪽이든 지표는 없다.
-        assertThat(response.statusCode).isIn(HttpStatus.FOUND, HttpStatus.UNAUTHORIZED)
+        // /api 밖의 미인증 요청이라 로그인 화면으로 보낸다. 지표는 없다.
+        assertThat(response.statusCode).isEqualTo(HttpStatus.FOUND)
+        assertThat(response.headers.location?.path).isEqualTo("/login")
         assertThat(response.body.orEmpty()).doesNotContain("credit_defense_total")
     }
 

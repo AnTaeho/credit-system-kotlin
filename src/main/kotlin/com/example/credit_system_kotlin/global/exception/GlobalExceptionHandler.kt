@@ -33,6 +33,10 @@ class GlobalExceptionHandler(
     fun handleIdempotencyKeyReused(e: IdempotencyKeyReusedException): ResponseEntity<ErrorResponse> =
         conflict("IDEMPOTENCY_KEY_REUSED", e.message)
 
+    @ExceptionHandler(EmailAlreadyUsedException::class)
+    fun handleEmailAlreadyUsed(e: EmailAlreadyUsedException): ResponseEntity<ErrorResponse> =
+        conflict("EMAIL_ALREADY_USED", e.message)
+
     @ExceptionHandler(InvalidRequestException::class)
     fun handleInvalidRequest(e: InvalidRequestException): ResponseEntity<ErrorResponse> =
         ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", e.message))

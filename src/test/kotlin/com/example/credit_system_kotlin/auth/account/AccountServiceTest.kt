@@ -34,7 +34,6 @@ class AccountServiceTest @Autowired constructor(
         assertThat(found.balance).isZero()
         assertThat(found.initialBalance).isZero()
         assertThat(found.role).isEqualTo(UserRole.USER)
-        assertThat(found.googleSub).isNull()
         assertThat(found.passwordHash).isNotEqualTo(PASSWORD).hasSize(60)
         assertThat(passwordEncoder.matches(PASSWORD, found.passwordHash)).isTrue()
     }
@@ -51,7 +50,7 @@ class AccountServiceTest @Autowired constructor(
 
     @Test
     fun `비밀번호 없이 만들어진 옛 행의 이메일로도 다시 가입할 수 없다`() {
-        userRepository.save(User("legacy", 0L, email = "legacy@example.com", googleSub = "sub-1"))
+        userRepository.save(User("legacy", 0L, email = "legacy@example.com"))
 
         assertThatThrownBy { accountService.signUp("legacy@example.com", PASSWORD) }
             .isInstanceOf(EmailAlreadyUsedException::class.java)
@@ -100,7 +99,7 @@ class AccountServiceTest @Autowired constructor(
     @Test
     fun `틀린 비밀번호와 없는 이메일과 해시 없는 옛 행은 모두 null 이다`() {
         accountService.signUp("alice@example.com", PASSWORD)
-        userRepository.save(User("legacy", 0L, email = "legacy@example.com", googleSub = "sub-1"))
+        userRepository.save(User("legacy", 0L, email = "legacy@example.com"))
 
         assertThat(accountService.authenticate("alice@example.com", "wrong-password")).`as`("틀린 비밀번호").isNull()
         assertThat(accountService.authenticate("nobody@example.com", PASSWORD)).`as`("없는 이메일").isNull()

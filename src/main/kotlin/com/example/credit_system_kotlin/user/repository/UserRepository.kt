@@ -37,8 +37,6 @@ interface UserRepository : JpaRepository<User, Long> {
         @Param("now") now: Instant
     ): Int
 
-    fun findByGoogleSub(googleSub: String): User?
-
     fun findByEmail(email: String): User?
 
     /** 잔액이 음수인 사용자 수. 불변식이라 0 이 아니면 즉시 사고다. */

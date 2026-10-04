@@ -16,8 +16,8 @@ import org.springframework.web.servlet.ModelAndView
  * 로그인한 사람의 화면. 서버는 첫 화면만 그리고, 이후 변화(요청 접수, 진행 상태, 더 보기, 지급)는
  * `static/js` 가 기존 `/api` 를 불러 처리한다. 화면 전용 API 는 없다.
  *
- * 사용자는 API 와 똑같이 [CurrentUser](인증 주체)로만 받는다. 이메일은 인증 주체의 종류(구글/개발 로그인)에
- * 기대지 않도록 사용자 행에서 읽는다.
+ * 사용자는 API 와 똑같이 [CurrentUser](인증 주체)로만 받는다. 인증 주체는 사용자 id 와 역할만 알기 때문에
+ * 이메일은 사용자 행에서 읽는다.
  */
 @Controller
 class PageController(

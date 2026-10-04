@@ -36,5 +36,11 @@ data class JwtProperties(
 
     companion object {
         const val MIN_SECRET_BYTES = 32
+
+        /**
+         * `application.yml` 이 `APP_AUTH_JWT_SECRET` 이 없을 때 쓰는 로컬 기본값과 같은 글자다. 저장소에 공개된
+         * 키라 운영에서 쓰이면 안 되고, [AuthStartupGuard] 가 prod 에서 이 값을 거부한다. yml 을 바꾸면 여기도 바꾼다.
+         */
+        const val LOCAL_DEFAULT_SECRET = "local-only-jwt-secret-do-not-use-in-prod"
     }
 }

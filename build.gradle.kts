@@ -29,8 +29,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-security")
-    implementation("org.springframework.boot:spring-boot-starter-security-oauth2-client")
-    implementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server")
+    // 액세스 JWT 를 직접 내고 확인하는 데 Nimbus 인코더·디코더만 쓴다. 리소스 서버 자동 설정은 쓰지 않는다.
+    implementation("org.springframework.security:spring-security-oauth2-jose")
     implementation("io.micrometer:micrometer-registry-prometheus")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")

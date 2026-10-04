@@ -1,36 +1,58 @@
 package com.example.credit_system_kotlin.auth.config
 
-import com.example.credit_system_kotlin.auth.login.AllowlistOidcUserService
-import com.example.credit_system_kotlin.auth.login.DevLoginAuthenticator
-import com.example.credit_system_kotlin.auth.login.DevLoginFilter
-import com.example.credit_system_kotlin.auth.login.UserAccountProvisioner
+import com.example.credit_system_kotlin.auth.token.AccessTokenService
+import com.example.credit_system_kotlin.auth.token.RefreshTokenService
+import com.example.credit_system_kotlin.auth.web.AuthCookies
 import com.example.credit_system_kotlin.auth.web.SecurityErrorWriter
+import com.example.credit_system_kotlin.auth.web.TokenApiController
+import com.example.credit_system_kotlin.auth.web.TokenAuthenticationFilter
+import com.example.credit_system_kotlin.auth.web.TokenLogoutHandler
+import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.springframework.boot.actuate.autoconfigure.web.server.ManagementPortType
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
+import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.invoke
+import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter
+import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository
+import org.springframework.security.web.savedrequest.NullRequestCache
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher
-import org.springframework.security.web.util.matcher.RequestHeaderRequestMatcher
+import org.springframework.security.web.util.matcher.AnyRequestMatcher
 import org.springframework.security.web.util.matcher.RequestMatcher
 
 /**
  * 보안 규칙 한 곳.
  *
+ * **누구인가.** 세션이 없다(`STATELESS`). 요청마다 [TokenAuthenticationFilter] 가 액세스 JWT(`Authorization: Bearer`
+ * 헤더, 없으면 `credit_at` 쿠키)로 사용자를 정하고, 액세스가 만료됐으면 `credit_rt` 쿠키의 리프레시 토큰으로 조용히
+ * 갱신한다. 어떤 요청도 `JSESSIONID` 를 만들지 않는다. 로그인 전에 가려던 주소를 기억해 두는 요청 캐시도 세션을
+ * 쓰므로 끈다 — 로그인하면 항상 홈으로 간다.
+ *
+ * **어디에 들어갈 수 있는가.**
  * - `/api` 아래: 인증 필요. 미인증 401, 권한 부족·CSRF 실패 403. 둘 다 [SecurityErrorWriter] 의 JSON 이고 리다이렉트하지 않는다
  * - `/api/admin` 아래: 운영자(ROLE_ADMIN) 전용. 운영자 경로는 전부 이 아래에 둔다
  * - `/admin` 화면: 운영자 전용(API 와 같은 기준)
- * - 그 밖의 경로(화면): 인증 필요. 미인증이면 `/login` 화면으로 보낸다. `/login` 과 정적 리소스는 열어 둔다.
- *   `/login` 을 열어 두지 않으면 로그인 화면이 다시 로그인을 요구하는 리다이렉트 루프가 된다
- * - `/dev-login`: 열어 두되 핸들러는 개발 로그인이 켜졌을 때만 있다(꺼져 있으면 404). CSRF 는 면제하지 않는다
+ * - 그 밖의 경로(화면): 인증 필요. 미인증이면 `/login` 화면으로 보낸다
+ * - 열어 두는 곳: `/login`, `/signup`, `POST /auth/token`, 정적 리소스. 로그인·가입 화면을 열어 두지 않으면
+ *   로그인 화면이 다시 로그인을 요구하는 리다이렉트 루프가 된다
  * - CSP: 같은 출처의 스크립트·스타일만 허용한다. 인라인 스크립트·스타일·외부 CDN 을 쓰지 않는다
- * - CSRF: 세션 쿠키로 인증하므로 켠다. 개발 로그인 헤더로 인증되는 요청만 뺀다(쿠키 인증이 아니다)
- * - 로그아웃: `POST /logout`
+ *
+ * **CSRF.** 브라우저는 쿠키로 인증하므로 켠다. 세션이 없어 토큰도 쿠키(`XSRF-TOKEN`)에 둔다. 화면은 서버가 그려 준
+ * meta·hidden 값으로 토큰을 돌려보내고, 서버는 그 값이 쿠키와 같은지 본다. 빼는 요청은 둘뿐이다.
+ * - Bearer 헤더가 붙은 요청: 브라우저가 스스로 붙여 주는 인증이 아니다. 이런 요청은 필터가 쿠키를 아예 보지
+ *   않으므로([TokenAuthenticationFilter.BEARER_REQUEST]) 헤더만 붙여 CSRF 검사를 건너뛰고 쿠키로 인증될 길이 없다
+ * - `POST /auth/token`: 비밀번호를 직접 내는 요청이라 따라갈 쿠키 인증이 없고, 쿠키를 심지도 않는다
+ *
+ * `POST /login`, `POST /signup`, `POST /logout` 은 빼지 않는다. 폼의 hidden `_csrf` 가 있어야 들어온다.
+ *
+ * **로그아웃.** `POST /logout`. 리프레시 사슬을 폐기하고 쿠키를 지운 뒤 `/login?logout` 으로 보낸다([TokenLogoutHandler]).
  *
  * **액추에이터.** 관리 포트를 따로 두면 부트가 이 필터 체인을 관리 포트의 자식 컨텍스트에도 그대로 건다
  * (`ServletManagementChildContextConfiguration`). 그래서 여기서 두 경우를 나눈다.
@@ -48,13 +70,16 @@ class SecurityConfig {
     fun securityFilterChain(
         http: HttpSecurity,
         authProperties: AuthProperties,
-        oidcUserService: AllowlistOidcUserService,
-        provisioner: UserAccountProvisioner,
+        accessTokenService: AccessTokenService,
+        refreshTokenService: RefreshTokenService,
+        userRepository: UserRepository,
+        cookies: AuthCookies,
         errorWriter: SecurityErrorWriter,
         environment: Environment
     ): SecurityFilterChain {
-        val api: RequestMatcher = PathPatternRequestMatcher.withDefaults().matcher("/api/**")
-        val devLoginHeader = RequestHeaderRequestMatcher(DevLoginFilter.HEADER)
+        val paths = PathPatternRequestMatcher.withDefaults()
+        val api: RequestMatcher = paths.matcher("/api/**")
+        val tokenEndpoint: RequestMatcher = paths.matcher(HttpMethod.POST, TokenApiController.PATH)
         val managementPortSeparated = ManagementPortType.get(environment) == ManagementPortType.DIFFERENT
 
         http {
@@ -65,7 +90,8 @@ class SecurityConfig {
                 authorize(EndpointRequest.toAnyEndpoint(), denyAll)
                 authorize("/error", permitAll)
                 authorize("/login", permitAll)
-                authorize("/dev-login", permitAll)
+                authorize("/signup", permitAll)
+                authorize(tokenEndpoint, permitAll)
                 authorize("/css/**", permitAll)
                 authorize("/js/**", permitAll)
                 authorize("/favicon.ico", permitAll)
@@ -75,20 +101,20 @@ class SecurityConfig {
                 authorize("/api/**", authenticated)
                 authorize(anyRequest, authenticated)
             }
-            oauth2Login {
-                // 실패(허용 목록 밖 등)는 /login?error, 로그아웃 성공은 /login?logout 으로 돌아온다.
-                loginPage = "/login"
-                userInfoEndpoint {
-                    this.oidcUserService = oidcUserService
-                }
+            sessionManagement {
+                sessionCreationPolicy = SessionCreationPolicy.STATELESS
+            }
+            requestCache {
+                requestCache = NullRequestCache()
             }
             logout {
                 logoutUrl = "/logout"
+                addLogoutHandler(TokenLogoutHandler(refreshTokenService, cookies))
+                logoutSuccessUrl = "/login?logout"
             }
             csrf {
-                if (authProperties.devLogin.enabled) {
-                    ignoringRequestMatchers(devLoginHeader)
-                }
+                csrfTokenRepository = csrfTokenRepository(authProperties)
+                ignoringRequestMatchers(TokenAuthenticationFilter.BEARER_REQUEST, tokenEndpoint)
             }
             headers {
                 contentSecurityPolicy {
@@ -96,17 +122,34 @@ class SecurityConfig {
                 }
             }
             exceptionHandling {
+                // 앞에 적은 것이 먼저 맞는다. /api 는 JSON, 나머지는 로그인 화면.
                 defaultAuthenticationEntryPointFor(errorWriter.unauthenticatedEntryPoint(), api)
+                defaultAuthenticationEntryPointFor(
+                    LoginUrlAuthenticationEntryPoint("/login"),
+                    AnyRequestMatcher.INSTANCE
+                )
                 defaultAccessDeniedHandlerFor(errorWriter.forbiddenHandler(), api)
             }
-            if (authProperties.devLogin.enabled) {
-                addFilterBefore<AnonymousAuthenticationFilter>(
-                    DevLoginFilter(DevLoginAuthenticator(authProperties, provisioner), errorWriter)
-                )
-            }
+            addFilterBefore<AnonymousAuthenticationFilter>(
+                TokenAuthenticationFilter(accessTokenService, refreshTokenService, userRepository, cookies)
+            )
         }
         return http.build()
     }
+
+    /**
+     * CSRF 토큰을 쿠키에 둔다. 기본값대로 `HttpOnly` 다 — 스크립트는 쿠키가 아니라 서버가 그려 준 meta 에서 읽는다.
+     * 토큰은 화면이 처음 읽을 때 만들어져 그때 쿠키가 심긴다.
+     */
+    private fun csrfTokenRepository(authProperties: AuthProperties): CookieCsrfTokenRepository =
+        CookieCsrfTokenRepository().apply {
+            setCookieCustomizer { cookie ->
+                cookie.sameSite(AuthCookies.SAME_SITE)
+                if (authProperties.cookieSecure) {
+                    cookie.secure(true)
+                }
+            }
+        }
 
     companion object {
         /**

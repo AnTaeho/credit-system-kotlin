@@ -15,8 +15,7 @@ import jakarta.persistence.UniqueConstraint
 @Table(
     name = "users",
     uniqueConstraints = [
-        UniqueConstraint(name = "uk_users_email", columnNames = ["email"]),
-        UniqueConstraint(name = "uk_users_google_sub", columnNames = ["googleSub"])
+        UniqueConstraint(name = "uk_users_email", columnNames = ["email"])
     ]
 )
 class User(
@@ -25,7 +24,6 @@ class User(
     val name: String,
     balance: Long,
     email: String? = null,
-    googleSub: String? = null,
     passwordHash: String? = null,
     role: UserRole = UserRole.USER
 
@@ -47,14 +45,9 @@ class User(
     var initialBalance: Long = balance
         protected set
 
-    /** 구글 로그인으로 채운다. 로그인 전에 만들어진 행은 비어 있다. */
+    /** 로그인 이름. 소문자로 맞춘 값만 들어온다. 로그인이 생기기 전에 만들어진 행은 비어 있다. */
     @Column
     var email: String? = email
-        protected set
-
-    /** 구글 계정의 고유 식별자(sub). 이메일은 바뀔 수 있어서 이쪽을 신원으로 쓴다. */
-    @Column
-    var googleSub: String? = googleSub
         protected set
 
     /** BCrypt 해시. 비밀번호 로그인 전에 만들어진 행은 비어 있고, 그 행은 비밀번호로 로그인할 수 없다. */
@@ -67,23 +60,14 @@ class User(
     var role: UserRole = role
         protected set
 
-    /** 구글 계정의 이메일이 바뀌었을 때 따라간다. 신원은 [googleSub] 이라 행은 그대로다. */
-    fun changeEmail(newEmail: String) {
-        email = newEmail
-    }
-
-    /**
-     * 구글 계정을 처음 이 행에 묶는다. 개발 로그인으로 먼저 만들어진 행처럼 sub 가 비어 있는
-     * 행에만 허용한다. 이미 다른 sub 가 묶인 행을 다른 계정이 가져가면 안 된다.
-     */
-    fun linkGoogleAccount(sub: String) {
-        check(googleSub == null) { "이미 다른 구글 계정이 연결된 사용자입니다." }
-        googleSub = sub
-    }
-
     /** 이미 가입한 사용자를 운영자로 올리거나 내린다. */
     fun changeRole(newRole: UserRole) {
         role = newRole
+    }
+
+    /** 비밀번호를 새 해시로 바꾼다. 이미 나간 리프레시 토큰을 폐기하는 것은 부르는 쪽 몫이다. */
+    fun changePassword(newPasswordHash: String) {
+        passwordHash = newPasswordHash
     }
 
     companion object {
