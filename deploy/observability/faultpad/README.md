@@ -47,10 +47,11 @@ python3 deploy/observability/faultpad/server.py --port 8099
 
 ## 누구로 요청하나
 
-트래픽 버튼은 앱의 **개발 로그인 헤더**로 신원을 댄다(step9, compose 가 앱을 `local` 프로필로 띄운다).
-job 생성·잔액 조회는 `X-Dev-User: dev@local.test`(seed 가 넣은 사용자 id=1), `운영자 지급` 버튼은
-`X-Dev-User: admin@local.test` 로 `POST /api/admin/users/1/grants` 를 부른다. 결제 없는 자기 충전은
-없어졌으므로 크레딧은 이 버튼으로만 생긴다(1회 상한 1,000,000). 헤더와 경로는 전부 `scenarios/lib.sh` 에 있다.
+트래픽 버튼은 **Bearer 액세스 토큰**으로 신원을 댄다. compose 가 앱을 `local` 프로필로 띄우고, 그 프로필이
+기동 때 시드 계정 둘을 만든다. job 생성·잔액 조회는 `dev@local.test`(새 DB 에서 id=1), `운영자 지급` 버튼은
+`admin@local.test` 의 토큰으로 `POST /api/admin/users/1/grants` 를 부른다. 결제 없는 자기 충전은
+없으므로 크레딧은 이 버튼으로만 생긴다(1회 상한 1,000,000). 버튼을 누를 때마다 `POST /auth/token` 에서
+토큰을 새로 받는다. 계정·토큰 받기·경로는 전부 `scenarios/lib.sh` 에 있다.
 
 ## 안전장치
 

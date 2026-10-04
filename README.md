@@ -16,7 +16,7 @@ Kotlin / Spring Boot / MySQL / Redis. 원본은 별도 Java 프로젝트이고 �
 # 1) 로컬 인프라 — MySQL 8.4 + Redis 7
 docker compose up -d
 
-# 2) 앱 — local 프로필(개발 로그인). DB·Redis 는 application.yml 의 기본값이 위 컨테이너와 같은 계약이라 설정 없이 붙는다
+# 2) 앱 — local 프로필(시드 계정 둘). DB·Redis 는 application.yml 의 기본값이 위 컨테이너와 같은 계약이라 설정 없이 붙는다
 SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 ```
 
@@ -24,30 +24,40 @@ SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 
 ### 로그인
 
-모든 API 와 화면은 로그인이 필요하다. 운영에서는 구글 로그인 + 이메일 허용 목록이고, 로컬에서는 구글 자격증명 없이 **개발 로그인**을 쓴다(`local` 프로필 전용 — prod 에서 켜면 기동이 거부된다). 허용 목록은 [`application-local.yml`](src/main/resources/application-local.yml) 의 두 계정이다.
+모든 API 와 화면은 로그인이 필요하다. 이메일과 비밀번호로 로그인하고, 누구나 <http://localhost:8080/signup> 에서 가입할 수 있다. 가입하면 항상 일반 사용자이고 잔액은 0 이다.
 
-| 이메일 | 권한 |
-|---|---|
-| `dev@local.test` | 일반 사용자 |
-| `admin@local.test` | 운영자(`ROLE_ADMIN`) — 크레딧 지급 |
+`local` 프로필은 기동할 때 계정 둘을 만들어 둔다([`application-local.yml`](src/main/resources/application-local.yml) 의 `app.auth.seed-accounts`). 비밀번호는 저장소에 공개된 로컬 전용 값이다.
 
-- **브라우저:** <http://localhost:8080/login> 의 개발 로그인 폼에 이메일을 넣는다. 세션 로그인이고 CSRF 가 적용된다
-- **curl:** `X-Dev-User: <email>` 헤더 한 줄. 그 요청 하나에만 인증이 걸리고 CSRF 검사에서 빠진다
+| 이메일 | 비밀번호 | 권한 |
+|---|---|---|
+| `dev@local.test` | `local-dev-password` | 일반 사용자 |
+| `admin@local.test` | `local-admin-password` | 운영자(`ROLE_ADMIN`) — 크레딧 지급 |
 
-사용자 행은 첫 로그인 때 생긴다. 사용자 생성 API 도, 미리 넣어 둘 SQL 도 없다.
+- **브라우저:** <http://localhost:8080/login> 에서 로그인한다. 로그인은 쿠키 두 개로 유지된다. 액세스 JWT(15분)와 리프레시 토큰(14일)이고, 액세스가 만료되면 서버가 리프레시로 조용히 갱신한다. 세션은 없다. 쓰기 요청에는 CSRF 토큰이 필요하다(화면이 알아서 싣는다)
+- **curl:** `POST /auth/token` 으로 액세스 토큰을 받아 `Authorization: Bearer` 헤더에 싣는다. 이 요청은 CSRF 검사에서 빠진다. 토큰은 15분 뒤 만료되므로 그때 다시 받는다
+
+```bash
+token() {
+  curl -s http://localhost:8080/auth/token -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$1\",\"password\":\"$2\"}" | sed -E 's/.*"accessToken":"([^"]+)".*/\1/'
+}
+DEV=$(token dev@local.test local-dev-password)
+ADMIN=$(token admin@local.test local-admin-password)
+```
+
+운영자는 가입으로 만들 수 없다. 운영자 계정은 `app.auth.seed-accounts` 에 적어 두면 기동할 때 만들어진다. 같은 이메일로 먼저 가입한 사람이 있어도 기동 뒤에는 설정의 역할과 비밀번호로 덮인다.
 
 ### 크레딧 얻기 — 운영자 지급
 
 결제 없는 자기 충전은 없다(실제 결제 충전은 [로드맵](docs/roadmap.md) step14). 그전까지 크레딧은 **운영자 지급**으로만 생긴다. 브라우저에서는 운영자로 로그인해 `/admin` 화면의 지급 폼을 쓴다.
 
 ```bash
-# 일반 사용자로 한 번 요청해 사용자 행을 만들고 id 를 확인한다 (새 DB 면 보통 1)
-curl http://localhost:8080/api/users/me/balance -H 'X-Dev-User: dev@local.test'
-docker compose exec -T mysql mysql -ucredit -pcredit credit_system -e "SELECT id, email FROM users;"
+# 지급할 사용자의 id 를 확인한다 (새 DB 면 dev@local.test 가 1)
+docker compose exec -T mysql mysql -ucredit -pcredit credit_system -e "SELECT id, email, role FROM users;"
 
 # 운영자가 그 사용자에게 1000 크레딧 지급 (1회 상한 1,000,000)
 curl -X POST http://localhost:8080/api/admin/users/1/grants \
-  -H 'X-Dev-User: admin@local.test' -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
   -d '{"idemKey":"grant-1","amount":1000}'
 ```
 
@@ -56,19 +66,19 @@ curl -X POST http://localhost:8080/api/admin/users/1/grants \
 ```bash
 # 생성 요청 — 건당 100 크레딧이 hold 된다
 curl -X POST http://localhost:8080/api/jobs \
-  -H 'X-Dev-User: dev@local.test' -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $DEV" -H 'Content-Type: application/json' \
   -d '{"idemKey":"job-1","prompt":"a cat wearing sunglasses"}'
 ```
 
-`idemKey` 는 멱등키다. 같은 키로 다시 보내면 새로 처리하지 않고 처음 결과를 돌려준다(응답의 `duplicate` 플래그).
+`idemKey` 는 멱등키다. 같은 키와 같은 내용으로 다시 보내면 새로 처리하지 않고 처음 결과를 돌려준다(응답의 `duplicate` 플래그). 같은 키로 다른 내용을 보내면 409 로 거절한다.
 
 워커가 job 을 집어 스텁을 호출한다. 스텁은 기본 설정에서 3~7초 걸리고 **30% 확률로 실패**한다(`app.stub.failure-rate`). 실패한 job 은 최대 3회까지 재시도되고, 그래도 안 되면 hold 된 금액이 환불된다. 진행 상황은 이렇게 본다.
 
 ```bash
-curl http://localhost:8080/api/jobs/1           -H 'X-Dev-User: dev@local.test'
-curl http://localhost:8080/api/jobs             -H 'X-Dev-User: dev@local.test'
-curl http://localhost:8080/api/users/me/balance -H 'X-Dev-User: dev@local.test'
-curl http://localhost:8080/api/ledger           -H 'X-Dev-User: dev@local.test'
+curl http://localhost:8080/api/jobs/1           -H "Authorization: Bearer $DEV"
+curl http://localhost:8080/api/jobs             -H "Authorization: Bearer $DEV"
+curl http://localhost:8080/api/users/me/balance -H "Authorization: Bearer $DEV"
+curl http://localhost:8080/api/ledger           -H "Authorization: Bearer $DEV"
 ```
 
 브라우저라면 로그인 뒤 홈(`/`)에서 요청하고, 진행 중인 job 은 화면이 알아서 폴링한다.
@@ -81,10 +91,11 @@ curl http://localhost:8080/api/ledger           -H 'X-Dev-User: dev@local.test'
 
 ## API
 
-전부 로그인이 필요하다. 사용자는 인증 주체에서 꺼내므로 요청에 사용자 id 를 적는 곳이 없다(운영자 지급의 대상 id 만 예외).
+`/api` 아래는 전부 로그인이 필요하다. 사용자는 인증 주체에서 꺼내므로 요청에 사용자 id 를 적는 곳이 없다(운영자 지급의 대상 id 만 예외).
 
 | | |
 |---|---|
+| `POST /auth/token` | 액세스 토큰 받기. 본문 `{"email","password"}`, 응답 `{"accessToken","expiresInSeconds"}`. 로그인 없이 부른다 |
 | `GET /api/users/me/balance` | 내 잔액 |
 | `POST /api/jobs` | 생성 요청(= hold). 본문 `{"idemKey","prompt"}` |
 | `GET /api/jobs/{id}` | 내 job 하나. 남의 것·없는 것은 둘 다 404 |
@@ -92,7 +103,7 @@ curl http://localhost:8080/api/ledger           -H 'X-Dev-User: dev@local.test'
 | `GET /api/ledger?cursor=&size=` | 내 원장. 형식은 위와 같다 |
 | `POST /api/admin/users/{userId}/grants` | 운영자 지급. 본문 `{"idemKey","amount"}`. 운영자 전용 |
 
-오류는 `{"code","message"}` 형태다. 입력 오류 400, 미인증 401, 권한 부족·CSRF 토큰 없음 403, 없는 job 404, 잔액 부족·중복 요청 409. 세션으로 로그인한 쓰기 요청은 CSRF 토큰이 필요하다(화면이 알아서 싣는다).
+오류는 `{"code","message"}` 형태다. 입력 오류 400, 미인증 401, 권한 부족·CSRF 토큰 없음 403, 없는 job 404, 잔액 부족·중복 요청·멱등키 재사용 409. 쿠키로 로그인한 쓰기 요청은 CSRF 토큰이 필요하다(화면이 알아서 싣는다). Bearer 헤더로 부르는 요청은 필요 없다.
 
 OpenAPI 문서는 아직 없다.
 
@@ -163,32 +174,32 @@ Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 comp
 | 스텁 지연 / 실패율 | 3~7초 / 0.3 |
 | heartbeat timeout / 갱신 주기 | 10초 / 5초 |
 | 처리 상한(회수) | 60초 |
-| 로그인 허용 목록 / 운영자 | 비어 있음(아무도 못 들어온다). local 프로필은 `dev@local.test` / `admin@local.test` |
+| 액세스 토큰 / 리프레시 토큰 수명 | 15분 / 14일 |
+| 시드 계정 | 없음. local 프로필은 `dev@local.test` / `admin@local.test` |
 | 운영자 지급 1회 상한 | 1,000,000 |
 
 환경별로 바꿀 때는 Spring 표준 환경변수로 덮어쓴다 — `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_DATA_REDIS_HOST`. `application.yml` 은 건드리지 않는다.
 
-### 구글 로그인
-
-구글 로그인을 쓰려면 구글 OAuth 클라이언트(리디렉션 URI `http://<호스트>/login/oauth2/code/google`)와 허용 목록이 필요하다.
+### 로그인 설정
 
 | 환경변수 | 뜻 |
 |---|---|
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 구글 OAuth 클라이언트 |
-| `APP_AUTH_ALLOWEDEMAILS` | 로그인 허용 이메일, 쉼표로 구분 |
-| `APP_AUTH_ADMINEMAILS` | 운영자 이메일. 허용 목록의 부분집합이어야 한다 |
+| `APP_AUTH_JWT_SECRET` | 액세스 JWT 서명 키(HS256, 32바이트 이상) |
+| `APP_AUTH_COOKIESECURE` | 로그인 쿠키에 `Secure` 를 붙일지. 운영은 `true` |
+| `APP_AUTH_SEEDACCOUNTS_0_EMAIL` / `_PASSWORD` / `_ROLE` | 기동할 때 맞출 계정. 운영자 계정을 만드는 유일한 길이다. 번호를 늘려 여러 개 적는다 |
 
-뒤의 둘은 속성(`app.auth.allowed-emails`)의 대시가 빠진 이름이다 — Spring 완화 바인딩의 규칙이다. 로컬에서 구글 두 값을 안 주면 자리표시 기본값으로 앱은 뜨고 구글 로그인만 실패한다.
+뒤의 둘은 속성(`app.auth.cookie-secure`, `app.auth.seed-accounts[0].email`)의 대시가 빠진 이름이다 — Spring 완화 바인딩의 규칙이다. 로컬에서 서명 키를 안 주면 `application.yml` 에 적힌 로컬 전용 기본값을 쓴다.
 
-운영은 `prod` 프로파일(`SPRING_PROFILES_ACTIVE=prod`)이다. 이 프로파일의 DB·구글 설정에는 **기본값이 없다** — 환경변수를 빠뜨리면 앱이 로컬 DB 를 향해 조용히 뜨는 대신 부팅에서 죽는다. 허용 목록이 비었거나 개발 로그인이 켜져 있어도 기동을 거부한다. 스키마는 어느 프로파일에서든 Flyway 가 만들고 Hibernate 는 `validate` 로 확인만 한다.
+운영은 `prod` 프로파일(`SPRING_PROFILES_ACTIVE=prod`)이다. 이 프로파일의 DB 설정과 JWT 서명 키에는 **기본값이 없다** — 환경변수를 빠뜨리면 앱이 로컬 DB 를 향해 조용히 뜨는 대신 부팅에서 죽는다. 서명 키가 저장소에 공개된 로컬 기본값과 같거나 쿠키 `Secure` 가 꺼져 있어도 기동을 거부한다. 스키마는 어느 프로파일에서든 Flyway 가 만들고 Hibernate 는 `validate` 로 확인만 한다.
 
-저장소에 평문 비밀번호는 없지만, compose 의 환경변수는 여전히 평문이다. 진짜 시크릿 관리는 배포 환경이 정해질 때(로드맵 step10) 붙는다.
+저장소에 있는 비밀번호는 local 프로필의 시드 계정 둘과 compose 의 DB 계정뿐이고, 둘 다 로컬 전용이다. 진짜 시크릿 관리는 배포 환경이 정해질 때(로드맵 step10) 붙는다.
 
 ---
 
 ## 알아 둘 것
 
-- **로그인할 수 있는 사람은 허용 목록뿐이다.** 공개 가입이 없다. 실사용자가 나 한 명인 서비스다([로드맵](docs/roadmap.md) 결정 9)
+- **누구나 가입할 수 있다.** 이메일 인증, 가입·로그인 시도 제한, 비밀번호 재설정은 없다. 가입해도 잔액은 0 이고 크레딧은 운영자 지급으로만 생기므로 돈이 새지는 않는다
+- **로그아웃해도 이미 나간 액세스 토큰은 만료(15분)까지 유효하다.** 서버가 끊는 것은 리프레시 토큰이다. 브라우저에서는 쿠키가 지워져 쓰이지 않는다
 - **크레딧은 운영자 지급으로만 생긴다.** 결제 충전은 step14 다
 - **생성이 스텁이다.** `GenerationStubClient` 는 `Thread.sleep` + 확률적 실패인 인메모리 시뮬레이션이다. 네트워크 너머로 나가는 것은 step11 이다
 - **인스턴스 1대 전제다.** 회수·대사·멱등키 정리 스케줄러에 분산 락이 없다. 실사용자가 한 명이라 서버도 1대로 운영하기로 했다(로드맵 결정 13)

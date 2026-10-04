@@ -30,31 +30,44 @@ docker compose -f deploy/observability/docker-compose.yml down -v
 ## 데이터 넣기
 
 ```
-# 사용자 id=1(email=dev@local.test) 생성 — 시나리오 SQL 이 id=1 을 가정하므로 id 를 못 박아 넣는다
+# 시드 계정 dev@local.test 가 id=1 로 생겼는지 확인 — 시나리오 SQL 이 id=1 을 가정한다. 행은 앱이 만든다
 ./deploy/observability/scripts/seed.sh
 
 # 운영자 지급 + job 생성 + 중복/잔액부족 유발, 마지막에 방어 카운터 출력
 ./deploy/observability/scripts/smoke.sh
 ```
 
-### 누구로 요청하나 (step9 이후)
+### 누구로 요청하나
 
-앱은 `local` 프로필로 뜬다(`SPRING_PROFILES_ACTIVE: local`). 그래서 구글 로그인 없이 **개발 로그인 헤더**
-하나로 신원을 댈 수 있다. 허용 목록은 `application-local.yml` 의 두 계정이다.
+앱은 `local` 프로필로 뜬다(`SPRING_PROFILES_ACTIVE: local`). 이 프로필은 기동이 끝난 직후
+`application-local.yml` 의 시드 계정 둘을 만든다. 스크립트는 이 계정으로 액세스 토큰을 받아
+`Authorization: Bearer <토큰>` 헤더로 요청한다.
 
-| 헤더 | 누구 | 쓰는 곳 |
-|---|---|---|
-| `X-Dev-User: dev@local.test` | 일반 사용자. seed 가 넣은 id=1 행을 이메일로 찾아 들어온다 | job 생성, 잔액·목록 조회 |
-| `X-Dev-User: admin@local.test` | 운영자(ROLE_ADMIN). 첫 요청 때 새 행(id=2)이 생긴다 | 지급 `POST /api/admin/users/1/grants` |
+| 계정 | 비밀번호 | 누구 | 쓰는 곳 |
+|---|---|---|---|
+| `dev@local.test` | `local-dev-password` | 일반 사용자. 새 DB 에서 id=1 | job 생성, 잔액·목록 조회 |
+| `admin@local.test` | `local-admin-password` | 운영자(ADMIN). 새 DB 에서 id=2 | 지급 `POST /api/admin/users/1/grants` |
 
-결제 없는 자기 충전 API 는 step9-C 에서 없어졌다. 크레딧은 운영자 지급으로만 생긴다(1회 상한 1,000,000).
-헤더 요청은 CSRF 검사에서 빠지므로 curl 에 토큰이 필요 없다.
+비밀번호는 저장소에 공개된 로컬 전용 고정값이다. 화면은 <http://localhost:8080/login> 에서 같은 계정으로 들어간다.
+
+토큰은 `POST /auth/token` 이 준다. 수명은 15분이고, 만료되면 다시 받는다. 시드 계정은 앱이 UP 이 된
+직후에 생기므로 기동 직후 잠깐은 401 이 난다. `scenarios/lib.sh` 의 `ensure_tokens` 가 재시도와
+10분마다 다시 받기를 맡는다. Bearer 요청은 CSRF 검사에서 빠지므로 curl 에 CSRF 토큰이 필요 없다.
+
+결제 없는 자기 충전 API 는 없다. 크레딧은 운영자 지급으로만 생긴다(1회 상한 1,000,000).
 
 ```
+token() {  # token <이메일> <비밀번호>
+  curl -s http://localhost:8080/auth/token -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$1\",\"password\":\"$2\"}" | sed -E 's/.*"accessToken":"([^"]+)".*/\1/'
+}
+ADMIN=$(token admin@local.test local-admin-password)
+DEV=$(token dev@local.test local-dev-password)
+
 curl -X POST http://localhost:8080/api/admin/users/1/grants \
-  -H 'X-Dev-User: admin@local.test' -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
   -d '{"idemKey":"grant-1","amount":10000}'
-curl http://localhost:8080/api/users/me/balance -H 'X-Dev-User: dev@local.test'
+curl http://localhost:8080/api/users/me/balance -H "Authorization: Bearer $DEV"
 ```
 
 ## 접속
