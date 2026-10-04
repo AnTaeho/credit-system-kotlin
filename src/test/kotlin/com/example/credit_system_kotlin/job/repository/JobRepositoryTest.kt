@@ -39,7 +39,7 @@ class JobRepositoryTest @Autowired constructor(
     }
 
     @Test
-    fun `재시도에서 미리 PROCESSING된 작업도 같은 attemptNo면 처리할 수 있다`() {
+    fun `재시도로 올린 attemptNo로도 처리를 시작할 수 있다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
         jobRepository.transitionIfStatusAndAttemptMatch(
             job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
@@ -104,7 +104,7 @@ class JobRepositoryTest @Autowired constructor(
     }
 
     @Test
-    fun `상태와 attemptNo가 모두 일치할 때만 전이된다`() {
+    fun `상태가 다르면 0행이고 일치하면 전이된다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
         jobRepository.transitionIfStatusAndAttemptMatch(
             job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()

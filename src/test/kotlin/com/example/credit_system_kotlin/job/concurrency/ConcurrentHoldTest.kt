@@ -2,8 +2,10 @@ package com.example.credit_system_kotlin.job.concurrency
 
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.job.service.HoldService
+import com.example.credit_system_kotlin.support.DefenseCounters
 import com.example.credit_system_kotlin.user.domain.User
 import com.example.credit_system_kotlin.user.repository.UserRepository
+import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -17,8 +19,11 @@ import java.util.concurrent.atomic.AtomicInteger
 @SpringBootTest
 class ConcurrentHoldTest @Autowired constructor(
     private val holdService: HoldService,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    meterRegistry: MeterRegistry
 ) {
+
+    private val defenseCounters = DefenseCounters(meterRegistry)
 
     companion object {
         @JvmStatic
@@ -35,6 +40,7 @@ class ConcurrentHoldTest @Autowired constructor(
         val threadCount = 10
         val successCount = AtomicInteger()
         val rejectedCount = AtomicInteger()
+        val before = defenseCounters.snapshot("hold_balance" to "applied", "hold_balance" to "rejected")
 
         runConcurrently(threadCount) { idx ->
             try {
@@ -51,5 +57,11 @@ class ConcurrentHoldTest @Autowired constructor(
 
         val found = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(found.balance).isEqualTo(0L)
+
+        // 카운터와 실제 돈이 같은 이야기를 해야 한다.
+        assertThat(defenseCounters.delta(before, "hold_balance", "applied"))
+            .isEqualTo(successCount.get().toDouble())
+        assertThat(defenseCounters.delta(before, "hold_balance", "rejected"))
+            .isEqualTo(rejectedCount.get().toDouble())
     }
 }

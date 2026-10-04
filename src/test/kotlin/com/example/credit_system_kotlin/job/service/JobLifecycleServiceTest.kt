@@ -42,6 +42,8 @@ class JobLifecycleServiceTest @Autowired constructor(
         assertThat(found.status).isEqualTo(JobStatus.COMPLETED)
         assertThat(found.resultUrl).isEqualTo("https://stub/x.png")
         assertThat(ledgerRepository.findByUserIdOrderByIdDesc(1L)).hasSize(1)
+        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.STALE)).isZero()
     }
 
     @Test
@@ -55,6 +57,8 @@ class JobLifecycleServiceTest @Autowired constructor(
         val found = jobRepository.findById(job.persistedId).orElseThrow()
         assertThat(found.status).isEqualTo(JobStatus.PROCESSING)
         assertThat(ledgerRepository.findByUserIdOrderByIdDesc(1L)).isEmpty()
+        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.STALE)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.APPLIED)).isZero()
     }
 
     @Test
@@ -123,6 +127,8 @@ class JobLifecycleServiceTest @Autowired constructor(
 
         assertThat(jobRepository.findById(job.persistedId).orElseThrow().status)
             .isEqualTo(JobStatus.COMPLETED)
+        assertThat(eventPublisher.countOf(DefensePoint.MARK_FAILED, DefenseOutcome.STALE)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.MARK_FAILED, DefenseOutcome.APPLIED)).isZero()
     }
 
     @Test
@@ -194,41 +200,8 @@ class JobLifecycleServiceTest @Autowired constructor(
             .isEqualTo(1000L)
         assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId))
             .hasSize(1)
-    }
-
-    @Test
-    fun `attemptNo가 일치하는 confirm은 CONFIRM APPLIED를 발행한다`() {
-        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
-
-        jobLifecycleService.confirm(job, "https://stub/x.png")
-
-        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.APPLIED)).isEqualTo(1)
-        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.STALE)).isZero()
-    }
-
-    @Test
-    fun `attemptNo가 어긋난 confirm은 CONFIRM STALE을 발행한다`() {
-        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
-        ReflectionTestUtils.setField(job, "attemptNo", 5)
-
-        jobLifecycleService.confirm(job, "https://stub/x.png")
-
-        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.STALE)).isEqualTo(1)
-        assertThat(eventPublisher.countOf(DefensePoint.CONFIRM, DefenseOutcome.APPLIED)).isZero()
-    }
-
-    @Test
-    fun `이미 완료된 job의 늦은 실패 처리는 MARK_FAILED STALE을 발행한다`() {
-        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
-        jobRepository.completeIfAttemptMatches(job.persistedId, "https://stub/done.png", 0, Instant.now())
-
-        jobLifecycleService.markFailed(job.persistedId, 0)
-
-        assertThat(eventPublisher.countOf(DefensePoint.MARK_FAILED, DefenseOutcome.STALE)).isEqualTo(1)
-        assertThat(eventPublisher.countOf(DefensePoint.MARK_FAILED, DefenseOutcome.APPLIED)).isZero()
+        assertThat(eventPublisher.countOf(DefensePoint.FINAL_REFUND, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.FINAL_REFUND, DefenseOutcome.RACED)).isEqualTo(1)
     }
 
     @Test
@@ -244,21 +217,5 @@ class JobLifecycleServiceTest @Autowired constructor(
 
         assertThat(eventPublisher.countOf(DefensePoint.RETRY_CLAIM, DefenseOutcome.APPLIED)).isEqualTo(1)
         assertThat(eventPublisher.countOf(DefensePoint.RETRY_CLAIM, DefenseOutcome.LOST)).isEqualTo(1)
-    }
-
-    @Test
-    fun `이미 처리된 job의 최종 환불은 FINAL_REFUND RACED를 발행한다`() {
-        val user = userRepository.save(User("acme", 700L))
-        val job = jobRepository.save(Job.hold(user.persistedId, 300L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
-        val failed = jobRepository.findById(job.persistedId).orElseThrow()
-
-        jobLifecycleService.finalRefund(failed)
-        jobLifecycleService.finalRefund(failed)
-
-        assertThat(eventPublisher.countOf(DefensePoint.FINAL_REFUND, DefenseOutcome.APPLIED)).isEqualTo(1)
-        assertThat(eventPublisher.countOf(DefensePoint.FINAL_REFUND, DefenseOutcome.RACED)).isEqualTo(1)
     }
 }

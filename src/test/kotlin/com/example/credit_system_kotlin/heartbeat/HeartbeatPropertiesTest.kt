@@ -13,17 +13,14 @@ class HeartbeatPropertiesTest {
 
     @Test
     fun `refresh interval이 timeout 이상이면 거부한다`() {
-        assertThatThrownBy { HeartbeatProperties(10, 15) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("refresh-interval-seconds")
-            .hasMessageContaining("timeout-seconds")
-    }
-
-    @Test
-    fun `refresh interval이 timeout과 같아도 거부한다`() {
-        assertThatThrownBy { HeartbeatProperties(10, 10) }
-            .isInstanceOf(IllegalArgumentException::class.java)
-            .hasMessageContaining("작아야 합니다")
+        listOf(15L, 10L).forEach { refreshInterval ->
+            assertThatThrownBy { HeartbeatProperties(10, refreshInterval) }
+                .`as`("$refreshInterval")
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("refresh-interval-seconds")
+                .hasMessageContaining("timeout-seconds")
+                .hasMessageContaining("작아야 합니다")
+        }
     }
 
     @Test

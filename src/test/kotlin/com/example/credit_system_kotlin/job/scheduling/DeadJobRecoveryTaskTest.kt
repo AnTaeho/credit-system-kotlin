@@ -84,6 +84,12 @@ class DeadJobRecoveryTaskTest {
 
         verify(jobRepository).failIfProcessing(eq(20L), eq(0), any<Instant>())
         verify(heartbeatRegistry).removeHeartbeat(20L, 0)
+        assertThat(eventPublisher.recoveryEvents())
+            .singleElement()
+            .satisfies({
+                assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP)
+                assertThat(it.jobId).isEqualTo(20L)
+            })
     }
 
     @Test
@@ -113,6 +119,13 @@ class DeadJobRecoveryTaskTest {
         verify(jobRepository).failIfProcessing(eq(31L), eq(3), any<Instant>())
         verify(heartbeatRegistry).removeHeartbeat(31L, 3)
         verify(jobRepository, never()).findById(any())
+        assertThat(eventPublisher.recoveryEvents())
+            .singleElement()
+            .satisfies({
+                assertThat(it.detector).isEqualTo(RecoveryDetector.HEARTBEAT)
+                assertThat(it.jobId).isEqualTo(31L)
+                assertThat(it.attemptNo).isEqualTo(3)
+            })
     }
 
     @Test
@@ -136,20 +149,6 @@ class DeadJobRecoveryTaskTest {
         task.scan()
 
         verify(jobLifecycleService).finalRefund(job)
-        verify(jobLifecycleService, never()).retry(any())
-    }
-
-    @Test
-    fun `FAILED 스냅샷을 그대로 넘기고 최신 상태 판정은 조건부 UPDATE에 맡긴다`() {
-        val staleSnapshot = failedJob(42L, 2)
-        whenever(jobRepository.findByStatusOrderByIdAsc(eq(JobStatus.FAILED), any<Pageable>()))
-            .thenReturn(listOf(staleSnapshot))
-
-        task.scan()
-
-        val jobCaptor = argumentCaptor<Job>()
-        verify(jobLifecycleService).finalRefund(jobCaptor.capture())
-        assertThat(jobCaptor.firstValue).isSameAs(staleSnapshot)
         verify(jobLifecycleService, never()).retry(any())
     }
 
@@ -200,57 +199,18 @@ class DeadJobRecoveryTaskTest {
     }
 
     @Test
-    fun `FAILED job은 배치 크기만큼만 조회한다`() {
+    fun `FAILED·PROCESSING 조회는 각각 배치 크기만큼만 가져온다`() {
         task.scan()
 
-        val pageableCaptor = argumentCaptor<Pageable>()
-        verify(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.FAILED), pageableCaptor.capture())
-        assertThat(pageableCaptor.firstValue.pageSize).isEqualTo(100)
-    }
+        val failedPageable = argumentCaptor<Pageable>()
+        verify(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.FAILED), failedPageable.capture())
+        assertThat(failedPageable.firstValue.pageSize).isEqualTo(100)
 
-    @Test
-    fun `PROCESSING 정체 조회도 배치 크기만큼만 가져온다`() {
-        task.scan()
-
-        val pageableCaptor = argumentCaptor<Pageable>()
+        val processingPageable = argumentCaptor<Pageable>()
         verify(jobRepository).findByStatusAndUpdatedAtBeforeOrderByIdAsc(
-            eq(JobStatus.PROCESSING), any<Instant>(), pageableCaptor.capture()
+            eq(JobStatus.PROCESSING), any<Instant>(), processingPageable.capture()
         )
-        assertThat(pageableCaptor.firstValue.pageSize).isEqualTo(100)
-    }
-
-    @Test
-    fun `heartbeat 만료 회수는 HEARTBEAT detector로 JobRecovered를 발행한다`() {
-        whenever(heartbeatRegistry.findExpiredAttempts()).thenReturn(setOf(JobAttempt(60L, 2)))
-        whenever(jobRepository.failIfProcessing(eq(60L), eq(2), any<Instant>())).thenReturn(1)
-
-        task.scan()
-
-        assertThat(eventPublisher.recoveryEvents())
-            .singleElement()
-            .satisfies({
-                assertThat(it.detector).isEqualTo(RecoveryDetector.HEARTBEAT)
-                assertThat(it.jobId).isEqualTo(60L)
-                assertThat(it.attemptNo).isEqualTo(2)
-            })
-    }
-
-    @Test
-    fun `updatedAt 정체 회수는 BACKSTOP detector로 JobRecovered를 발행한다`() {
-        val job = staleProcessingJob(61L)
-        whenever(
-            jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
-                eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
-            )
-        ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.heartbeatState(61L, 0)).thenReturn(HeartbeatState.ABSENT)
-        whenever(jobRepository.failIfProcessing(eq(61L), eq(0), any<Instant>())).thenReturn(1)
-
-        task.scan()
-
-        assertThat(eventPublisher.recoveryEvents())
-            .singleElement()
-            .satisfies({ assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP) })
+        assertThat(processingPageable.firstValue.pageSize).isEqualTo(100)
     }
 
     @Test

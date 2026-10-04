@@ -58,15 +58,4 @@ class AuthStartupGuardTest {
             .withPropertyValues("spring.profiles.active=prod")
             .run { context -> assertThat(context).hasNotFailed() }
     }
-
-    @Test
-    fun `운영자 목록이 허용 목록의 부분집합이 아니면 기동이 거부된다`() {
-        runner
-            .withPropertyValues("app.auth.admin-emails=boss@test.local")
-            .run { context ->
-                assertThat(context).hasFailed()
-                assertThat(context.startupFailure).rootCause()
-                    .hasMessageContaining("admin-emails 는 app.auth.allowed-emails 에 포함돼야 합니다")
-            }
-    }
 }

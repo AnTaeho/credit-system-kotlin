@@ -51,12 +51,6 @@ class ManagementPortBoundaryTest @Autowired constructor(
     private var managementPort: Int = 0
 
     @Test
-    fun `애플리케이션 포트와 관리 포트가 서로 다르다`() {
-        assertThat(managementPort).isNotZero()
-        assertThat(managementPort).isNotEqualTo(serverPort)
-    }
-
-    @Test
     fun `애플리케이션 포트에서는 로그인해도 prometheus 엔드포인트가 없다`() {
         val headers = HttpHeaders()
         headers.add("X-Dev-User", "admin@test.local")

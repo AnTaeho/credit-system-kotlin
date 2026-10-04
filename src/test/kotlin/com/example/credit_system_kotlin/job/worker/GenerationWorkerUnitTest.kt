@@ -54,18 +54,6 @@ class GenerationWorkerUnitTest {
     }
 
     @Test
-    fun `대기 작업을 DB에서 찾아 선점한 뒤 처리기로 넘긴다`() {
-        whenever(jobRepository.findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any()))
-            .thenReturn(listOf(job))
-        whenever(jobRepository.startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>()))
-            .thenReturn(1)
-
-        worker.dispatchPendingJobs()
-
-        verify(jobProcessor).runGeneration(job)
-    }
-
-    @Test
     fun `다른 워커가 선점한 작업은 외부 처리기로 넘기지 않는다`() {
         doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
         doReturn(0).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
@@ -73,6 +61,8 @@ class GenerationWorkerUnitTest {
         worker.dispatchPendingJobs()
 
         verify(jobProcessor, never()).runGeneration(job)
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.LOST)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isZero()
     }
 
     @Test
@@ -156,28 +146,8 @@ class GenerationWorkerUnitTest {
 
         verify(jobProcessor).runGeneration(job)
         verify(jobProcessor).runGeneration(second)
-    }
-
-    @Test
-    fun `선점 성공은 WORKER_CLAIM APPLIED를 발행한다`() {
-        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
-        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
-
-        worker.dispatchPendingJobs()
-
-        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isEqualTo(2)
         assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.LOST)).isZero()
-    }
-
-    @Test
-    fun `이미 선점된 job의 claim은 WORKER_CLAIM LOST를 발행한다`() {
-        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
-        doReturn(0).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
-
-        worker.dispatchPendingJobs()
-
-        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.LOST)).isEqualTo(1)
-        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isZero()
     }
 
     @Test

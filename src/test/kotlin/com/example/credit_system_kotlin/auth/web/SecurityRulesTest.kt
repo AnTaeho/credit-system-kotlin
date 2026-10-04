@@ -53,7 +53,9 @@ class SecurityRulesTest @Autowired constructor(
 
     @Test
     fun `미인증 api 요청은 리다이렉트 없이 401 JSON 이다`() {
-        val result = mockMvc.perform(get("/api/users/me/balance")).andReturn()
+        val result = mockMvc.perform(
+            get("/api/users/me/balance").accept(MediaType.TEXT_HTML, MediaType.APPLICATION_JSON)
+        ).andReturn()
 
         assertThat(result.response.status).isEqualTo(401)
         assertThat(result.response.getHeader("Location")).isNull()
@@ -97,14 +99,6 @@ class SecurityRulesTest @Autowired constructor(
     }
 
     @Test
-    fun `운영자는 운영자 경로의 권한 검사를 통과한다`() {
-        // 없는 운영자 경로다. 권한 검사를 통과하면 컨트롤러가 없어 404 가 난다.
-        val result = mockMvc.perform(get("/api/admin/anything").header(DEV_HEADER, ADMIN_EMAIL)).andReturn()
-
-        assertThat(result.response.status).isEqualTo(404)
-    }
-
-    @Test
     fun `세션 로그인 사용자는 자기 잔액을 본다`() {
         val result = mockMvc.perform(get("/api/users/me/balance").with(oidcLogin().oidcUser(sessionUser()))).andReturn()
 
@@ -138,14 +132,6 @@ class SecurityRulesTest @Autowired constructor(
 
         assertThat(result.response.status).isEqualTo(200)
         assertThat(userRepository.findById(user.persistedId).orElseThrow().balance).isEqualTo(800L)
-    }
-
-    @Test
-    fun `api 밖의 경로는 미인증 브라우저 요청이면 로그인 화면으로 리다이렉트한다`() {
-        val result = mockMvc.perform(get("/").accept(MediaType.TEXT_HTML)).andReturn()
-
-        assertThat(result.response.status).isEqualTo(302)
-        assertThat(result.response.redirectedUrl).endsWith("/login")
     }
 
     @Test

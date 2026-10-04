@@ -56,14 +56,7 @@ class ApiIdentitySourceTest @Autowired constructor(
     fun `api 핸들러는 요청의 헤더·쿼리·경로에서 사용자 식별자를 받지 않는다`() {
         val checked = apiHandlers.filterNot { (pattern, _) -> pattern in ADMIN_USER_ID_EXCEPTIONS }
         val suspicious = checked.flatMap { (pattern, method) ->
-            method.methodParameters
-                .filter {
-                    it.hasParameterAnnotation(RequestHeader::class.java) ||
-                        it.hasParameterAnnotation(RequestParam::class.java) ||
-                        it.hasParameterAnnotation(PathVariable::class.java)
-                }
-                .filter { looksLikeUserId(it.parameterName) || looksLikeUserId(annotatedName(it)) }
-                .map { "$pattern ${method.method.name}(${it.parameterName})" }
+            userIdParamsFromRequest(method).map { "$pattern ${method.method.name}(${it.parameterName})" }
         }
 
         assertThat(suspicious).isEmpty()
@@ -80,13 +73,7 @@ class ApiIdentitySourceTest @Autowired constructor(
 
         assertThat(exceptionHandlers.map { it.first }).containsExactlyInAnyOrderElementsOf(ADMIN_USER_ID_EXCEPTIONS)
         exceptionHandlers.forEach { (pattern, method) ->
-            val fromRequest = method.methodParameters
-                .filter {
-                    it.hasParameterAnnotation(RequestHeader::class.java) ||
-                        it.hasParameterAnnotation(RequestParam::class.java) ||
-                        it.hasParameterAnnotation(PathVariable::class.java)
-                }
-                .filter { looksLikeUserId(it.parameterName) || looksLikeUserId(annotatedName(it)) }
+            val fromRequest = userIdParamsFromRequest(method)
             assertThat(fromRequest).`as`(pattern).singleElement()
                 .matches { it.hasParameterAnnotation(PathVariable::class.java) }
         }
@@ -106,6 +93,16 @@ class ApiIdentitySourceTest @Autowired constructor(
 
         assertThat(suspicious).isEmpty()
     }
+
+    /** 헤더·쿼리·경로 파라미터 중 사용자 식별자처럼 보이는 것. */
+    private fun userIdParamsFromRequest(method: HandlerMethod): List<MethodParameter> =
+        method.methodParameters
+            .filter {
+                it.hasParameterAnnotation(RequestHeader::class.java) ||
+                    it.hasParameterAnnotation(RequestParam::class.java) ||
+                    it.hasParameterAnnotation(PathVariable::class.java)
+            }
+            .filter { looksLikeUserId(it.parameterName) || looksLikeUserId(annotatedName(it)) }
 
     private fun annotatedName(param: MethodParameter): String? =
         param.getParameterAnnotation(RequestHeader::class.java)?.let { it.name.ifEmpty { it.value } }

@@ -84,16 +84,6 @@ class PageSecurityTest @Autowired constructor(
     }
 
     @Test
-    fun `미인증 api 요청은 여전히 리다이렉트 없이 401 JSON 이다`() {
-        val result = mockMvc.perform(get("/api/jobs").accept(MediaType.TEXT_HTML, MediaType.APPLICATION_JSON))
-            .andReturn()
-
-        assertThat(result.response.status).isEqualTo(401)
-        assertThat(result.response.getHeader("Location")).isNull()
-        assertThat(result.response.contentAsString).contains("\"code\"").contains("UNAUTHENTICATED")
-    }
-
-    @Test
     fun `로그인 거부로 돌아오면 거부 안내를 보인다`() {
         val body = mockMvc.perform(get("/login").param("error", "")).andReturn().response.contentAsString
 

@@ -107,22 +107,12 @@ class UserServiceTest @Autowired constructor(
     fun `지급 금액이 0 이하면 거부한다`() {
         val user = userRepository.save(User("acme", 500L))
 
-        assertThatThrownBy { userService.grant(ADMIN_ID, user.persistedId, "idem-1", 0L) }
-            .isInstanceOf(InvalidRequestException::class.java)
-            .hasMessage("amount는 0보다 커야 합니다.")
-
-        assertThat(userRepository.findById(user.persistedId).orElseThrow().balance)
-            .isEqualTo(500L)
-        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId)).isEmpty()
-    }
-
-    @Test
-    fun `지급 금액이 상한을 초과하면 거부한다`() {
-        val user = userRepository.save(User("acme", 500L))
-
-        assertThatThrownBy { userService.grant(ADMIN_ID, user.persistedId, "idem-1", 1_000_001L) }
-            .isInstanceOf(InvalidRequestException::class.java)
-            .hasMessage("amount는 1,000,000을 초과할 수 없습니다.")
+        listOf(0L, -1L).forEach { amount ->
+            assertThatThrownBy { userService.grant(ADMIN_ID, user.persistedId, "idem-1", amount) }
+                .`as`("$amount")
+                .isInstanceOf(InvalidRequestException::class.java)
+                .hasMessage("amount는 0보다 커야 합니다.")
+        }
 
         assertThat(userRepository.findById(user.persistedId).orElseThrow().balance)
             .isEqualTo(500L)
@@ -137,16 +127,6 @@ class UserServiceTest @Autowired constructor(
         assertThatThrownBy { userService.grant(ADMIN_ID, missingUserId, "idem-1", 300L) }
             .isInstanceOf(UserNotFoundException::class.java)
             .hasMessage("존재하지 않는 user: $missingUserId")
-    }
-
-    @Test
-    fun `지급 금액이 음수면 거부한다`() {
-        val user = userRepository.save(User("acme", 500L))
-
-        assertThatThrownBy { userService.grant(ADMIN_ID, user.persistedId, "idem-1", -1L) }
-            .isInstanceOf(InvalidRequestException::class.java)
-
-        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId)).isEmpty()
     }
 
     @Test

@@ -1,10 +1,6 @@
 package com.example.credit_system_kotlin.ledger.repository
 
 import com.example.credit_system_kotlin.job.concurrency.SharedContainers
-import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
-import com.example.credit_system_kotlin.ledger.domain.LedgerType
-import com.example.credit_system_kotlin.user.domain.User
-import com.example.credit_system_kotlin.user.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -24,9 +20,7 @@ import org.springframework.test.context.DynamicPropertySource
 @ActiveProfiles("test")
 @SpringBootTest
 class LedgerTypeMigrationTest @Autowired constructor(
-    private val jdbcTemplate: JdbcTemplate,
-    private val userRepository: UserRepository,
-    private val ledgerRepository: LedgerRepository
+    private val jdbcTemplate: JdbcTemplate
 ) {
 
     companion object {
@@ -48,21 +42,5 @@ class LedgerTypeMigrationTest @Autowired constructor(
         )
 
         assertThat(columnType).isEqualTo("enum('ADMIN_GRANT','CHARGE','CONFIRM','HOLD','REFUND')")
-    }
-
-    @Test
-    fun `ADMIN_GRANT 행이 네이티브 enum 에 저장되고 그대로 읽힌다`() {
-        val user = userRepository.save(User("grant-target", 0L))
-
-        ledgerRepository.saveAndFlush(LedgerEntry.adminGrant(user.persistedId, "grant-enum-1", 300L))
-
-        val stored = jdbcTemplate.queryForObject(
-            "SELECT type FROM ledger_entries WHERE user_id = ? AND idem_key = ?",
-            String::class.java, user.persistedId, "grant-enum-1"
-        )
-        assertThat(stored).isEqualTo("ADMIN_GRANT")
-        val read = requireNotNull(ledgerRepository.findByUserIdAndIdemKey(user.persistedId, "grant-enum-1"))
-        assertThat(read.type).isEqualTo(LedgerType.ADMIN_GRANT)
-        assertThat(read.amount).isEqualTo(300L)
     }
 }

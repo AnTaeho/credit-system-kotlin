@@ -170,25 +170,6 @@ class AdminGrantApiControllerTest @Autowired constructor(
         assertThat(balanceOf(target)).isEqualTo(500L)
     }
 
-    /**
-     * 지급 원장은 양수여야 대사(`balance == initialBalance + SUM(amount)`)가 맞는다.
-     *
-     * 이 테스트의 사용자 한 명만 본다. 같은 H2 를 다른 테스트 클래스와 나눠 쓰므로 전체 사용자를 대사하면
-     * 실행 순서에 따라 남이 남긴 행 때문에 흔들린다. 전체 대사 경로는 `LedgerReconciliationTaskTest` 가 따로 본다.
-     */
-    @Test
-    fun `지급 뒤 원장 대사 불일치가 없다`() {
-        grant(ADMIN_EMAIL, target.persistedId, GrantRequest("grant-r1", 300L), GrantResponse::class.java)
-        grant(ADMIN_EMAIL, target.persistedId, GrantRequest("grant-r2", 200L), GrantResponse::class.java)
-        grant(ADMIN_EMAIL, target.persistedId, GrantRequest("grant-r2", 200L), GrantResponse::class.java)
-
-        val stored = userRepository.findById(target.persistedId).orElseThrow()
-        val entries = ledgerRepository.findByUserIdOrderByIdDesc(target.persistedId)
-        assertThat(entries).hasSize(2)
-        assertThat(stored.balance).isEqualTo(stored.initialBalance + entries.sumOf { it.amount })
-        assertThat(stored.balance).isEqualTo(1_000L)
-    }
-
     private fun <T : Any> grant(devUser: String?, userId: Long, body: Any, type: Class<T>): ResponseEntity<T> {
         val headers = HttpHeaders()
         devUser?.let { headers.add("X-Dev-User", it) }

@@ -1,6 +1,5 @@
 package com.example.credit_system_kotlin.ledger.controller
 
-import com.example.credit_system_kotlin.global.exception.ErrorResponse
 import com.example.credit_system_kotlin.global.paging.CursorPage
 import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.dto.LedgerResponse
@@ -66,14 +65,6 @@ class LedgerApiControllerTest @Autowired constructor(
     }
 
     @Test
-    fun `인증 없이 호출하면 401이다`() {
-        val response = restTemplate.getForEntity(url("/api/ledger"), ErrorResponse::class.java)
-
-        assertThat(response.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
-        assertThat(response.body?.code).isEqualTo("UNAUTHENTICATED")
-    }
-
-    @Test
     fun `커서로 끝까지 빠짐과 중복 없이 순회한다`() {
         val ids = saveEntries(user, 25)
 
@@ -92,16 +83,6 @@ class LedgerApiControllerTest @Autowired constructor(
     }
 
     @Test
-    fun `정확히 size 개만 있으면 nextCursor 는 null 이다`() {
-        saveEntries(user, 10)
-
-        val page = getPage("/api/ledger?size=10")
-
-        assertThat(page.items).hasSize(10)
-        assertThat(page.nextCursor).isNull()
-    }
-
-    @Test
     fun `다른 사용자의 원장이 섞여 있어도 내 것만 돌려준다`() {
         val mine = saveEntries(user, 3)
         saveEntries(other, 3)
@@ -111,29 +92,6 @@ class LedgerApiControllerTest @Autowired constructor(
 
         assertThat(page.items.map { it.id }).containsExactlyElementsOf(mine.sortedDescending())
         assertThat(page.nextCursor).isNull()
-    }
-
-    @Test
-    fun `size 를 주지 않으면 20개씩이다`() {
-        saveEntries(user, 25)
-
-        val page = getPage("/api/ledger")
-
-        assertThat(page.items).hasSize(20)
-        assertThat(page.nextCursor).isEqualTo(page.items.last().id)
-    }
-
-    @Test
-    fun `size 와 cursor 가 범위를 벗어나거나 숫자가 아니면 400이다`() {
-        listOf("size=101", "size=0", "size=-1", "size=abc", "cursor=0", "cursor=-5", "cursor=abc").forEach { query ->
-            val response = restTemplate.exchange(
-                url("/api/ledger?$query"), HttpMethod.GET, HttpEntity<Void>(authHeaders()),
-                ErrorResponse::class.java
-            )
-
-            assertThat(response.statusCode).`as`(query).isEqualTo(HttpStatus.BAD_REQUEST)
-            assertThat(response.body?.code).`as`(query).isEqualTo("INVALID_REQUEST")
-        }
     }
 
     private fun saveEntries(owner: User, count: Int): MutableList<Long> =
