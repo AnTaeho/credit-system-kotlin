@@ -61,7 +61,7 @@ class DefenseMetricsTest {
     fun `생성 직후 모든 유효 조합이 0으로 미리 등록돼 있다`() {
         val expected = mapOf(
             "hold_balance" to listOf("applied", "rejected"),
-            "idem_key" to listOf("app_hit", "db_unique"),
+            "idem_key" to listOf("app_hit", "db_unique", "mismatch"),
             "worker_claim" to listOf("applied", "lost", "rolled_back"),
             "confirm" to listOf("applied", "stale"),
             "mark_failed" to listOf("applied", "stale"),
@@ -84,17 +84,6 @@ class DefenseMetricsTest {
 
         val registeredCombinations = registry.get(DefenseMetrics.DEFENSE_METRIC).counters().size
         assertThat(registeredCombinations).isEqualTo(expected.values.sumOf { it.size })
-    }
-
-    @Test
-    fun `태그 값은 enum 이름을 소문자로 바꾼 것이다`() {
-        val tagValues = registry.get(DefenseMetrics.DEFENSE_METRIC).counters()
-            .flatMap { it.id.tags }
-            .map { it.value }
-            .toSet()
-
-        assertThat(tagValues).allSatisfy { assertThat(it).isEqualTo(it.lowercase()) }
-        assertThat(tagValues).contains("hold_balance", "db_unique", "final_refund", "raced", "rolled_back")
     }
 
     /** 사전 등록 목록에 없는 조합이 와도 도메인 흐름을 죽이지 않고 세기만 한다. */

@@ -5,6 +5,7 @@ import com.example.credit_system_kotlin.global.event.DefenseOutcome
 import com.example.credit_system_kotlin.global.event.DefensePoint
 import com.example.credit_system_kotlin.global.event.DefenseTriggered
 import com.example.credit_system_kotlin.global.exception.DuplicateRequestInProgressException
+import com.example.credit_system_kotlin.global.exception.IdempotencyKeyReusedException
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.validation.validateIdemKey
@@ -21,7 +22,9 @@ import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.security.MessageDigest
 import java.time.Instant
+import java.util.HexFormat
 
 private val log = LoggerFactory.getLogger(HoldService::class.java)
 
@@ -40,13 +43,20 @@ class HoldService(
     fun requestGeneration(userId: Long, idemKey: String, prompt: String): HoldResult {
         validateRequest(idemKey, prompt)
 
+        val requestHash = sha256Hex(prompt)
         val existing = idempotencyKeyRepository.findByUserIdAndIdemKey(userId, idemKey)
         if (existing != null) {
+            // 같은 키에 다른 내용이면 기존 job 을 돌려줄 수 없다. 해시가 없는 옛 키는 비교하지 않는다.
+            if (existing.requestHash != null && existing.requestHash != requestHash) {
+                eventPublisher.publishEvent(DefenseTriggered(DefensePoint.IDEM_KEY, DefenseOutcome.MISMATCH))
+                log.info("멱등키 재사용 거절: userId={}, idemKey={}", userId, idemKey)
+                throw IdempotencyKeyReusedException()
+            }
             eventPublisher.publishEvent(DefenseTriggered(DefensePoint.IDEM_KEY, DefenseOutcome.APP_HIT))
             return resolveDuplicateRequest(existing)
         }
 
-        idempotencyKeyRepository.save(IdempotencyKey(userId, idemKey))
+        idempotencyKeyRepository.save(IdempotencyKey(userId, idemKey, requestHash))
 
         val cost = appProperties.generation.cost
 
@@ -96,3 +106,7 @@ class HoldService(
         }
     }
 }
+
+/** 멱등키에 묶을 요청 내용의 지문. UTF-8 바이트의 SHA-256 을 소문자 hex 64자로 낸다. */
+internal fun sha256Hex(text: String): String =
+    HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)))

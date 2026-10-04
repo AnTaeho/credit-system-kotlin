@@ -29,6 +29,10 @@ class GlobalExceptionHandler(
     fun handleDuplicateInProgress(e: DuplicateRequestInProgressException): ResponseEntity<ErrorResponse> =
         conflict("DUPLICATE_IN_PROGRESS", e.message)
 
+    @ExceptionHandler(IdempotencyKeyReusedException::class)
+    fun handleIdempotencyKeyReused(e: IdempotencyKeyReusedException): ResponseEntity<ErrorResponse> =
+        conflict("IDEMPOTENCY_KEY_REUSED", e.message)
+
     @ExceptionHandler(InvalidRequestException::class)
     fun handleInvalidRequest(e: InvalidRequestException): ResponseEntity<ErrorResponse> =
         ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", e.message))

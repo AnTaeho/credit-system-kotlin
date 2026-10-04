@@ -33,6 +33,15 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    fun `멱등키 재사용 예외는 409와 코드를 반환한다`() {
+        val response = handler.handleIdempotencyKeyReused(IdempotencyKeyReusedException())
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.CONFLICT)
+        assertThat(response.body!!.code).isEqualTo("IDEMPOTENCY_KEY_REUSED")
+        assertThat(response.body!!.message).isEqualTo("같은 요청 번호로 다른 내용을 보낼 수 없습니다. 다시 시도해주세요.")
+    }
+
+    @Test
     fun `유니크 제약 위반은 중복 처리중으로 번역된다`() {
         val uniqueViolation = ConstraintViolationException(
             "constraint violated", SQLException("Duplicate entry"),

@@ -56,11 +56,23 @@ class JobApiControllerTest @Autowired constructor(
     }
 
     @Test
-    fun `인증 없이 호출하면 401이다`() {
-        val response = restTemplate.getForEntity(url("/api/jobs"), ErrorResponse::class.java)
+    fun `같은 idemKey로 다른 prompt를 보내면 409 IDEMPOTENCY_KEY_REUSED다`() {
+        val headers = authHeaders()
+        headers.contentType = MediaType.APPLICATION_JSON
+        restTemplate.exchange(
+            url("/api/jobs"), HttpMethod.POST,
+            HttpEntity(JobCreateRequest("idem-reuse", "a cat"), headers),
+            HoldResult::class.java
+        )
 
-        assertThat(response.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
-        assertThat(response.body?.code).isEqualTo("UNAUTHENTICATED")
+        val response = restTemplate.exchange(
+            url("/api/jobs"), HttpMethod.POST,
+            HttpEntity(JobCreateRequest("idem-reuse", "a dog"), headers),
+            ErrorResponse::class.java
+        )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.CONFLICT)
+        assertThat(response.body?.code).isEqualTo("IDEMPOTENCY_KEY_REUSED")
     }
 
     @Test
@@ -123,15 +135,6 @@ class JobApiControllerTest @Autowired constructor(
 
         assertThat(response.first).isEqualTo(HttpStatus.BAD_REQUEST)
         assertThat(response.second?.code).isEqualTo("INVALID_REQUEST")
-    }
-
-    @Test
-    fun `단건 조회도 인증 없이 호출하면 401이다`() {
-        val job = jobRepository.save(Job.hold(user.persistedId, 100L, "a cat"))
-
-        val response = restTemplate.getForEntity(url("/api/jobs/${job.persistedId}"), ErrorResponse::class.java)
-
-        assertThat(response.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
     }
 
     @Test

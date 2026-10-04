@@ -46,6 +46,9 @@ enum class DefenseOutcome {
     /** 멱등키 2차 방어. 조회를 통과한 뒤 DB 유니크 제약이 막았다 */
     DB_UNIQUE,
 
+    /** 기존 멱등키를 찾았지만 요청 내용이 달라 거절했다. APP_HIT 과 따로 센다(정상 재시도가 아니다) */
+    MISMATCH,
+
     /** 선점/투입 경쟁에서 밀려 0행 */
     LOST,
 

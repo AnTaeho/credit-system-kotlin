@@ -3,9 +3,12 @@ package com.example.credit_system_kotlin.job.service
 import com.example.credit_system_kotlin.global.config.appProperties
 import com.example.credit_system_kotlin.global.event.DefenseOutcome
 import com.example.credit_system_kotlin.global.event.DefensePoint
+import com.example.credit_system_kotlin.global.exception.IdempotencyKeyReusedException
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.exception.UserNotFoundException
+import com.example.credit_system_kotlin.job.domain.IdempotencyKey
+import com.example.credit_system_kotlin.job.domain.Job
 import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
@@ -59,6 +62,8 @@ class HoldServiceTest @Autowired constructor(
         assertThat(result.duplicate).isFalse()
         assertThat(found.balance).isEqualTo(900L)
         assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId)).hasSize(1)
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.REJECTED)).isZero()
     }
 
     @Test
@@ -70,6 +75,8 @@ class HoldServiceTest @Autowired constructor(
         assertThat(second.duplicate).isTrue()
         assertThat(second.jobId).isEqualTo(first.jobId)
         assertThat(found.balance).isEqualTo(900L)
+        assertThat(eventPublisher.countOf(DefensePoint.IDEM_KEY, DefenseOutcome.APP_HIT)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isEqualTo(1)
     }
 
     @Test
@@ -81,6 +88,8 @@ class HoldServiceTest @Autowired constructor(
 
         assertThat(jobRepository.findByUserIdOrderByIdDesc(poor.persistedId)).isEmpty()
         assertThat(ledgerRepository.findByUserIdOrderByIdDesc(poor.persistedId)).isEmpty()
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.REJECTED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isZero()
     }
 
     @Test
@@ -137,30 +146,44 @@ class HoldServiceTest @Autowired constructor(
     }
 
     @Test
-    fun `정상 hold는 HOLD_BALANCE APPLIED를 발행한다`() {
+    fun `새 멱등키에는 prompt 의 SHA-256 hex 가 함께 저장된다`() {
         holdService.requestGeneration(user.persistedId, "key-1", "a cat")
 
-        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isEqualTo(1)
-        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.REJECTED)).isZero()
+        val stored = requireNotNull(idempotencyKeyRepository.findByUserIdAndIdemKey(user.persistedId, "key-1"))
+        // printf 'a cat' | shasum -a 256
+        assertThat(stored.requestHash).isEqualTo("51e467415607798220a3776f6ae1a2a09ddc7e5dcdc955d685477b4cf05ade22")
     }
 
     @Test
-    fun `잔액이 부족하면 HOLD_BALANCE REJECTED를 발행하고 예외를 던진다`() {
-        val poor = userRepository.save(User("poor", 50L))
+    fun `같은 idemKey에 다른 prompt면 거절하고 잔액 job 원장을 바꾸지 않는다`() {
+        val first = holdService.requestGeneration(user.persistedId, "key-1", "a cat")
+        eventPublisher.clear()
 
-        assertThatThrownBy { holdService.requestGeneration(poor.persistedId, "key-2", "a cat") }
-            .isInstanceOf(InsufficientBalanceException::class.java)
+        assertThatThrownBy { holdService.requestGeneration(user.persistedId, "key-1", "a dog") }
+            .isInstanceOf(IdempotencyKeyReusedException::class.java)
 
-        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.REJECTED)).isEqualTo(1)
+        assertThat(userRepository.findById(user.persistedId).orElseThrow().balance).isEqualTo(900L)
+        assertThat(jobRepository.findByUserIdOrderByIdDesc(user.persistedId)).extracting("id")
+            .containsExactly(first.jobId)
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId)).hasSize(1)
+        assertThat(idempotencyKeyRepository.count()).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.IDEM_KEY, DefenseOutcome.MISMATCH)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.IDEM_KEY, DefenseOutcome.APP_HIT)).isZero()
         assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isZero()
     }
 
     @Test
-    fun `같은 idemKey로 재요청하면 IDEM_KEY APP_HIT를 발행한다`() {
-        holdService.requestGeneration(user.persistedId, "key-1", "a cat")
-        holdService.requestGeneration(user.persistedId, "key-1", "a cat")
+    fun `내용 해시가 없는 옛 멱등키는 prompt가 달라도 기존 job을 돌려준다`() {
+        idempotencyKeyRepository.save(IdempotencyKey(user.persistedId, "legacy-key"))
+        val legacyJob = jobRepository.save(Job.hold(user.persistedId, 100L, "a cat"))
+        idempotencyKeyRepository.attachJobId(user.persistedId, "legacy-key", legacyJob.persistedId)
 
+        val result = holdService.requestGeneration(user.persistedId, "legacy-key", "a dog")
+
+        assertThat(result.duplicate).isTrue()
+        assertThat(result.jobId).isEqualTo(legacyJob.persistedId)
+        assertThat(userRepository.findById(user.persistedId).orElseThrow().balance).isEqualTo(1000L)
+        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId)).isEmpty()
         assertThat(eventPublisher.countOf(DefensePoint.IDEM_KEY, DefenseOutcome.APP_HIT)).isEqualTo(1)
-        assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isEqualTo(1)
     }
 }

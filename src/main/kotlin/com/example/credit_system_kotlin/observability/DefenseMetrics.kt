@@ -90,7 +90,7 @@ class DefenseMetrics(
         /** 각 방어 지점이 실제로 낼 수 있는 결과만 담는다. 여기 없는 조합은 코드상 발생하지 않는다. */
         val VALID_COMBINATIONS: Map<DefensePoint, Set<DefenseOutcome>> = mapOf(
             DefensePoint.HOLD_BALANCE to setOf(DefenseOutcome.APPLIED, DefenseOutcome.REJECTED),
-            DefensePoint.IDEM_KEY to setOf(DefenseOutcome.APP_HIT, DefenseOutcome.DB_UNIQUE),
+            DefensePoint.IDEM_KEY to setOf(DefenseOutcome.APP_HIT, DefenseOutcome.DB_UNIQUE, DefenseOutcome.MISMATCH),
             DefensePoint.WORKER_CLAIM to setOf(
                 DefenseOutcome.APPLIED, DefenseOutcome.LOST, DefenseOutcome.ROLLED_BACK
             ),
