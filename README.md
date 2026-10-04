@@ -149,6 +149,40 @@ Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 comp
 
 ---
 
+## 바깥에 기대는 것
+
+이 앱이 자기 프로세스 밖에서 기대는 것은 넷이다. 각각이 끊겼을 때 돈이 어떻게 되는지를 기준으로 적는다.
+
+| 바깥 | 무엇을 맡기나 | 닿는 방법 | 끊기면 |
+|---|---|---|---|
+| **MySQL 8.4** | 잔액, 원장, job, 멱등키, 리프레시 토큰. 사실의 전부다 | JDBC `3306`. 스키마는 기동할 때 Flyway 가 맞춘다 | 서비스가 선다. 요청은 실패하고 기동도 되지 않는다. 스케줄러는 그 주기를 실패로 남기고 다음 주기에 다시 돈다. 돈은 마지막 커밋 상태 그대로다 |
+| **Redis 7** | 워커가 살아 있다는 표시(ZSET `heartbeats`) 하나. 세션도 캐시도 두지 않는다 | `6379`, 연결·명령 타임아웃 2초 | 서비스는 계속 돈다. 하트비트 갱신은 경고 로그만 남기고, 죽은 job 회수는 DB 의 `updatedAt` 60초 기준으로 내려간다(`backstop_blind`). 살아 있는 job 을 잘못 회수해도 `attemptNo` 가 달라 돈은 한 번만 움직인다 |
+| **생성 호출** | 결과물을 만드는 일 | 지금은 프로세스 안의 스텁이다. 네트워크로 나가지 않는다. 3~7초 뒤 30% 확률로 실패하고, 성공하면 존재하지 않는 주소(`https://stub-images.local/…`)를 돌려준다 | 실패하면 재시도 뒤 환불로 끝난다. **돌아오지 않으면 돈이 묶인다.** 호출에 타임아웃이 없고, 워커가 살아 하트비트를 계속 보내므로 회수도 일어나지 않는다. 알아챌 길은 가장 오래된 미결 나이가 5분을 넘을 때 뜨는 `CreditPipelineStalled` 뿐이다 |
+| **Prometheus · Grafana** | 지표를 모으고 알람을 낸다 | Prometheus 가 관리 포트(`8081`)의 `/actuator/prometheus` 를 5초마다 긁는다. 앱은 Prometheus 를 모른다 | 서비스와 돈은 그대로다. 사고가 나도 알람이 오지 않는다 |
+
+넷 말고는 없다. 로그인은 예전에 구글에 기댔지만 지금은 앱 안에서 끝난다. 메일도 결제도 붙어 있지 않다.
+
+**헬스체크가 Redis 를 본다.** `/actuator/health` 는 DB 와 Redis 를 함께 확인한다. Redis 만 죽어도 `DOWN` 이 되고, compose 의 앱 헬스체크가 이 주소를 본다. 돈 처리는 계속 도는데 컨테이너는 unhealthy 로 보이는 구간이 생긴다.
+
+**들어오는 쪽.** 공개 포트는 `8080` 하나다(API 와 화면). 관리 포트 `8081` 은 compose 네트워크 밖으로 내보내지 않는 것이 경계다. 그 포트의 `health`·`prometheus` 는 로그인 없이 열린다.
+
+**알람 규칙**은 [`deploy/observability/prometheus/rules/credit.rules.yml`](deploy/observability/prometheus/rules/credit.rules.yml) 에 있다.
+
+| 알람 | 뜻 |
+|---|---|
+| `CreditLedgerReconciliationMismatch` | 잔액이 원장 합계와 어긋난 사용자가 있다 |
+| `CreditNegativeBalanceOrgs` · `CreditJobsWithoutHold` · `CreditUnsettledTerminalJobs` | 있어서는 안 되는 상태가 DB 에 있다(음수 잔액, HOLD 없는 job, 끝났는데 정산 원장이 없는 job) |
+| `CreditPipelineStalled` | 가장 오래된 미결 job 이 5분을 넘겼다. 워커가 멈췄거나 생성 호출이 돌아오지 않는다 |
+| `CreditBackstopRecovery` · `CreditBackstopBlindRecovery` | 하트비트가 놓친 job 을 `updatedAt` 으로 회수했다. 뒤쪽은 Redis 를 못 본 채 회수한 것이다 |
+| `CreditReconciliationStale` · `CreditSnapshotStale` | 대사나 스냅샷 자체가 멈췄다 |
+| `CreditSystemDown` | Prometheus 가 앱을 30초째 긁지 못한다 |
+| `CreditRetryExhaustionRateHigh` | 한 시간 동안 접수의 10% 넘게 환불로 끝났다 |
+| `CreditWorkerClaimRolledBack` | 워커가 선점한 job 을 풀에 넘기지 못해 되돌렸다 |
+
+알람을 받아 사람에게 보내는 곳(Alertmanager, 메신저)은 아직 붙어 있지 않다. 규칙은 Prometheus 화면에서만 보인다.
+
+---
+
 ## 문서 지도
 
 | | |
@@ -178,7 +212,16 @@ Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 comp
 | 시드 계정 | 없음. local 프로필은 `dev@local.test` / `admin@local.test` |
 | 운영자 지급 1회 상한 | 1,000,000 |
 
-환경별로 바꿀 때는 Spring 표준 환경변수로 덮어쓴다 — `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_DATA_REDIS_HOST`. `application.yml` 은 건드리지 않는다.
+환경별로 바꿀 때는 환경변수로 덮어쓴다. `application.yml` 은 건드리지 않는다.
+
+| 환경변수 | 뜻 |
+|---|---|
+| `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | MySQL 접속 |
+| `SPRING_DATA_REDIS_HOST` / `_PORT` | Redis 접속 |
+| `SPRING_PROFILES_ACTIVE` | `local`(시드 계정, 관리 포트 8081) 또는 `prod` |
+| `MANAGEMENT_SERVER_PORT` | 관리 포트. 따로 주지 않으면 액추에이터가 전부 막힌다 |
+| `APP_WORKER_ENABLED` / `APP_SCHEDULING_ENABLED` | 워커와 스케줄러를 끈다. 런타임에 바꿀 수 없어 재기동이 필요하다 |
+| `APP_STUB_FAILURE_RATE` / `APP_STUB_MIN_DELAY_MILLIS` / `APP_STUB_MAX_DELAY_MILLIS` | 생성 스텁의 실패율과 지연 |
 
 ### 로그인 설정
 
