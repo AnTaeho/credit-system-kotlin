@@ -13,7 +13,7 @@
 #
 #   docker compose --profile app up -d --build
 #
-# 관측 스택(Prometheus/Grafana 포함)은 별도다: deploy/observability/docker-compose.yml
+# 관측 스택(Prometheus 포함)은 별도다: deploy/observability/docker-compose.yml
 
 services:
 

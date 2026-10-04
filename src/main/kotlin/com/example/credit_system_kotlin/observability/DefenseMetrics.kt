@@ -36,7 +36,7 @@ class DefenseMetrics(
     init {
         // 한 번도 발생하지 않은 조합을 lazy 등록에 맡기면 스크레이프에 시계열 자체가 없다.
         // Prometheus 의 rate()/increase() 는 "없는 시계열"과 "0인 시계열"을 다르게 다루므로,
-        // 알람 규칙과 대시보드가 처음부터 성립하도록 유효 조합 전부를 0으로 깔아 둔다.
+        // 알람 규칙이 처음부터 성립하도록 유효 조합 전부를 0으로 깔아 둔다.
         for ((point, outcomes) in VALID_COMBINATIONS) {
             for (outcome in outcomes) {
                 defenseCounters[point to outcome] = registerDefenseCounter(point, outcome)

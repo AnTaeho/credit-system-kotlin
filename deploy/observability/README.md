@@ -1,4 +1,4 @@
-# 관측 스택 (Prometheus + Grafana)
+# 관측 스택 (Prometheus)
 
 step7 5단계에서 만든 로컬 관측 스택이다. 논지·지표 해석·알람 기준의 상세는
 [`docs/step7-observability.md`](../../docs/step7-observability.md) 의 4·5단계를 봐라.
@@ -20,7 +20,7 @@ publish 하지 않고 compose 네트워크 안에서만 산다.
 # 올리기 (저장소 루트에서)
 docker compose -f deploy/observability/docker-compose.yml up -d --build
 
-# 상태 확인 — 5개 서비스가 전부 healthy/running 이 될 때까지
+# 상태 확인 — 4개 서비스(mysql, redis, app, prometheus)가 전부 healthy/running 이 될 때까지
 docker compose -f deploy/observability/docker-compose.yml ps
 
 # 내리기 (볼륨까지)
@@ -75,8 +75,7 @@ curl http://localhost:8080/api/users/me/balance -H "Authorization: Bearer $DEV"
 | | URL |
 |---|---|
 | 애플리케이션 API | http://localhost:8080 |
-| Prometheus | http://localhost:9090 (`/targets`, `/alerts`) |
-| Grafana | http://localhost:3000 (익명 Viewer 허용, 쓰기는 admin/admin) |
+| Prometheus | http://localhost:9090 (`/targets`, `/graph`, `/alerts`) |
 
 `http://localhost:8080/actuator/prometheus` 는 **404 다.** 관리 포트(8081)는 호스트로
 publish 하지 않기 때문이다. 지표를 눈으로 보려면:
@@ -84,6 +83,39 @@ publish 하지 않기 때문이다. 지표를 눈으로 보려면:
 ```
 docker compose -f deploy/observability/docker-compose.yml exec app \
   curl -s http://localhost:8081/actuator/prometheus | grep credit_
+```
+
+## 지표와 알람 보기
+
+지표와 알람은 Prometheus 화면에서 본다.
+
+| 화면 | 보는 것 |
+|---|---|
+| <http://localhost:9090/targets> | `credit_system` 스크레이프가 UP 인지 |
+| <http://localhost:9090/alerts> | 알람 규칙 12개의 상태(inactive → pending → firing) |
+| <http://localhost:9090/graph> | 식을 넣고 Graph 탭에서 곡선으로 본다 |
+
+`/graph` 에 넣어 볼 식:
+
+```
+# 가장 오래 기다린 PENDING job 의 나이(초). 워커가 멈추면 계속 오른다
+credit_job_oldest_pending_age_seconds
+
+# 원장 대사 불일치 건수. 0 이어야 한다
+credit_ledger_reconciliation_mismatch
+
+# 방어 지점별 최근 5분 증가량
+sum by (point, outcome) (increase(credit_defense_total[5m]))
+
+# 회수가 어느 감지기로 일어났나
+increase(credit_job_recovery_total[10m])
+```
+
+알람 규칙은 [`prometheus/rules/credit.rules.yml`](prometheus/rules/credit.rules.yml) 에 있다.
+지금 켜진 알람만 터미널에서 보려면:
+
+```
+curl -s http://localhost:9090/api/v1/alerts
 ```
 
 ## 디버깅
@@ -125,26 +157,5 @@ docker compose -f deploy/observability/docker-compose.yml logs -f app
 `docker-compose.yml` 의 `APP_*` 통과 항목이고, 전부 스크립트 안(`restart_app_with`)에서만
 export 되므로 호출한 셸에는 남지 않는다.
 
-Grafana 로 곡선을 보려면 스크립트를 돌리는 동안 <http://localhost:3000> 의
-`credit-domain` 대시보드를 열어 둔다. 어느 시점에 어느 패널을 봐야 하는지는 문서 6단계의
-"포트폴리오 스크린샷 가이드" 절에 있다.
-
-## 장애 주입 버튼 패드 (step7 후속 3)
-
-시나리오 스크립트는 사고를 심고 끝까지 달린 다음 표를 내는 물건이다. **누르고 나서 곡선을
-보고 싶을 때**는 다른 게 필요하다. `faultpad/` 가 그거다 — 버튼 하나가 사고 하나이고,
-사고 버튼마다 짝이 되는 복구 버튼이 있다. 화면은 카드마다 **반응해야 할 지표(실측 초까지)와
-침묵해야 할 지표**를 나란히 놓는다.
-
-```
-python3 deploy/observability/faultpad/server.py     # http://127.0.0.1:8090
-```
-
-전제는 Docker 와 python3 뿐이다(표준 라이브러리만 쓴다 — 설치할 것이 없다). 서버는 **127.0.0.1
-에만 바인드하고**, `catalog.json` 에 선언된 액션만 실행한다. docker·mysql·curl 조작은 전부
-`faultpad/actions.sh` 가 하고, 그 파일은 시나리오와 같은 `scenarios/lib.sh` 를 source 한다 —
-스크립트와 버튼이 다른 코드로 같은 사고를 심으면 둘 중 하나는 반드시 낡는다.
-
-스택은 패드의 `스택 올리기 (fresh)` 버튼으로 올려도 되고 미리 올려 둬도 된다. 상세는
-[`faultpad/README.md`](faultpad/README.md), 설계 근거는
-[`docs/step7-observability.md`](../../docs/step7-observability.md) 의 `## 후속 3` 에 있다.
+곡선을 보려면 스크립트를 돌리는 동안 <http://localhost:9090/graph> 에 그 시나리오의 지표를
+넣어 두고, 알람이 pending 을 거쳐 firing 으로 넘어가는 것은 <http://localhost:9090/alerts> 에서 본다.
