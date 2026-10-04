@@ -49,11 +49,22 @@ app:
     dev-login:
       # 헤더 한 줄로 로그인하는 로컬 전용 장치. 기본은 끈다. prod 에서 켜면 기동이 거부된다.
       enabled: false
+    jwt:
+      # 액세스 JWT 서명 키(HS256, 32바이트 이상). 여기 적힌 기본값은 로컬 전용이다 — 저장소에 공개된 값이라
+      # 이 키로 서명한 토큰은 누구나 만들 수 있다. 운영은 application-prod.yml 이 기본값 없이 덮어써서
+      # 값이 없으면 부팅에서 죽는다.
+      secret: ${APP_AUTH_JWT_SECRET:local-only-jwt-secret-do-not-use-in-prod}
+      issuer: credit
+      access-ttl: 15m
+      refresh-ttl: 14d
+      # 이미 회전된 리프레시 토큰이 다시 와도 탈취로 보지 않는 시간(동시에 날아간 두 요청의 정상 경쟁).
+      refresh-reuse-grace: 10s
   scheduling:
     enabled: true
     reconciliation-interval-millis: 60000
     snapshot-interval-millis: 15000
     idempotency-cleanup-cron: "0 0 2 * * *"
+    refresh-token-cleanup-cron: "0 0 3 * * *"
     timezone: Asia/Seoul
   idempotency:
     retention-days: 7

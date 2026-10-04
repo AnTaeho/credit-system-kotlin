@@ -20,6 +20,12 @@ spring:
       # 운영에서 Hibernate 가 스키마를 건드리는 일은 없어야 한다. 명시해서 못 박는다.
       ddl-auto: validate
 
+app:
+  auth:
+    jwt:
+      # 기본값을 주지 않는다(위 datasource 와 같은 원칙). 빠뜨리면 공개된 로컬 키로 서명하게 된다.
+      secret: ${APP_AUTH_JWT_SECRET}
+
 server:
   servlet:
     session:

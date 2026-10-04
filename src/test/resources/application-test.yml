@@ -33,6 +33,8 @@ app:
     # 컨트롤러 테스트는 X-Dev-User 헤더로 인증한다.
     dev-login:
       enabled: true
+    jwt:
+      secret: test-only-jwt-secret-0123456789-abcdef
   scheduling:
     enabled: false
   idempotency:

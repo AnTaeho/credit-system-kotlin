@@ -3,6 +3,8 @@ package com.example.credit_system_kotlin.user.domain
 import com.example.credit_system_kotlin.global.domain.BaseEntity
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
@@ -23,7 +25,9 @@ class User(
     val name: String,
     balance: Long,
     email: String? = null,
-    googleSub: String? = null
+    googleSub: String? = null,
+    passwordHash: String? = null,
+    role: UserRole = UserRole.USER
 
 ) : BaseEntity() {
 
@@ -53,6 +57,16 @@ class User(
     var googleSub: String? = googleSub
         protected set
 
+    /** BCrypt 해시. 비밀번호 로그인 전에 만들어진 행은 비어 있고, 그 행은 비밀번호로 로그인할 수 없다. */
+    @Column(length = 60)
+    var passwordHash: String? = passwordHash
+        protected set
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    var role: UserRole = role
+        protected set
+
     /** 구글 계정의 이메일이 바뀌었을 때 따라간다. 신원은 [googleSub] 이라 행은 그대로다. */
     fun changeEmail(newEmail: String) {
         email = newEmail
@@ -65,5 +79,23 @@ class User(
     fun linkGoogleAccount(sub: String) {
         check(googleSub == null) { "이미 다른 구글 계정이 연결된 사용자입니다." }
         googleSub = sub
+    }
+
+    /** 이미 가입한 사용자를 운영자로 올리거나 내린다. */
+    fun changeRole(newRole: UserRole) {
+        role = newRole
+    }
+
+    companion object {
+        /** 누구나 하는 가입. 이름은 이메일 @ 앞부분, 잔액 0, 역할 USER 로 시작한다. */
+        fun signUp(email: String, passwordHash: String): User =
+            withPassword(email, passwordHash, UserRole.USER)
+
+        /** 운영자 계정. 가입 화면으로는 만들 수 없고 운영 경로(초기 계정 준비 등)에서만 쓴다. */
+        fun admin(email: String, passwordHash: String): User =
+            withPassword(email, passwordHash, UserRole.ADMIN)
+
+        private fun withPassword(email: String, passwordHash: String, role: UserRole): User =
+            User(email.substringBefore('@'), 0L, email = email, passwordHash = passwordHash, role = role)
     }
 }
