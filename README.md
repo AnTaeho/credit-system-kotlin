@@ -141,7 +141,7 @@ CI 는 GitHub Actions 다. PR 이면 [`ci.yml`](.github/workflows/ci.yml) 이 `t
 
 ## 관측 스택
 
-Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 compose 로 들어 있다. 워커를 죽이고 Redis 를 내리고 원장을 SQL 로 깨서 **어느 지표가 반응하고 어느 지표가 침묵하는지** 실측한 기록이 그 안에 있다.
+Prometheus + 알람 규칙 + 장애 주입 시나리오가 별도 compose 로 들어 있다. 지표와 알람은 Prometheus 화면에서 본다. 워커를 죽이고 Redis 를 내리고 원장을 SQL 로 깨서 **어느 지표가 반응하고 어느 지표가 침묵하는지** 실측한 기록이 그 안에 있다.
 
 → [`deploy/observability/README.md`](deploy/observability/README.md)
 
@@ -158,7 +158,7 @@ Prometheus + Grafana + 알람 규칙 + 장애 주입 시나리오가 별도 comp
 | **MySQL 8.4** | 잔액, 원장, job, 멱등키, 리프레시 토큰. 사실의 전부다 | JDBC `3306`. 스키마는 기동할 때 Flyway 가 맞춘다 | 서비스가 선다. 요청은 실패하고 기동도 되지 않는다. 스케줄러는 그 주기를 실패로 남기고 다음 주기에 다시 돈다. 돈은 마지막 커밋 상태 그대로다 |
 | **Redis 7** | 워커가 살아 있다는 표시(ZSET `heartbeats`) 하나. 세션도 캐시도 두지 않는다 | `6379`, 연결·명령 타임아웃 2초 | 서비스는 계속 돈다. 하트비트 갱신은 경고 로그만 남기고, 죽은 job 회수는 DB 의 `updatedAt` 60초 기준으로 내려간다(`backstop_blind`). 살아 있는 job 을 잘못 회수해도 `attemptNo` 가 달라 돈은 한 번만 움직인다 |
 | **생성 호출** | 결과물을 만드는 일 | 지금은 프로세스 안의 스텁이다. 네트워크로 나가지 않는다. 3~7초 뒤 30% 확률로 실패하고, 성공하면 존재하지 않는 주소(`https://stub-images.local/…`)를 돌려준다 | 실패하면 재시도 뒤 환불로 끝난다. **돌아오지 않으면 돈이 묶인다.** 호출에 타임아웃이 없고, 워커가 살아 하트비트를 계속 보내므로 회수도 일어나지 않는다. 알아챌 길은 가장 오래된 미결 나이가 5분을 넘을 때 뜨는 `CreditPipelineStalled` 뿐이다 |
-| **Prometheus · Grafana** | 지표를 모으고 알람을 낸다 | Prometheus 가 관리 포트(`8081`)의 `/actuator/prometheus` 를 5초마다 긁는다. 앱은 Prometheus 를 모른다 | 서비스와 돈은 그대로다. 사고가 나도 알람이 오지 않는다 |
+| **Prometheus** | 지표를 모으고 알람을 낸다 | Prometheus 가 관리 포트(`8081`)의 `/actuator/prometheus` 를 5초마다 긁는다. 앱은 Prometheus 를 모른다 | 서비스와 돈은 그대로다. 사고가 나도 알람이 오지 않는다 |
 
 넷 말고는 없다. 로그인은 예전에 구글에 기댔지만 지금은 앱 안에서 끝난다. 메일도 결제도 붙어 있지 않다.
 
