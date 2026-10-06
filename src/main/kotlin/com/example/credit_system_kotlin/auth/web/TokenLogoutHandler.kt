@@ -16,7 +16,7 @@ class TokenLogoutHandler(
 ) : LogoutHandler {
 
     override fun logout(request: HttpServletRequest, response: HttpServletResponse, authentication: Authentication?) {
-        cookies.readRefresh(request)?.let(refreshTokenService::revokeFamilyOf)
+        cookies.readRefresh(request)?.let(refreshTokenService::delete)
         cookies.clear(response)
     }
 }

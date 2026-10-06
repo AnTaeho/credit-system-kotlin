@@ -11,7 +11,8 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 
 /**
- * V7(users 의 password_hash·role), V8(refresh_tokens), V9(users 의 google_sub 삭제)가 실제 MySQL 에서 도는지 확인한다.
+ * V7(users 의 password_hash·role), V8(refresh_tokens), V9(users 의 google_sub 삭제), V10(refresh_tokens 의
+ * family_id·rotated_at·revoked_at 삭제)이 실제 MySQL 에서 도는지 확인한다.
  * `ddl-auto: validate` 가 보지 않는 enum 값의 나열, 기본값, 유니크 키는 `information_schema` 로 직접 단언한다.
  */
 @ActiveProfiles("test")
@@ -70,5 +71,35 @@ class AuthTokenMigrationTest @Autowired constructor(
             String::class.java
         )
         assertThat(uniqueKeys).containsExactlyInAnyOrder("PRIMARY", "uk_users_email")
+    }
+
+    @Test
+    fun `V10 뒤 refresh_tokens 에는 family_id rotated_at revoked_at 컬럼과 family_id 인덱스가 없다`() {
+        val columns = jdbcTemplate.queryForList(
+            """
+            SELECT COLUMN_NAME FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'refresh_tokens'
+            """,
+            String::class.java
+        )
+        assertThat(columns)
+            .doesNotContain("family_id", "rotated_at", "revoked_at")
+            .containsExactlyInAnyOrder("id", "user_id", "token_hash", "expires_at", "created_at", "updated_at")
+
+        val indexes = jdbcTemplate.queryForList(
+            """
+            SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'refresh_tokens'
+            """,
+            String::class.java
+        )
+        assertThat(indexes)
+            .doesNotContain("idx_refresh_tokens_family_id")
+            .containsExactlyInAnyOrder(
+                "PRIMARY",
+                "uk_refresh_tokens_token_hash",
+                "idx_refresh_tokens_user_id",
+                "idx_refresh_tokens_expires_at"
+            )
     }
 }

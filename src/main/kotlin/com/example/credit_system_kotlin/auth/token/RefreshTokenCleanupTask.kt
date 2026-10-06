@@ -6,14 +6,10 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Clock
-import java.time.Duration
 
 private val log = LoggerFactory.getLogger(RefreshTokenCleanupTask::class.java)
 
-/**
- * 만료된 지 하루가 넘은 리프레시 토큰을 지운다. 하루를 더 두면 만료 직후의 재사용 시도가
- * 어느 사용자의 어느 사슬인지 로그에 남는다.
- */
+/** 만료된 리프레시 토큰을 지운다. 만료된 행은 이미 거절되므로 지워도 동작은 같고 테이블만 줄어든다. */
 @Component
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class RefreshTokenCleanupTask(
@@ -27,7 +23,7 @@ class RefreshTokenCleanupTask(
         zone = $$"${app.scheduling.timezone:Asia/Seoul}"
     )
     fun cleanup() {
-        val cutoff = clock.instant().minus(KEEP_AFTER_EXPIRY)
+        val cutoff = clock.instant()
         var deletedCount = 0
         do {
             val ids = refreshTokenRepository.findIdsExpiredBefore(cutoff, PageRequest.of(0, CLEANUP_BATCH_SIZE))
@@ -51,6 +47,5 @@ class RefreshTokenCleanupTask(
 
     companion object {
         private const val CLEANUP_BATCH_SIZE = 500
-        private val KEEP_AFTER_EXPIRY: Duration = Duration.ofDays(1)
     }
 }

@@ -166,7 +166,7 @@ class LoginFlowTest @Autowired constructor(
     }
 
     @Test
-    fun `액세스 쿠키 없이 리프레시 쿠키만 있어도 화면이 열리고 새 쿠키 두 개가 온다`() {
+    fun `액세스 쿠키 없이 리프레시 쿠키만 있어도 화면이 열리고 액세스 쿠키만 새로 온다`() {
         accountService.signUp(EMAIL, PASSWORD)
         val refresh = loginCookie(logIn(EMAIL, PASSWORD), AuthCookies.REFRESH)
 
@@ -175,17 +175,16 @@ class LoginFlowTest @Autowired constructor(
         assertThat(result.response.status).isEqualTo(200)
         assertThat(result.response.contentAsString).contains(EMAIL)
         val newAccess = loginCookie(result, AuthCookies.ACCESS)
-        val newRefresh = loginCookie(result, AuthCookies.REFRESH)
-        assertThat(newRefresh.value).isNotEqualTo(refresh.value)
-        // 새로 받은 것만으로 다음 요청이 된다.
+        assertThat(result.response.getCookie(AuthCookies.REFRESH)).`as`("리프레시 쿠키는 다시 쓰지 않는다").isNull()
+        // 새로 받은 액세스만으로도, 처음 받은 리프레시만으로도 다음 요청이 된다.
         assertThat(mockMvc.perform(get("/api/users/me/balance").cookie(newAccess)).andReturn().response.status)
             .isEqualTo(200)
-        assertThat(mockMvc.perform(get("/api/users/me/balance").cookie(newRefresh)).andReturn().response.status)
+        assertThat(mockMvc.perform(get("/api/users/me/balance").cookie(refresh)).andReturn().response.status)
             .isEqualTo(200)
     }
 
     @Test
-    fun `만료된 액세스 쿠키와 리프레시 쿠키가 같이 오면 조용히 갱신된다`() {
+    fun `만료된 액세스 쿠키와 리프레시 쿠키가 같이 오면 액세스 쿠키만 새로 온다`() {
         accountService.signUp(EMAIL, PASSWORD)
         val refresh = loginCookie(logIn(EMAIL, PASSWORD), AuthCookies.REFRESH)
 
@@ -194,33 +193,32 @@ class LoginFlowTest @Autowired constructor(
         ).andReturn()
 
         assertThat(result.response.status).isEqualTo(200)
-        loginCookie(result, AuthCookies.ACCESS)
-        loginCookie(result, AuthCookies.REFRESH)
+        assertThat(loginCookie(result, AuthCookies.ACCESS).value).isNotEqualTo("expired-or-garbage")
+        assertThat(result.response.getCookie(AuthCookies.REFRESH)).isNull()
     }
 
-    /** 탭 두 개가 같은 리프레시로 동시에 갱신한 경우다. 진 쪽도 로그인은 유지되고, 새 리프레시는 이긴 쪽 응답에만 있다. */
+    /** 탭 두 개가 같은 리프레시로 갱신하는 경우다. 토큰이 바뀌지 않으므로 몇 번을 써도 같은 한 장이 남는다. */
     @Test
-    fun `방금 회전된 리프레시가 유예 안에 다시 오면 액세스 쿠키만 새로 온다`() {
+    fun `같은 리프레시로 여러 번 갱신해도 매번 액세스 쿠키만 새로 오고 토큰은 한 장 그대로다`() {
         accountService.signUp(EMAIL, PASSWORD)
         val refresh = loginCookie(logIn(EMAIL, PASSWORD), AuthCookies.REFRESH)
-        val winner = mockMvc.perform(get("/api/users/me/balance").cookie(refresh)).andReturn()
 
-        val loser = mockMvc.perform(get("/api/users/me/balance").cookie(refresh)).andReturn()
+        repeat(3) {
+            val result = mockMvc.perform(get("/api/users/me/balance").cookie(refresh)).andReturn()
 
-        assertThat(loser.response.status).isEqualTo(200)
-        loginCookie(loser, AuthCookies.ACCESS)
-        assertThat(loser.response.getCookie(AuthCookies.REFRESH)).isNull()
-        // 이긴 쪽이 받은 리프레시는 계속 쓸 수 있다.
-        val next = mockMvc.perform(get("/api/users/me/balance").cookie(loginCookie(winner, AuthCookies.REFRESH)))
-            .andReturn()
-        assertThat(next.response.status).isEqualTo(200)
+            assertThat(result.response.status).isEqualTo(200)
+            loginCookie(result, AuthCookies.ACCESS)
+            assertThat(result.response.getCookie(AuthCookies.REFRESH)).isNull()
+        }
+        assertThat(refreshTokenRepository.findAll().single().tokenHash)
+            .isEqualTo(RefreshTokenService.sha256Hex(refresh.value))
     }
 
     @Test
-    fun `폐기된 리프레시면 두 쿠키가 지워지고 화면은 로그인으로, api 는 401 이다`() {
+    fun `삭제된 리프레시면 두 쿠키가 지워지고 화면은 로그인으로, api 는 401 이다`() {
         accountService.signUp(EMAIL, PASSWORD)
         val refresh = loginCookie(logIn(EMAIL, PASSWORD), AuthCookies.REFRESH)
-        refreshTokenService.revokeFamilyOf(refresh.value)
+        refreshTokenService.delete(refresh.value)
 
         val page = mockMvc.perform(get("/").cookie(refresh)).andReturn()
         val api = mockMvc.perform(get("/api/users/me/balance").cookie(refresh)).andReturn()
@@ -242,9 +240,9 @@ class LoginFlowTest @Autowired constructor(
         assertLoginCookiesCleared(result)
     }
 
-    /** 화면 하나가 css·js 를 같이 부른다. 그 요청들이 저마다 리프레시를 회전하면 안 된다. */
+    /** 화면 하나가 css·js 를 같이 부른다. 그 요청들이 저마다 리프레시로 갱신하면 안 된다. */
     @Test
-    fun `정적 리소스 요청은 리프레시를 회전하지 않는다`() {
+    fun `정적 리소스 요청은 리프레시로 갱신하지 않는다`() {
         accountService.signUp(EMAIL, PASSWORD)
         val refresh = loginCookie(logIn(EMAIL, PASSWORD), AuthCookies.REFRESH)
 
@@ -254,26 +252,27 @@ class LoginFlowTest @Autowired constructor(
             assertThat(result.response.status).`as`(path).isEqualTo(200)
             assertNoLoginCookies(result)
         }
-        assertThat(refreshTokenRepository.findAll()).singleElement().matches { it.rotatedAt == null }
+        assertThat(refreshTokenRepository.count()).isEqualTo(1)
     }
 
     @Test
     fun `로그아웃하면 두 쿠키가 지워지고 그 리프레시로는 다시 갱신되지 않는다`() {
         accountService.signUp(EMAIL, PASSWORD)
-        val first = loginCookie(logIn(EMAIL, PASSWORD), AuthCookies.REFRESH)
-        // 한 번 갱신해서, 로그아웃이 지금 쥔 토큰뿐 아니라 사슬 전체를 끊는지 본다.
-        val current = loginCookie(mockMvc.perform(get("/").cookie(first)).andReturn(), AuthCookies.REFRESH)
+        val refresh = loginCookie(logIn(EMAIL, PASSWORD), AuthCookies.REFRESH)
+        // 다른 기기의 로그인이다. 이쪽 로그아웃에 끊기지 않는다.
+        val otherDevice = loginCookie(logIn(EMAIL, PASSWORD), AuthCookies.REFRESH)
 
-        val logout = mockMvc.perform(post("/logout").cookie(current).withCsrfToken()).andReturn()
+        val logout = mockMvc.perform(post("/logout").cookie(refresh).withCsrfToken()).andReturn()
 
         assertThat(logout.response.status).isEqualTo(302)
         assertThat(logout.response.redirectedUrl).isEqualTo("/login?logout")
         assertLoginCookiesCleared(logout)
-        listOf(first, current).forEach { cookie ->
-            val after = mockMvc.perform(get("/api/users/me/balance").cookie(cookie)).andReturn()
-            assertThat(after.response.status).isEqualTo(401)
-        }
-        assertThat(refreshTokenRepository.findAll()).hasSize(2).allMatch { it.revokedAt != null }
+        assertThat(mockMvc.perform(get("/api/users/me/balance").cookie(refresh)).andReturn().response.status)
+            .isEqualTo(401)
+        assertThat(mockMvc.perform(get("/api/users/me/balance").cookie(otherDevice)).andReturn().response.status)
+            .isEqualTo(200)
+        assertThat(refreshTokenRepository.findAll().single().tokenHash)
+            .isEqualTo(RefreshTokenService.sha256Hex(otherDevice.value))
     }
 
     @Test

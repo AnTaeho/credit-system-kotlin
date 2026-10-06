@@ -34,7 +34,7 @@ class SeedAccountSynchronizerTest @Autowired constructor(
 
     private val accountService = AccountService(userRepository, passwordEncoder)
 
-    private val synchronizer = SeedAccountSynchronizer(userRepository, refreshTokenRepository, passwordEncoder, clock)
+    private val synchronizer = SeedAccountSynchronizer(userRepository, refreshTokenRepository, passwordEncoder)
 
     @Test
     fun `없는 이메일이면 설정의 역할과 비밀번호로 만든다`() {
@@ -49,7 +49,7 @@ class SeedAccountSynchronizerTest @Autowired constructor(
 
     /** 운영자 이메일을 남이 먼저 가입해 둔 경우다. 기동 뒤에는 그 사람의 비밀번호도, 열어 둔 로그인도 쓸 수 없다. */
     @Test
-    fun `같은 이메일로 먼저 가입한 일반 사용자는 설정의 역할과 비밀번호로 덮이고 리프레시가 폐기된다`() {
+    fun `같은 이메일로 먼저 가입한 일반 사용자는 설정의 역할과 비밀번호로 덮이고 리프레시가 지워진다`() {
         val squatter = accountService.signUp("boss@test.local", "squatter-password")
         val squatterToken = refreshTokenOf(squatter.persistedId, "squatter")
         val bystanderToken = refreshTokenOf(squatter.persistedId + 1_000L, "bystander")
@@ -61,12 +61,12 @@ class SeedAccountSynchronizerTest @Autowired constructor(
         val boss = accountService.authenticate("boss@test.local", SEED_PASSWORD)
         assertThat(boss?.id).isEqualTo(squatter.persistedId)
         assertThat(boss?.role).isEqualTo(UserRole.ADMIN)
-        assertThat(revokedAtOf(squatterToken)).isEqualTo(clock.instant())
-        assertThat(revokedAtOf(bystanderToken)).`as`("다른 사용자의 토큰").isNull()
+        assertThat(refreshTokenRepository.findById(squatterToken)).isEmpty()
+        assertThat(refreshTokenRepository.findById(bystanderToken)).`as`("다른 사용자의 토큰").isPresent()
     }
 
     @Test
-    fun `역할만 다르면 역할을 맞추고 비밀번호 해시는 그대로 두며 리프레시를 폐기한다`() {
+    fun `역할만 다르면 역할을 맞추고 비밀번호 해시는 그대로 두며 리프레시를 지운다`() {
         val user = accountService.signUp("boss@test.local", SEED_PASSWORD)
         val hashBefore = user.passwordHash
         val token = refreshTokenOf(user.persistedId, "before")
@@ -76,7 +76,7 @@ class SeedAccountSynchronizerTest @Autowired constructor(
         val found = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(found.role).isEqualTo(UserRole.ADMIN)
         assertThat(found.passwordHash).isEqualTo(hashBefore)
-        assertThat(revokedAtOf(token)).isNotNull()
+        assertThat(refreshTokenRepository.findById(token)).isEmpty()
     }
 
     /** 재기동할 때마다 시드 계정이 로그아웃되면 안 된다. */
@@ -90,7 +90,7 @@ class SeedAccountSynchronizerTest @Autowired constructor(
         synchronizer.sync(SeedAccount("boss@test.local", SEED_PASSWORD, UserRole.ADMIN))
 
         assertThat(userRepository.findByEmail("boss@test.local")!!.passwordHash).isEqualTo(hashBefore)
-        assertThat(revokedAtOf(token)).isNull()
+        assertThat(refreshTokenRepository.findById(token)).isPresent()
     }
 
     @Test
@@ -110,10 +110,8 @@ class SeedAccountSynchronizerTest @Autowired constructor(
 
     private fun refreshTokenOf(userId: Long, label: String): Long =
         refreshTokenRepository.saveAndFlush(
-            RefreshToken(userId, "hash-$label", "family-$label", clock.instant().plus(Duration.ofDays(14)))
+            RefreshToken(userId, "hash-$label", clock.instant().plus(Duration.ofDays(14)))
         ).persistedId
-
-    private fun revokedAtOf(tokenId: Long): Instant? = refreshTokenRepository.findById(tokenId).orElseThrow().revokedAt
 
     companion object {
         private const val SEED_PASSWORD = "seed-password"

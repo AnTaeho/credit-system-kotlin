@@ -14,7 +14,6 @@ import org.springframework.boot.ApplicationRunner
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
-import java.time.Clock
 
 private val log = LoggerFactory.getLogger(SeedAccountSynchronizer::class.java)
 
@@ -23,12 +22,11 @@ private val log = LoggerFactory.getLogger(SeedAccountSynchronizer::class.java)
 class SeedAccountSynchronizer(
     private val userRepository: UserRepository,
     private val refreshTokenRepository: RefreshTokenRepository,
-    private val passwordEncoder: PasswordEncoder,
-    private val clock: Clock
+    private val passwordEncoder: PasswordEncoder
 ) {
 
     /**
-     * 행이 있으면 설정이 이긴다. 역할·비밀번호를 덮고 그 사용자의 리프레시를 모두 폐기해 예전 로그인을 끊는다.
+     * 행이 있으면 설정이 이긴다. 역할·비밀번호를 덮고 그 사용자의 리프레시를 모두 지워 예전 로그인을 끊는다.
      * 이미 설정과 같으면 손대지 않아 재기동할 때마다 로그아웃되지는 않는다.
      */
     @Transactional
@@ -54,12 +52,12 @@ class SeedAccountSynchronizer(
         if (passwordDiffers) {
             existing.changePassword(encode(account.password))
         }
-        // 폐기 UPDATE 가 영속성 컨텍스트를 비우기 전에 위 변경을 내보낸다(flushAutomatically).
+        // 삭제 쿼리가 영속성 컨텍스트를 비우기 전에 위 변경을 내보낸다(flushAutomatically).
         val userId = existing.persistedId
-        val revoked = refreshTokenRepository.revokeAllOfUser(userId, clock.instant())
+        val deleted = refreshTokenRepository.deleteAllOfUser(userId)
         log.warn(
-            "시드 계정을 설정값으로 덮음: userId={}, email={}, role={}, 역할 변경={}, 비밀번호 변경={}, 폐기한 리프레시={}",
-            userId, maskEmail(email), account.role, roleDiffers, passwordDiffers, revoked
+            "시드 계정을 설정값으로 덮음: userId={}, email={}, role={}, 역할 변경={}, 비밀번호 변경={}, 지운 리프레시={}",
+            userId, maskEmail(email), account.role, roleDiffers, passwordDiffers, deleted
         )
     }
 

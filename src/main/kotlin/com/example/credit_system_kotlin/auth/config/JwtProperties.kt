@@ -3,17 +3,13 @@ package com.example.credit_system_kotlin.auth.config
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
 
-/**
- * 액세스 JWT 와 리프레시 토큰의 수명·서명 설정. [refreshReuseGrace] 안에 다시 온 회전된 토큰은
- * 탭 두 개의 동시 갱신으로 보고 탈취로 치지 않는다.
- */
+/** 액세스 JWT 와 리프레시 토큰의 수명·서명 설정. */
 @ConfigurationProperties(prefix = "app.auth.jwt")
 data class JwtProperties(
     val secret: String,
     val issuer: String = "credit",
     val accessTtl: Duration = Duration.ofMinutes(15),
-    val refreshTtl: Duration = Duration.ofDays(14),
-    val refreshReuseGrace: Duration = Duration.ofSeconds(10)
+    val refreshTtl: Duration = Duration.ofDays(14)
 ) {
 
     init {
@@ -24,13 +20,11 @@ data class JwtProperties(
         require(issuer.isNotBlank()) { "app.auth.jwt.issuer 는 비어 있을 수 없습니다." }
         require(accessTtl > Duration.ZERO) { "app.auth.jwt.access-ttl 은 0보다 커야 합니다." }
         require(refreshTtl > accessTtl) { "app.auth.jwt.refresh-ttl 은 access-ttl 보다 길어야 합니다." }
-        require(!refreshReuseGrace.isNegative) { "app.auth.jwt.refresh-reuse-grace 는 음수일 수 없습니다." }
     }
 
     // data class 의 기본 toString 은 secret 을 그대로 찍는다. 로그나 예외 메시지로 새지 않게 가린다.
     override fun toString(): String =
-        "JwtProperties(secret=***, issuer=$issuer, accessTtl=$accessTtl, " +
-            "refreshTtl=$refreshTtl, refreshReuseGrace=$refreshReuseGrace)"
+        "JwtProperties(secret=***, issuer=$issuer, accessTtl=$accessTtl, refreshTtl=$refreshTtl)"
 
     companion object {
         const val MIN_SECRET_BYTES = 32

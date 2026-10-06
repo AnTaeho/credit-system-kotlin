@@ -20,27 +20,27 @@ class RefreshTokenCleanupTaskTest @Autowired constructor(
     private val task = RefreshTokenCleanupTask(refreshTokenRepository, clock)
 
     private fun saveExpiredFor(sinceExpiry: Duration, tokenHash: String): RefreshToken =
-        refreshTokenRepository.save(
-            RefreshToken(1L, tokenHash, "family-$tokenHash", clock.instant().minus(sinceExpiry))
-        )
+        refreshTokenRepository.save(RefreshToken(1L, tokenHash, clock.instant().minus(sinceExpiry)))
 
     @Test
-    fun `만료된 지 하루가 넘은 토큰은 삭제된다`() {
-        val token = saveExpiredFor(Duration.ofDays(1).plusSeconds(1), "old")
+    fun `만료된 토큰은 방금 만료됐어도 삭제된다`() {
+        val old = saveExpiredFor(Duration.ofDays(1).plusSeconds(1), "old")
+        val justExpired = saveExpiredFor(Duration.ofSeconds(1), "just-expired")
 
         task.cleanup()
 
-        assertThat(refreshTokenRepository.findById(token.persistedId)).isEmpty()
+        assertThat(refreshTokenRepository.findById(old.persistedId)).isEmpty()
+        assertThat(refreshTokenRepository.findById(justExpired.persistedId)).isEmpty()
     }
 
     @Test
-    fun `만료된 지 하루가 안 된 토큰과 아직 유효한 토큰은 남는다`() {
-        val justExpired = saveExpiredFor(Duration.ofHours(23), "just-expired")
+    fun `아직 유효한 토큰은 만료가 코앞이어도 남는다`() {
+        val expiringSoon = saveExpiredFor(Duration.ofSeconds(-1), "expiring-soon")
         val alive = saveExpiredFor(Duration.ofDays(-13), "alive")
 
         task.cleanup()
 
-        assertThat(refreshTokenRepository.findById(justExpired.persistedId)).isPresent()
+        assertThat(refreshTokenRepository.findById(expiringSoon.persistedId)).isPresent()
         assertThat(refreshTokenRepository.findById(alive.persistedId)).isPresent()
     }
 

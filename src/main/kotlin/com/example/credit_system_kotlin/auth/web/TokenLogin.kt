@@ -6,7 +6,7 @@ import com.example.credit_system_kotlin.user.domain.User
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.stereotype.Component
 
-/** 비밀번호 확인을 통과한 사람을 브라우저에 로그인시킨다. 액세스와 새 사슬의 리프레시를 내고 쿠키로 심는다. */
+/** 비밀번호 확인을 통과한 사람을 브라우저에 로그인시킨다. 액세스와 리프레시를 새로 내고 쿠키로 심는다. */
 @Component
 class TokenLogin(
     private val accessTokenService: AccessTokenService,

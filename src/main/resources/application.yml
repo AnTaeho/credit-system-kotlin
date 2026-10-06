@@ -52,8 +52,6 @@ app:
       issuer: credit
       access-ttl: 15m
       refresh-ttl: 14d
-      # 이미 회전된 리프레시 토큰이 다시 와도 탈취로 보지 않는 시간(동시에 날아간 두 요청의 정상 경쟁).
-      refresh-reuse-grace: 10s
   scheduling:
     enabled: true
     reconciliation-interval-millis: 60000

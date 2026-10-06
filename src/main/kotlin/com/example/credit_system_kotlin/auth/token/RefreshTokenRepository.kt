@@ -12,44 +12,15 @@ interface RefreshTokenRepository : JpaRepository<RefreshToken, Long> {
 
     fun findByTokenHash(tokenHash: String): RefreshToken?
 
-    /**
-     * 아직 쓰이지 않았고 폐기·만료되지 않은 토큰만 "회전됨"으로 바꾼다. 1 이면 이 요청이 회전을 차지한 것이고,
-     * 0 이면 다른 요청이 먼저 가져갔거나 쓸 수 없는 토큰이다.
-     */
+    /** 로그아웃한 토큰 한 장을 지운다. 지운 행 수를 돌려준다. 모르는 토큰이면 0 이다. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(
-        """
-        UPDATE RefreshToken t
-        SET t.rotatedAt = :now, t.updatedAt = :now
-        WHERE t.tokenHash = :tokenHash
-          AND t.rotatedAt IS NULL
-          AND t.revokedAt IS NULL
-          AND t.expiresAt > :now
-        """
-    )
-    fun markRotated(@Param("tokenHash") tokenHash: String, @Param("now") now: Instant): Int
+    @Query("DELETE FROM RefreshToken t WHERE t.tokenHash = :tokenHash")
+    fun deleteByTokenHash(@Param("tokenHash") tokenHash: String): Int
 
-    /** 사슬 전체를 폐기한다. 이미 폐기된 행은 처음 폐기된 시각을 지킨다. */
+    /** 한 사용자의 토큰을 모두 지운다. 비밀번호나 역할이 밖에서 바뀌었을 때 이미 나간 로그인을 끊는다. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(
-        """
-        UPDATE RefreshToken t
-        SET t.revokedAt = :now, t.updatedAt = :now
-        WHERE t.familyId = :familyId AND t.revokedAt IS NULL
-        """
-    )
-    fun revokeFamily(@Param("familyId") familyId: String, @Param("now") now: Instant): Int
-
-    /** 한 사용자의 모든 사슬을 폐기한다. 비밀번호나 역할이 밖에서 바뀌었을 때 이미 나간 로그인을 끊는다. */
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(
-        """
-        UPDATE RefreshToken t
-        SET t.revokedAt = :now, t.updatedAt = :now
-        WHERE t.userId = :userId AND t.revokedAt IS NULL
-        """
-    )
-    fun revokeAllOfUser(@Param("userId") userId: Long, @Param("now") now: Instant): Int
+    @Query("DELETE FROM RefreshToken t WHERE t.userId = :userId")
+    fun deleteAllOfUser(@Param("userId") userId: Long): Int
 
     /** 정리 작업이 한 묶음씩 지울 id 를 고른다. 매번 첫 페이지를 다시 읽으므로 지운 만큼 다음 묶음이 올라온다. */
     @Query("SELECT t.id FROM RefreshToken t WHERE t.expiresAt < :cutoff ORDER BY t.id")

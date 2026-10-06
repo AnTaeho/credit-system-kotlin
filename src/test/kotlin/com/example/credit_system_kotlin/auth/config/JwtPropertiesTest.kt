@@ -21,7 +21,6 @@ class JwtPropertiesTest {
         assertThat(properties.issuer).isEqualTo("credit")
         assertThat(properties.accessTtl).isEqualTo(Duration.ofMinutes(15))
         assertThat(properties.refreshTtl).isEqualTo(Duration.ofDays(14))
-        assertThat(properties.refreshReuseGrace).isEqualTo(Duration.ofSeconds(10))
         assertThat(properties.toString()).doesNotContain("a".repeat(32))
     }
 }

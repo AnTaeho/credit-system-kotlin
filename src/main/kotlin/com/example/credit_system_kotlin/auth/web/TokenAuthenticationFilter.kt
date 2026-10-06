@@ -5,7 +5,6 @@ import com.example.credit_system_kotlin.auth.login.authoritiesFor
 import com.example.credit_system_kotlin.auth.token.AccessPrincipal
 import com.example.credit_system_kotlin.auth.token.AccessTokenService
 import com.example.credit_system_kotlin.auth.token.RefreshTokenService
-import com.example.credit_system_kotlin.auth.token.RotationResult
 import com.example.credit_system_kotlin.user.domain.UserRole
 import com.example.credit_system_kotlin.user.repository.UserRepository
 import jakarta.servlet.FilterChain
@@ -49,7 +48,7 @@ class TokenAuthenticationFilter(
 
     /**
      * Bearer 헤더가 있으면 그것만 보고, 무효여도 쿠키로 넘어가지 않는다([BEARER_REQUEST]).
-     * 정적 리소스 요청은 리프레시로 갱신하지 않는다. 갱신하면 화면 하나가 css·js 를 같이 부르며 회전을 여러 번 일으킨다.
+     * 정적 리소스 요청은 리프레시로 갱신하지 않는다. 갱신하면 화면 하나가 부르는 css·js 요청마다 DB 를 본다.
      */
     private fun resolve(request: HttpServletRequest, response: HttpServletResponse): AccessPrincipal? {
         if (BEARER_REQUEST.matches(request)) {
@@ -65,25 +64,15 @@ class TokenAuthenticationFilter(
         return refreshSilently(refreshRaw, response)
     }
 
-    /** 회전을 차지했으면 두 쿠키를, 유예 안의 동시 갱신이면 액세스만 새로 심는다. 그 밖에는 쿠키를 지우고 미인증이다. */
+    /** 리프레시가 유효하면 액세스 쿠키만 새로 심는다. 리프레시 쿠키는 그대로 둔다. 그 밖에는 쿠키를 지우고 미인증이다. */
     private fun refreshSilently(refreshRaw: String, response: HttpServletResponse): AccessPrincipal? {
-        val result = refreshTokenService.rotate(refreshRaw)
-        val principal = when (result) {
-            is RotationResult.Rotated -> principalOf(result.userId)?.also {
-                cookies.writeAccess(response, accessTokenService.issue(it.userId, it.role))
-                cookies.writeRefresh(response, result.newRaw)
-            }
-
-            is RotationResult.WithinGrace -> principalOf(result.userId)?.also {
-                cookies.writeAccess(response, accessTokenService.issue(it.userId, it.role))
-            }
-
-            RotationResult.ReuseDetected, RotationResult.Rejected -> null
-        }
+        val principal = refreshTokenService.userIdOf(refreshRaw)?.let(::principalOf)
         if (principal == null) {
-            // 못 쓰는 쿠키를 남겨 두면 요청마다 다시 회전을 시도한다.
+            // 못 쓰는 쿠키를 남겨 두면 요청마다 다시 갱신을 시도한다.
             cookies.clear(response)
+            return null
         }
+        cookies.writeAccess(response, accessTokenService.issue(principal.userId, principal.role))
         return principal
     }
 
