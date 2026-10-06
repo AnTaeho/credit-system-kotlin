@@ -2381,7 +2381,7 @@ ROLLED_BACK
 
 | 파일 | 변경 |
 |---|---|
-| `job/worker/WorkerExecutorConfig.kt` | `fun interface WorkerSlots` 추가. `workerSlots` 빈 = `maxPoolSize - activeCount` |
+| `job/worker/WorkerSlots.kt` | `fun interface WorkerSlots` 추가. `workerSlots` 빈 = `maxPoolSize - activeCount` |
 | `job/worker/GenerationWorker.kt` | `free <= 0` 이면 조회 없이 return. `PageRequest.of(0, minOf(batchSize, free))`. 거부 시 `ROLLED_BACK` 발행 |
 | `global/event/DefenseTriggered.kt` | `DefenseOutcome.ROLLED_BACK` 추가 |
 | `observability/DefenseMetrics.kt` | `WORKER_CLAIM` 유효 조합에 `ROLLED_BACK` — 14개 → 15개 |

@@ -46,10 +46,10 @@ fun complete(resultUrl: String) {
 | `job/repository/JobRepository.kt` | CAS 쿼리 `transitionIfStatusAndAttemptMatch` 신설. `startProcessingIfAttemptMatches`, `failIfProcessing`은 이를 감싼 이름 붙은 default 메서드. `completeIfAttemptMatches`는 resultUrl까지 함께 쓰는 전용 쿼리 |
 | `job/service/JobLifecycleService.kt` | `startProcessing` 메서드 삭제(선점은 워커가 직접 리포지토리를 호출). `confirm`/`markFailed`가 CAS 결과 행 수를 확인해 0건이면 조용히 무시하도록 변경 |
 | `job/worker/GenerationWorker.kt` | `claim()` 사설 메서드 추가 — 선점 UPDATE가 0건이면 그 job은 건너뛴다. 선점에 성공한 job만 `workerExecutor`로 비동기 위임 |
-| `job/worker/WorkerExecutorConfig.kt` (신규) | 고정 크기 `ThreadPoolTaskExecutor` 빈 정의 |
+| `global/config/ThreadPoolConfig.kt` (신규) | 고정 크기 `ThreadPoolTaskExecutor` 빈 정의 |
 | `job/worker/GenerationJobProcessor.kt` | `confirm(job, resultUrl)`, `markFailed(jobId, attemptNo)` 호출로 변경 — attemptNo를 함께 실어 보낸다 |
 | `global/config/WorkerProperties.kt` | `concurrency: Int` 필드 추가 |
-| `CreditSystemKotlinApplication.kt` | `@EnableConfigurationProperties`에서 `WorkerProperties` 제거 — `WorkerExecutorConfig`가 자체적으로 `@EnableConfigurationProperties(WorkerProperties::class)`를 선언하므로 애플리케이션 클래스가 더는 알 필요가 없다 |
+| `CreditSystemKotlinApplication.kt` | `@EnableConfigurationProperties`에서 `WorkerProperties` 제거 — `ThreadPoolConfig`가 자체적으로 `@EnableConfigurationProperties(WorkerProperties::class)`를 선언하므로 애플리케이션 클래스가 더는 알 필요가 없다 |
 | `job/dto/JobResponse.kt` | 응답에 `attemptNo` 노출 |
 | `application.yml` / `application-test.yml` | `app.worker.concurrency` 설정 추가 |
 
@@ -142,12 +142,12 @@ private fun claim(job: Job): Boolean {
 }
 ```
 
-선점 UPDATE가 0건이면 다른 워커가 이미 가져간 것이므로 그냥 넘어간다. 선점에 성공한 job만 `workerExecutor.execute { ... }`로 위임하는데, 이 실행기가 `WorkerExecutorConfig`가 만드는 고정 크기 스레드 풀이다.
+선점 UPDATE가 0건이면 다른 워커가 이미 가져간 것이므로 그냥 넘어간다. 선점에 성공한 job만 `workerExecutor.execute { ... }`로 위임하는데, 이 실행기가 `ThreadPoolConfig`가 만드는 고정 크기 스레드 풀이다.
 
 ```kotlin
 @Configuration
 @EnableConfigurationProperties(WorkerProperties::class)
-class WorkerExecutorConfig {
+class ThreadPoolConfig {
 
     @Bean("generationWorkerExecutor")
     fun generationWorkerExecutor(workerProperties: WorkerProperties): ThreadPoolTaskExecutor =
