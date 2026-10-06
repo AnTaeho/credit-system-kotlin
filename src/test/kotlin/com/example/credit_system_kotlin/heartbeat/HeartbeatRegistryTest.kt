@@ -1,6 +1,5 @@
 package com.example.credit_system_kotlin.heartbeat
 
-import com.example.credit_system_kotlin.global.config.WorkerProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -20,9 +19,8 @@ import org.mockito.kotlin.whenever
 import org.springframework.data.redis.RedisConnectionFailureException
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.ZSetOperations
-import org.springframework.test.util.ReflectionTestUtils
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import java.time.Instant
-import java.util.concurrent.ScheduledThreadPoolExecutor
 
 @ExtendWith(MockitoExtension::class)
 class HeartbeatRegistryTest {
@@ -31,6 +29,8 @@ class HeartbeatRegistryTest {
 
     @Mock lateinit var zSetOperations: ZSetOperations<String, String>
 
+    private lateinit var scheduler: ThreadPoolTaskScheduler
+
     private lateinit var registry: HeartbeatRegistry
 
     @BeforeEach
@@ -38,12 +38,18 @@ class HeartbeatRegistryTest {
         val properties = HeartbeatProperties(
             timeoutSeconds = 10, refreshIntervalSeconds = 1
         )
-        registry = HeartbeatRegistry(redisTemplate, properties, WorkerProperties(true, 20, 3))
+        scheduler = ThreadPoolTaskScheduler().apply {
+            poolSize = 3
+            setThreadNamePrefix("heartbeat-")
+            setRemoveOnCancelPolicy(true)
+            initialize()
+        }
+        registry = HeartbeatRegistry(redisTemplate, properties, scheduler)
     }
 
     @AfterEach
     fun tearDown() {
-        registry.shutdown()
+        scheduler.shutdown()
     }
 
     @Test
@@ -175,13 +181,6 @@ class HeartbeatRegistryTest {
 
         verify(zSetOperations).remove(KEY, "1:0")
         verify(zSetOperations, never()).remove(KEY, "1:1")
-    }
-
-    @Test
-    fun `heartbeat 스레드 풀은 워커 동시 실행 수만큼 만들어진다`() {
-        val executor = ReflectionTestUtils.getField(registry, "executor") as ScheduledThreadPoolExecutor
-
-        assertThat(executor.corePoolSize).isEqualTo(3)
     }
 
     companion object {

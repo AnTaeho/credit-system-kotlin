@@ -1,15 +1,13 @@
 package com.example.credit_system_kotlin.heartbeat
 
-import com.example.credit_system_kotlin.global.config.WorkerProperties
-import jakarta.annotation.PreDestroy
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.scheduling.TaskScheduler
 import org.springframework.stereotype.Component
+import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
-import java.util.concurrent.TimeUnit
 
 private val log = LoggerFactory.getLogger(HeartbeatRegistry::class.java)
 
@@ -35,17 +33,21 @@ enum class HeartbeatState {
 class HeartbeatRegistry(
     private val redisTemplate: StringRedisTemplate,
     private val heartbeatProperties: HeartbeatProperties,
-    workerProperties: WorkerProperties
+    @Qualifier("heartbeatScheduler") private val scheduler: TaskScheduler
 ) {
 
-    private val executor: ScheduledExecutorService =
-        Executors.newScheduledThreadPool(workerProperties.concurrency)
-
+    /**
+     * 첫 갱신은 호출 스레드에서 바로 한다. 생성 호출이 시작되기 전에 heartbeat 가 반드시 있어야
+     * 회수 스캔이 이 attempt 를 죽은 것으로 보지 않는다.
+     *
+     * 주기 작업은 시작 시각을 한 주기 뒤로 줘서 건다. 시작 시각 없이 걸면 스케줄러가 곧바로 한 번 더
+     * 돌려 방금 한 갱신과 겹친다.
+     */
     fun startHeartbeat(jobId: Long, attemptNo: Int): ScheduledFuture<*> {
         val attempt = JobAttempt(jobId, attemptNo)
         refreshHeartbeat(attempt)
-        val interval = heartbeatProperties.refreshIntervalSeconds
-        return executor.scheduleAtFixedRate({ refreshHeartbeat(attempt) }, interval, interval, TimeUnit.SECONDS)
+        val interval = Duration.ofSeconds(heartbeatProperties.refreshIntervalSeconds)
+        return scheduler.scheduleAtFixedRate({ refreshHeartbeat(attempt) }, Instant.now().plus(interval), interval)
     }
 
     fun stopHeartbeat(jobId: Long, attemptNo: Int, future: ScheduledFuture<*>) {
@@ -117,11 +119,6 @@ class HeartbeatRegistry(
         } catch (e: RuntimeException) {
             log.warn("heartbeat 제거 실패, 다음 만료 스캔이 소거한다: jobId={}, attemptNo={}", jobId, attemptNo, e)
         }
-    }
-
-    @PreDestroy
-    fun shutdown() {
-        executor.shutdownNow()
     }
 
     companion object {

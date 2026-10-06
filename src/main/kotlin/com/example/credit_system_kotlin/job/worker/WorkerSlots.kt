@@ -1,8 +1,6 @@
 package com.example.credit_system_kotlin.job.worker
 
-import com.example.credit_system_kotlin.global.config.WorkerProperties
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor
@@ -19,18 +17,7 @@ fun interface WorkerSlots {
 }
 
 @Configuration
-@EnableConfigurationProperties(WorkerProperties::class)
-class WorkerExecutorConfig {
-
-    @Bean("generationWorkerExecutor")
-    fun generationWorkerExecutor(workerProperties: WorkerProperties): ThreadPoolTaskExecutor =
-        ThreadPoolTaskExecutor().apply {
-            corePoolSize = workerProperties.concurrency
-            maxPoolSize = workerProperties.concurrency
-            queueCapacity = 0
-            setThreadNamePrefix("generation-worker-")
-            initialize()
-        }
+class WorkerSlotsConfig {
 
     /**
      * `maxPoolSize - activeCount`. `activeCount` 는 지금 task 를 실행 중인 스레드 수다.

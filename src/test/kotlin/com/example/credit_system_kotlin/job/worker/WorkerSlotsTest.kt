@@ -1,5 +1,6 @@
 package com.example.credit_system_kotlin.job.worker
 
+import com.example.credit_system_kotlin.global.config.ThreadPoolConfig
 import com.example.credit_system_kotlin.global.config.WorkerProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility.await
@@ -19,9 +20,8 @@ class WorkerSlotsTest {
 
     @Test
     fun `풀이 꽉 차면 0을 돌려주고 task가 끝나면 다시 채워진다`() {
-        val config = WorkerExecutorConfig()
-        val executor = config.generationWorkerExecutor(WorkerProperties(true, 3, CONCURRENCY))
-        val slots = config.workerSlots(executor)
+        val executor = ThreadPoolConfig().generationWorkerExecutor(WorkerProperties(true, 3, CONCURRENCY))
+        val slots = WorkerSlotsConfig().workerSlots(executor)
 
         assertThat(slots.free()).isEqualTo(CONCURRENCY)
 
