@@ -66,8 +66,9 @@ app:
     max-grant-amount: 1000000
   worker:
     enabled: true
-    batch-size: 3
-    concurrency: 3
+    # 처리량은 concurrency ÷ 5 건/초쯤 나온다. batch-size 는 concurrency ÷ 10 보다 작으면 워커가 논다.
+    batch-size: 5
+    concurrency: 20
   generation:
     cost: 100
     max-attempts: 3
