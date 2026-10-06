@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
+/** 로그인한 사용자 자신의 잔액만 돌려준다. */
 @RestController
 @RequestMapping("/api/users")
 class UserApiController(

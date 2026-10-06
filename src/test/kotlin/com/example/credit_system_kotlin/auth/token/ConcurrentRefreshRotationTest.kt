@@ -13,9 +13,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * 같은 리프레시 토큰으로 동시에 갱신해도 새 토큰은 하나만 나오는지 실제 MySQL 에서 확인한다.
- *
- * 진 쪽이 이긴 쪽의 `rotated_at` 을 볼 수 있는지는 격리 수준(REPEATABLE READ)의 스냅샷 시점에 달려 있어
- * H2 한 트랜잭션 안에서는 드러나지 않는다.
+ * 진 쪽이 이긴 쪽의 `rotated_at` 을 보는지는 REPEATABLE READ 의 스냅샷 시점에 달려 있어 H2 로는 드러나지 않는다.
  */
 @ActiveProfiles("test")
 @SpringBootTest

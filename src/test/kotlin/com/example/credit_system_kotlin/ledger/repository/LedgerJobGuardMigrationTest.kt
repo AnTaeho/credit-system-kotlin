@@ -17,11 +17,8 @@ import org.springframework.test.context.DynamicPropertySource
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * V5 가 실제 MySQL 에서 job 원장 중복을 막는지 확인한다.
- *
- * CONFIRM 과 REFUND 를 하나만 허용하는 제약은 엔티티에 매핑하지 않은 생성 컬럼에 걸려 있어
- * H2(Hibernate 가 만든 스키마)에는 없다. 그래서 이 확인은 Flyway 가 스키마를 만든 MySQL 에서만 할 수 있다.
- * 이 클래스는 트랜잭션 롤백이 없으므로 테스트마다 다른 jobId 를 쓴다.
+ * V5 가 실제 MySQL 에서 job 원장 중복을 막는지 확인한다. 제약이 엔티티에 매핑하지 않은 생성 컬럼에 걸려 있어 H2 에는 없다.
+ * 트랜잭션 롤백이 없으므로 테스트마다 다른 jobId 를 쓴다.
  */
 @ActiveProfiles("test")
 @SpringBootTest

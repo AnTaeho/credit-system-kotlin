@@ -15,14 +15,8 @@ import java.time.Duration
 private val log = LoggerFactory.getLogger(DomainSnapshotTask::class.java)
 
 /**
- * 도메인 상태를 주기적으로 찍어 [DomainSnapshotTaken] 으로 발행한다.
- *
- * 카운터는 실행을 세고, 이 태스크는 상태를 잰다. 워커가 죽어서 아무 코드도 안 불리는
- * 사고는 카운터로 잡을 수 없고, 오직 "지금 이 상태인 row 가 몇 개냐"를 DB 에 직접 묻는
- * 이 경로만이 잡을 수 있다.
- *
- * `LedgerReconciliationTask` 와 같은 모양이다 — 스케줄러는 사실만 발행하고,
- * Micrometer 는 `observability` 패키지만 안다.
+ * 주기마다 DB 에 미결 job 과 불변식 위반 건수를 물어 [DomainSnapshotTaken] 으로 발행한다.
+ * 워커가 죽어 아무 코드도 안 불리면 카운터는 조용하고 이 값만 움직인다.
  */
 @Component
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
@@ -33,6 +27,7 @@ class DomainSnapshotTask(
     private val clock: Clock
 ) {
 
+    /** 쿼리가 하나라도 실패하면 이번 주기는 발행하지 않고 다음 주기에 다시 찍는다. */
     @Scheduled(fixedDelayString = $$"${app.scheduling.snapshot-interval-millis:15000}")
     fun takeSnapshot() {
         val startedAt = clock.instant()

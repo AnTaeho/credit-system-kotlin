@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
+/** 로그인한 사용자 자신의 원장만 보여 준다. 남의 userId 를 받는 파라미터가 없다. */
 @RestController
 @RequestMapping("/api/ledger")
 class LedgerApiController(

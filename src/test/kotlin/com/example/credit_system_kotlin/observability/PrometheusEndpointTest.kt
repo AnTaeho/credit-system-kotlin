@@ -15,10 +15,8 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 
 /**
- * 관리 포트를 따로 주지 않은 기동(관리 포트 = 애플리케이션 포트)에서는 액추에이터가 공개 포트에
- * 섞인다. 그때는 누구에게도 열지 않는다. 운영자로 로그인해도 막힌다.
- *
- * 지표 내용 자체(원장 대사 지표 노출)는 관리 포트를 분리한 [ManagementPortBoundaryTest] 가 확인한다.
+ * 관리 포트를 따로 주지 않으면 액추에이터가 공개 포트에 섞인다. 그때는 운영자로 로그인해도 막힌다.
+ * 지표 내용은 [ManagementPortBoundaryTest] 가 확인한다.
  */
 @ActiveProfiles("test")
 @AutoConfigureMockMvc

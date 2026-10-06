@@ -12,9 +12,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * `workerSlots` 빈이 실제 [ThreadPoolTaskExecutor] 위에서 맞는 값을 내는지 본다.
- *
- * `maxPoolSize - activeCount` 라는 식 자체는 한 줄이지만, 그 한 줄이 틀리면 디스패처가
- * 아무것도 넘기지 못하거나(항상 0) 예전처럼 헛선점을 반복한다(항상 양수). 실물 풀로 확인한다.
+ * 식이 틀리면 디스패처가 아무것도 넘기지 못하거나(항상 0) 헛선점을 반복한다(항상 양수).
  */
 class WorkerSlotsTest {
 

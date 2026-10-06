@@ -23,10 +23,7 @@ import org.springframework.test.context.ActiveProfiles
 
 /**
  * 진짜 서블릿 컨테이너에서 어떤 응답에도 `JSESSIONID` 가 실리지 않는지 본다.
- *
- * MockMvc 에는 세션 쿠키를 내보내는 컨테이너가 없어 이 쿠키가 보이지 않는다. MockMvc 쪽에서는
- * SecurityRulesTest 가 "세션 객체가 만들어지지 않는다"를 본다. 여기는 그 결과가 응답 헤더에도 그대로인지다.
- * 컨텍스트는 API 컨트롤러 테스트들과 같은 조합이라 캐시를 같이 쓴다.
+ * MockMvc 에는 세션 쿠키를 내보내는 컨테이너가 없어 이 쿠키가 보이지 않는다.
  */
 @ActiveProfiles("test")
 @AutoConfigureTestRestTemplate

@@ -12,6 +12,7 @@ import java.time.Instant
 
 interface JobRepository : JpaRepository<Job, Long> {
 
+    /** 워커의 선점. HOLDING 인 시도만 PROCESSING 으로 올리고, 0행이면 다른 쪽이 먼저 가져간 것이다. */
     fun startProcessingIfAttemptMatches(jobId: Long, attemptNo: Int, now: Instant): Int =
         transitionIfStatusAndAttemptMatch(jobId, JobStatus.PROCESSING, JobStatus.HOLDING, attemptNo, now)
 
@@ -27,6 +28,7 @@ interface JobRepository : JpaRepository<Job, Long> {
     fun refundIfFailed(jobId: Long, attemptNo: Int, now: Instant): Int =
         transitionIfStatusAndAttemptMatch(jobId, JobStatus.REFUNDED, JobStatus.FAILED, attemptNo, now)
 
+    /** PROCESSING 이고 시도 번호가 같을 때만 완료로 바꾼다. 회수된 뒤 늦게 온 워커는 0행을 받는다. */
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
@@ -46,6 +48,7 @@ interface JobRepository : JpaRepository<Job, Long> {
         @Param("now") now: Instant
     ): Int
 
+    /** 위 네 전이의 공통 UPDATE. 기대 상태나 시도 번호가 어긋나면 0행이고, 호출자는 그걸로 경쟁에서 진 것을 안다. */
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
@@ -63,6 +66,7 @@ interface JobRepository : JpaRepository<Job, Long> {
         @Param("now") now: Instant
     ): Int
 
+    /** FAILED 인 시도를 HOLDING 으로 되돌리며 시도 번호를 올린다. 번호가 바뀌어 이전 시도의 늦은 UPDATE 는 0행이 된다. */
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
@@ -114,9 +118,7 @@ interface JobRepository : JpaRepository<Job, Long> {
 
     /**
      * 가장 오래된 미결 job 의 생성 시각. 미결이 없으면 null 이다.
-     *
-     * `updatedAt` 이 아니라 `createdAt` 을 본다. 재시도로 상태가 바뀌어도 그 job 의 돈은
-     * 처음부터 계속 묶여 있으므로, "묶인 시간"의 기준점은 생성 시각이어야 한다.
+     * 재시도로 `updatedAt` 이 바뀌어도 돈은 생성 때부터 묶여 있어 `createdAt` 을 본다.
      */
     @Query(
         """

@@ -18,14 +18,8 @@ data class TokenRequest(val email: String, val password: String) {
 data class TokenResponse(val accessToken: String, val expiresInSeconds: Long)
 
 /**
- * 스크립트·curl 용 토큰 발급. 이메일과 비밀번호를 주면 액세스 JWT 를 본문으로 돌려준다.
- *
- *     TOKEN=$(curl -s localhost:8080/auth/token -H 'Content-Type: application/json' \
- *       -d '{"email":"dev@local.test","password":"..."}' | jq -r .accessToken)
- *     curl -H "Authorization: Bearer $TOKEN" localhost:8080/api/users/me/balance
- *
- * 쿠키를 심지 않고 리프레시 토큰도 내지 않는다. 만료되면 다시 부른다. 브라우저는 `/login` 을 쓴다.
- * 아직 아무도 아닌 요청이 부르는 곳이라 `/api` 밖에 둔다. `/api` 아래 핸들러는 모두 로그인한 사용자를 받는다.
+ * 스크립트·curl 용 토큰 발급. 쿠키를 심지 않고 리프레시도 내지 않으니 만료되면 다시 부른다.
+ * 로그인 전 요청이 부르는 곳이라 `/api` 밖에 둔다.
  */
 @RestController
 class TokenApiController(
@@ -34,6 +28,7 @@ class TokenApiController(
     private val jwtProperties: JwtProperties
 ) {
 
+    /** 이메일이나 비밀번호가 틀리면 어느 쪽인지 가리지 않고 401 을 준다. */
     @PostMapping(PATH)
     fun token(@RequestBody request: TokenRequest): ResponseEntity<Any> {
         val user = accountService.authenticate(request.email, request.password)

@@ -12,11 +12,8 @@ import jakarta.persistence.UniqueConstraint
 import java.time.Instant
 
 /**
- * 리프레시 토큰 한 장. 원문은 클라이언트만 갖고, 여기에는 SHA-256 해시만 둔다.
- *
- * 상태는 시각 두 개로 읽는다. [rotatedAt] 이 차 있으면 이미 다음 토큰으로 교체된 것이고,
- * [revokedAt] 이 차 있으면 로그아웃이나 재사용 탐지로 폐기된 것이다. 두 값은 엔티티 메서드가 아니라
- * [RefreshTokenRepository] 의 조건부 UPDATE 로만 채운다(경쟁을 UPDATE 한 줄로 가르기 위해서다).
+ * 리프레시 토큰 한 장. 원문은 클라이언트만 갖고 여기에는 SHA-256 해시만 둔다.
+ * [rotatedAt]·[revokedAt] 은 [RefreshTokenRepository] 의 조건부 UPDATE 로만 채운다. 경쟁을 UPDATE 한 줄로 가른다.
  */
 @Entity
 @Table(

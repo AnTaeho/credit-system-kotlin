@@ -20,6 +20,7 @@ import java.time.Instant
 
 private val log = LoggerFactory.getLogger(DeadJobRecoveryTask::class.java)
 
+/** 죽은 워커가 붙잡고 있던 job 을 주기적으로 회수하고, FAILED 로 모인 job 을 재시도하거나 환불한다. */
 @Component
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class DeadJobRecoveryTask(
@@ -30,6 +31,7 @@ class DeadJobRecoveryTask(
     private val eventPublisher: ApplicationEventPublisher
 ) {
 
+    /** 세 단계를 순서대로 돌린다. 단계마다 따로 잡아서 앞 단계가 터져도 뒤 단계는 돈다. */
     @Scheduled(fixedDelayString = $$"${app.scheduling.dead-job-scan-interval-millis:5000}")
     fun scan() {
         try {
@@ -49,6 +51,7 @@ class DeadJobRecoveryTask(
         }
     }
 
+    /** heartbeat 가 끊긴 시도를 FAILED 로 돌린다. 재시도·환불은 같은 주기의 마지막 단계가 한다. */
     private fun markExpiredJobsAsFailed() {
         for (attempt in heartbeatRegistry.findExpiredAttempts()) {
             recoverExpired(attempt)
@@ -71,6 +74,7 @@ class DeadJobRecoveryTask(
         }
     }
 
+    /** heartbeat 스캔이 놓친 것을 잡는다. PROCESSING 인 채 timeout 넘게 updatedAt 이 그대로인 job 을 100건까지 본다. */
     private fun markStalledJobsAsFailed() {
         val cutoff = Instant.now().minusSeconds(appProperties.processing.timeoutSeconds)
         val stalled = jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
@@ -82,13 +86,8 @@ class DeadJobRecoveryTask(
     }
 
     /**
-     * 한 건의 실패가 같은 주기의 나머지를 막지 않도록 항목 단위로 격리한다.
-     *
-     * heartbeat 를 못 본 경우([HeartbeatState.UNKNOWN])에도 회수한다. 이 백스톱의 존재 이유가
-     * "heartbeat 저장소가 죽어도 돈이 묶인 채 방치되지 않는다"이므로, 저장소가 안 보인다고
-     * 회수를 멈추면 장치가 스스로를 부정한다. 대신 오탐 가능성을 라벨로 남긴다 —
-     * 살아 있는 job 을 잘못 내려도 attemptNo CAS 가 돈을 지키고(원래 워커의 confirm 은 0행),
-     * 비용은 낭비된 외부 호출 1회다.
+     * heartbeat 를 못 본 경우([HeartbeatState.UNKNOWN])에도 회수한다. Redis 가 죽었다고 멈추면 돈이 묶인 채 남는다.
+     * 살아 있는 job 을 잘못 내려도 원래 워커의 confirm 은 attemptNo 조건에서 0행이라 돈은 안 틀어진다.
      */
     private fun recoverStalled(job: Job) {
         try {
@@ -114,11 +113,13 @@ class DeadJobRecoveryTask(
         }
     }
 
+    /** heartbeat 를 못 보고 내린 회수는 오탐일 수 있어 지표에서 따로 센다. */
     private fun detectorFor(state: HeartbeatState): RecoveryDetector = when (state) {
         HeartbeatState.UNKNOWN -> RecoveryDetector.BACKSTOP_BLIND
         else -> RecoveryDetector.BACKSTOP
     }
 
+    /** FAILED job 을 id 순으로 100건까지 읽어 한 건씩 재시도나 환불로 넘긴다. 앞 단계에서 방금 내린 것도 여기서 잡힌다. */
     private fun retryOrRefundFailedJobs() {
         val failed: List<Job> = jobRepository.findByStatusOrderByIdAsc(
             JobStatus.FAILED, PageRequest.of(0, SCAN_BATCH_SIZE)

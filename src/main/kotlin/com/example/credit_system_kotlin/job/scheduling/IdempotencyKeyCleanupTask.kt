@@ -12,12 +12,7 @@ import java.time.temporal.ChronoUnit
 
 private val log = LoggerFactory.getLogger(IdempotencyKeyCleanupTask::class.java)
 
-/**
- * 보존 기간(`app.idempotency.retention-days`, 기본 7일)이 지난 멱등키를 지운다.
- *
- * 키가 지워진 뒤 같은 키로 다시 보내면 새 요청으로 처리된다(새로 차감한다). 보존 기간은
- * 클라이언트 재시도 창을 덮으면 충분하다고 보고 이 동작을 받아들인다.
- */
+/** 보존 기간이 지난 멱등키를 지운다. 지워진 키로 다시 보내면 새 요청으로 보고 또 차감한다. */
 @Component
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class IdempotencyKeyCleanupTask(

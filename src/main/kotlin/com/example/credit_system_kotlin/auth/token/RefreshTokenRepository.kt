@@ -51,9 +51,11 @@ interface RefreshTokenRepository : JpaRepository<RefreshToken, Long> {
     )
     fun revokeAllOfUser(@Param("userId") userId: Long, @Param("now") now: Instant): Int
 
+    /** 정리 작업이 한 묶음씩 지울 id 를 고른다. 매번 첫 페이지를 다시 읽으므로 지운 만큼 다음 묶음이 올라온다. */
     @Query("SELECT t.id FROM RefreshToken t WHERE t.expiresAt < :cutoff ORDER BY t.id")
     fun findIdsExpiredBefore(@Param("cutoff") cutoff: Instant, pageable: Pageable): List<Long>
 
+    /** 정리 작업에 트랜잭션이 없어 여기서 연다. 묶음마다 따로 커밋된다. */
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("DELETE FROM RefreshToken t WHERE t.id IN :ids")

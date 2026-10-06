@@ -18,16 +18,7 @@ import java.time.Clock
 
 private val log = LoggerFactory.getLogger(SeedAccountSynchronizer::class.java)
 
-/**
- * 설정에 적힌 계정(`app.auth.seed-accounts`)을 사용자 행에 맞춘다. 운영자 계정이 생기는 유일한 길이다.
- *
- * - 그 이메일의 행이 없으면 만든다.
- * - 있으면 **설정이 기준이다.** 역할과 비밀번호를 설정값으로 덮는다. 누군가 운영자 이메일로 먼저 가입해 둔
- *   행이 있어도, 기동 뒤에는 그 사람이 정한 비밀번호로는 들어올 수 없다.
- * - 덮어썼으면 그 사용자의 리프레시 토큰을 모두 폐기한다. 덮이기 전의 비밀번호로 열린 로그인을 끊는다.
- *   이미 나간 액세스 토큰은 서버에 저장하지 않아 무효로 만들 수 없고, 만료(기본 15분)까지 예전 역할로 남는다.
- * - 역할과 비밀번호가 이미 설정과 같으면 아무것도 하지 않는다. 재기동할 때마다 로그아웃시키지 않는다.
- */
+/** 설정에 적힌 계정(`app.auth.seed-accounts`)을 사용자 행에 맞춘다. 운영자 계정은 이 길로만 생긴다. */
 @Component
 class SeedAccountSynchronizer(
     private val userRepository: UserRepository,
@@ -36,6 +27,10 @@ class SeedAccountSynchronizer(
     private val clock: Clock
 ) {
 
+    /**
+     * 행이 있으면 설정이 이긴다. 역할·비밀번호를 덮고 그 사용자의 리프레시를 모두 폐기해 예전 로그인을 끊는다.
+     * 이미 설정과 같으면 손대지 않아 재기동할 때마다 로그아웃되지는 않는다.
+     */
     @Transactional
     fun sync(account: AuthProperties.SeedAccount) {
         val email = normalizeEmail(account.email)

@@ -25,9 +25,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 
 /**
  * 가입·로그인·조용한 갱신·로그아웃을 화면이 쓰는 길 그대로(폼 POST 와 쿠키) 확인한다.
- *
- * MockMvc 는 쿠키를 다음 요청에 알아서 실어 주지 않는다. 응답의 쿠키를 꺼내 다음 요청에 직접 싣는다.
- * 컨텍스트는 SecurityRulesTest 와 같은 조합이라 캐시를 같이 쓴다. 리프레시 유예는 기본값(10초)이다.
+ * MockMvc 는 쿠키를 다음 요청에 실어 주지 않아 응답의 쿠키를 꺼내 직접 싣는다.
  */
 @ActiveProfiles("test")
 @AutoConfigureMockMvc

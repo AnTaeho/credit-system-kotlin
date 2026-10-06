@@ -23,26 +23,8 @@ import org.springframework.web.filter.OncePerRequestFilter
 private val log = LoggerFactory.getLogger(TokenAuthenticationFilter::class.java)
 
 /**
- * 요청에 실린 토큰으로 "누구인가"를 정한다. 세션은 없다. 인증은 **이 요청 하나에만** 걸린다.
- *
- * 1. `Authorization: Bearer <액세스 JWT>` 가 있으면 그것만 본다. 무효면 미인증이다.
- *    **쿠키로 넘어가지 않는다.** Bearer 요청은 CSRF 검사에서 빠지므로(SecurityConfig), 헤더만 아무렇게나 붙이고
- *    쿠키로 인증되는 길이 있으면 다른 사이트가 그 길로 CSRF 검사를 건너뛴다.
- * 2. 없으면 `credit_at` 쿠키의 액세스 JWT 를 본다.
- * 3. 액세스가 없거나 무효(대개 만료)이고 `credit_rt` 쿠키가 있으면 **조용히 갱신한다.** 리프레시를 회전해
- *    새 액세스를 내고 쿠키로 다시 심는다. 사용자는 15분마다 로그인하지 않는다.
- *    - 이 요청이 회전을 차지했으면 두 쿠키를 모두 새로 심는다.
- *    - 동시에 날아간 다른 요청이 먼저 차지했으면(유예 안) 액세스만 심는다. 새 리프레시는 이긴 요청의 응답에 실려 있다.
- *    - 재사용 탐지·폐기·만료·모르는 토큰이거나 사용자 행이 없으면 두 쿠키를 지우고 미인증으로 둔다.
- * 4. 정적 리소스에서는 갱신하지 않는다. 화면 하나가 css·js 를 같이 부르면서 회전을 여러 번 일으키지 않게 한다.
- *
- * 액세스가 유효한 요청은 DB 를 보지 않는다. 역할은 토큰에 들어 있다. 갱신할 때만 사용자 행에서 역할을 다시 읽으므로,
- * 역할이 바뀌면 늦어도 액세스 수명 뒤에 반영된다.
- *
- * 인증하지 못해도 여기서 응답을 끝내지 않는다. 미인증으로 흘려보내면 SecurityConfig 의 규칙이 401·리다이렉트를 정한다.
- *
- * 빈으로 등록하지 않는다. `@Component` 필터는 서블릿 컨테이너에도 자동 등록돼 보안 체인 밖에서 한 번 더 돈다.
- * SecurityConfig 가 만들어 체인에 끼운다.
+ * 요청에 실린 토큰으로 사용자를 정한다. 인증은 이 요청 하나에만 걸리고, 못 해도 응답을 끝내지 않고 흘려보낸다.
+ * 빈으로 등록하지 않는다. `@Component` 필터는 서블릿 컨테이너에도 등록돼 보안 체인 밖에서 한 번 더 돈다.
  */
 class TokenAuthenticationFilter(
     private val accessTokenService: AccessTokenService,
@@ -65,6 +47,10 @@ class TokenAuthenticationFilter(
         chain.doFilter(request, response)
     }
 
+    /**
+     * Bearer 헤더가 있으면 그것만 보고, 무효여도 쿠키로 넘어가지 않는다([BEARER_REQUEST]).
+     * 정적 리소스 요청은 리프레시로 갱신하지 않는다. 갱신하면 화면 하나가 css·js 를 같이 부르며 회전을 여러 번 일으킨다.
+     */
     private fun resolve(request: HttpServletRequest, response: HttpServletResponse): AccessPrincipal? {
         if (BEARER_REQUEST.matches(request)) {
             val token = request.getHeader(HttpHeaders.AUTHORIZATION).substring(BEARER_PREFIX.length).trim()
@@ -79,6 +65,7 @@ class TokenAuthenticationFilter(
         return refreshSilently(refreshRaw, response)
     }
 
+    /** 회전을 차지했으면 두 쿠키를, 유예 안의 동시 갱신이면 액세스만 새로 심는다. 그 밖에는 쿠키를 지우고 미인증이다. */
     private fun refreshSilently(refreshRaw: String, response: HttpServletResponse): AccessPrincipal? {
         val result = refreshTokenService.rotate(refreshRaw)
         val principal = when (result) {
@@ -100,6 +87,7 @@ class TokenAuthenticationFilter(
         return principal
     }
 
+    /** 갱신할 때만 사용자 행에서 역할을 다시 읽는다. 액세스가 유효한 요청은 DB 를 보지 않는다. */
     private fun principalOf(userId: Long): AccessPrincipal? {
         val role: UserRole? = userRepository.findById(userId).map { it.role }.orElse(null)
         if (role == null) {

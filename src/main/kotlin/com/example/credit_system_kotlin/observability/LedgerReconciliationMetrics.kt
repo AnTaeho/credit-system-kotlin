@@ -14,15 +14,8 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 원장 대사 결과를 Micrometer 지표로 승격한다.
- *
- * `LedgerReconciliationTask`(도메인/스케줄러)는 [LedgerReconciliationCompleted] 이벤트만
- * 발행하고, 세는 책임은 이 컴포넌트가 진다. 관측 방식이 바뀌어도(Prometheus → 다른 것)
- * 도메인 코드는 흔들리지 않는다.
- *
- * 라벨(tag)은 붙이지 않는다. 특히 userId 는 카디널리티가 폭발하므로 절대 금지 —
- * 개별 사용자 식별은 로그(`LedgerReconciliationTask` 의 ERROR 로그)의 몫이고, 여기는
- * 전역 집계만 담당한다.
+ * 대사 결과를 지표로 내보낸다. 태그는 붙이지 않는다.
+ * userId 를 태그로 달면 시계열이 사용자 수만큼 늘어서, 누가 틀렸는지는 대사 작업의 ERROR 로그에서 찾는다.
  */
 @Component
 class LedgerReconciliationMetrics(
@@ -63,6 +56,7 @@ class LedgerReconciliationMetrics(
             .register(registry)
     }
 
+    /** 불일치 수와 검사 수는 마지막 주기 값으로 덮어쓰고, 주기 수와 걸린 시간만 쌓는다. */
     @EventListener
     fun onReconciliationCompleted(event: LedgerReconciliationCompleted) {
         mismatchCount.set(event.mismatchCount.toLong())

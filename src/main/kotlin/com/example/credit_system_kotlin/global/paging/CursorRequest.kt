@@ -3,10 +3,8 @@ package com.example.credit_system_kotlin.global.paging
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 
 /**
- * 커서 페이징 요청. [cursor] 는 배타적 상한 id(`id < cursor`)이고 첫 페이지는 null 이다.
- *
- * 쿼리 파라미터를 문자열로 받아 여기서 해석한다. 숫자가 아닌 값도 다른 검증 실패와 같은
- * `INVALID_REQUEST` 응답으로 돌려주기 위해서다.
+ * [cursor] 는 배타적 상한 id(`id < cursor`)이고 첫 페이지는 null 이다.
+ * 숫자가 아닌 값도 `INVALID_REQUEST` 로 답하려고 문자열로 받아 여기서 푼다.
  */
 class CursorRequest private constructor(
     val cursor: Long?,
@@ -20,6 +18,7 @@ class CursorRequest private constructor(
         const val DEFAULT_SIZE = 20
         const val MAX_SIZE = 100
 
+        /** size 가 없으면 [DEFAULT_SIZE] 다. cursor 는 양수, size 는 1~[MAX_SIZE] 여야 하고 벗어나면 [InvalidRequestException] 이다. */
         fun of(cursor: String?, size: String?): CursorRequest {
             val parsedCursor = cursor?.let {
                 val value = it.toLongOrNull() ?: throw InvalidRequestException("cursor 는 숫자여야 합니다: $it")

@@ -26,6 +26,10 @@ class AccountService(
      */
     private val dummyHash: String = requireNotNull(passwordEncoder.encode(DUMMY_PASSWORD))
 
+    /**
+     * 가입은 항상 일반 사용자다. 이메일이 이미 있으면 [EmailAlreadyUsedException] 이고,
+     * 동시 가입으로 유니크 제약에 걸린 쪽도 같은 예외로 바꾼다.
+     */
     @Transactional
     fun signUp(email: String, rawPassword: String): User {
         val normalized = normalizeEmail(email)

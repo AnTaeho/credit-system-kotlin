@@ -16,14 +16,8 @@ import org.springframework.web.method.HandlerMethod
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
 
 /**
- * "남의 userId 로 접근할 길이 없다"를 컨트롤러 시그니처로 못 박는다.
- *
- * `/api` 아래 모든 핸들러는 사용자를 [CurrentUser](인증 주체)로만 받는다. 헤더·쿼리·경로·본문 어디에서도
- * 사용자 id 를 받지 않는다. 새 API 가 이 규칙을 어기면 이 테스트가 깨진다.
- *
- * 예외는 [ADMIN_USER_ID_EXCEPTIONS] 에 이름으로 적은 운영자 API 뿐이다. 운영자가 남에게 지급하는 것이
- * 그 API 의 뜻이라 대상 사용자 id 를 경로에서 받는다. 예외는 `/api/admin` 아래(ROLE_ADMIN 전용)에만
- * 둘 수 있고, 실제 핸들러와 어긋나면 이 테스트가 깨진다.
+ * `/api` 아래 핸들러는 사용자를 [CurrentUser] 로만 받는다. 헤더·쿼리·경로·본문에서 사용자 id 를 받는 API 가 생기면 깨진다.
+ * 예외는 [ADMIN_USER_ID_EXCEPTIONS] 에 적은 `/api/admin` 아래 운영자 API 뿐이다.
  */
 @ActiveProfiles("test")
 @SpringBootTest

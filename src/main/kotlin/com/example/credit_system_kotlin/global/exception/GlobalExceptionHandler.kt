@@ -16,6 +16,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 private val log = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
 
+/** 예외를 `ErrorResponse` JSON 으로 바꾼다. 업무 규칙 위반은 409, 입력 오류는 400, 없는 대상은 404 다. */
 @RestControllerAdvice
 class GlobalExceptionHandler(
     private val eventPublisher: ApplicationEventPublisher
@@ -41,6 +42,7 @@ class GlobalExceptionHandler(
     fun handleInvalidRequest(e: InvalidRequestException): ResponseEntity<ErrorResponse> =
         ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", e.message))
 
+    /** 파서가 낸 원인 메시지는 로그에만 남기고 응답에는 고정 문구를 준다. */
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun handleNotReadable(e: HttpMessageNotReadableException): ResponseEntity<ErrorResponse> {
         log.info("요청 본문 해석 실패: {}", e.message)
@@ -52,6 +54,7 @@ class GlobalExceptionHandler(
     fun handleTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<ErrorResponse> =
         ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", "${e.name} 값의 형식이 올바르지 않습니다."))
 
+    /** 유니크 위반은 어느 제약인지 가리지 않고 멱등키 경쟁으로 세고 409 로 답한다. 그 밖의 무결성 위반은 500 이다. */
     @ExceptionHandler(DataIntegrityViolationException::class)
     fun handleDataIntegrityViolation(e: DataIntegrityViolationException): ResponseEntity<ErrorResponse> {
         if (isUniqueConstraintViolation(e)) {
@@ -66,6 +69,7 @@ class GlobalExceptionHandler(
             .body(ErrorResponse("DATA_INTEGRITY_VIOLATION", "요청을 처리할 수 없습니다."))
     }
 
+    /** 스프링이 감싼 예외의 cause 사슬에서 Hibernate 의 제약 위반을 찾아 종류가 UNIQUE 인지 본다. */
     private fun isUniqueConstraintViolation(e: Throwable): Boolean =
         generateSequence(e) { it.cause }
             .filterIsInstance<ConstraintViolationException>()

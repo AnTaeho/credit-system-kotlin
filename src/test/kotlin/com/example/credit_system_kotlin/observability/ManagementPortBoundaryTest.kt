@@ -19,18 +19,8 @@ import org.springframework.http.HttpStatus
 import org.springframework.test.context.ActiveProfiles
 
 /**
- * 노출 경계가 실제로 존재하는지 확인한다.
- *
- * `management.server.port` 를 애플리케이션 포트와 다르게 주면 액추에이터는 별도 포트로
- * 옮겨간다. 이 테스트는 그 상태에서 **애플리케이션 포트로는 `/actuator/prometheus` 에
- * 닿을 수 없다**는 것을 못 박는다. 설정이 되돌려지면 이 테스트가 깨진다.
- *
- * 보안 필터 체인은 관리 포트의 자식 컨텍스트에도 걸린다. 그래서 관리 포트의 health·prometheus 가
- * 인증 없이 열려 있는 것은 SecurityConfig 의 규칙 덕분이고, 그것도 여기서 확인한다.
- * Prometheus 스크레이프와 compose 헬스체크는 로그인하지 않는다.
- *
- * 배포(docker-compose)에서는 관리 포트를 호스트로 publish 하지 않아서 컨테이너 네트워크
- * 밖에서는 아예 닿을 수 없다. 여기서는 그 배포 결정의 앞단, 즉 "포트가 실제로 갈라진다"를 본다.
+ * 관리 포트를 따로 주면 애플리케이션 포트로는 `/actuator/prometheus` 에 닿을 수 없는지 확인한다.
+ * 관리 포트에도 보안 필터 체인이 걸려서, health·prometheus 가 인증 없이 열리는지도 여기서 본다.
  */
 @ActiveProfiles("test")
 @AutoConfigureTestRestTemplate

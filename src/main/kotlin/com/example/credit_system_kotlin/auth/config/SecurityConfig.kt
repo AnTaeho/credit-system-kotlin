@@ -27,45 +27,15 @@ import org.springframework.security.web.servlet.util.matcher.PathPatternRequestM
 import org.springframework.security.web.util.matcher.AnyRequestMatcher
 import org.springframework.security.web.util.matcher.RequestMatcher
 
-/**
- * 보안 규칙 한 곳.
- *
- * **누구인가.** 세션이 없다(`STATELESS`). 요청마다 [TokenAuthenticationFilter] 가 액세스 JWT(`Authorization: Bearer`
- * 헤더, 없으면 `credit_at` 쿠키)로 사용자를 정하고, 액세스가 만료됐으면 `credit_rt` 쿠키의 리프레시 토큰으로 조용히
- * 갱신한다. 어떤 요청도 `JSESSIONID` 를 만들지 않는다. 로그인 전에 가려던 주소를 기억해 두는 요청 캐시도 세션을
- * 쓰므로 끈다 — 로그인하면 항상 홈으로 간다.
- *
- * **어디에 들어갈 수 있는가.**
- * - `/api` 아래: 인증 필요. 미인증 401, 권한 부족·CSRF 실패 403. 둘 다 [SecurityErrorWriter] 의 JSON 이고 리다이렉트하지 않는다
- * - `/api/admin` 아래: 운영자(ROLE_ADMIN) 전용. 운영자 경로는 전부 이 아래에 둔다
- * - `/admin` 화면: 운영자 전용(API 와 같은 기준)
- * - 그 밖의 경로(화면): 인증 필요. 미인증이면 `/login` 화면으로 보낸다
- * - 열어 두는 곳: `/login`, `/signup`, `POST /auth/token`, 정적 리소스. 로그인·가입 화면을 열어 두지 않으면
- *   로그인 화면이 다시 로그인을 요구하는 리다이렉트 루프가 된다
- * - CSP: 같은 출처의 스크립트·스타일만 허용한다. 인라인 스크립트·스타일·외부 CDN 을 쓰지 않는다
- *
- * **CSRF.** 브라우저는 쿠키로 인증하므로 켠다. 세션이 없어 토큰도 쿠키(`XSRF-TOKEN`)에 둔다. 화면은 서버가 그려 준
- * meta·hidden 값으로 토큰을 돌려보내고, 서버는 그 값이 쿠키와 같은지 본다. 빼는 요청은 둘뿐이다.
- * - Bearer 헤더가 붙은 요청: 브라우저가 스스로 붙여 주는 인증이 아니다. 이런 요청은 필터가 쿠키를 아예 보지
- *   않으므로([TokenAuthenticationFilter.BEARER_REQUEST]) 헤더만 붙여 CSRF 검사를 건너뛰고 쿠키로 인증될 길이 없다
- * - `POST /auth/token`: 비밀번호를 직접 내는 요청이라 따라갈 쿠키 인증이 없고, 쿠키를 심지도 않는다
- *
- * `POST /login`, `POST /signup`, `POST /logout` 은 빼지 않는다. 폼의 hidden `_csrf` 가 있어야 들어온다.
- *
- * **로그아웃.** `POST /logout`. 리프레시 사슬을 폐기하고 쿠키를 지운 뒤 `/login?logout` 으로 보낸다([TokenLogoutHandler]).
- *
- * **액추에이터.** 관리 포트를 따로 두면 부트가 이 필터 체인을 관리 포트의 자식 컨텍스트에도 그대로 건다
- * (`ServletManagementChildContextConfiguration`). 그래서 여기서 두 경우를 나눈다.
- * - 관리 포트가 따로일 때: 관리 포트로 들어온 health·prometheus 는 인증 없이 통과한다. 스크레이프와
- *   헬스체크는 사람이 아니다. 관리 포트는 compose 네트워크 밖으로 publish 하지 않는 것이 경계다.
- *   애플리케이션 포트에는 액추에이터가 아예 없다(404 이전에 인증 요구에 걸린다).
- * - 관리 포트가 같을 때(관리 포트를 따로 안 준 기동): 액추에이터가 공개 포트에 섞여 있으므로 전부 막는다.
- *   `EndpointRequest` 는 포트가 갈라져 있으면 관리 컨텍스트로 온 요청에만 맞는다.
- */
+/** 보안 규칙은 전부 여기 있다. 세션이 없고(STATELESS) 인증은 요청마다 [TokenAuthenticationFilter] 가 한다. */
 @Configuration
 @EnableConfigurationProperties(AuthProperties::class)
 class SecurityConfig {
 
+    /**
+     * 관리 포트가 따로면 부트가 이 체인을 거기에도 건다. 그때만 health·prometheus 를 열고, 포트가 같으면 액추에이터를 다 막는다.
+     * CSRF 는 Bearer 요청과 `POST /auth/token` 만 뺀다. 둘 다 브라우저가 붙여 주는 쿠키 인증을 쓰지 않는다.
+     */
     @Bean
     fun securityFilterChain(
         http: HttpSecurity,
@@ -89,6 +59,7 @@ class SecurityConfig {
                 }
                 authorize(EndpointRequest.toAnyEndpoint(), denyAll)
                 authorize("/error", permitAll)
+                // 이 둘을 닫으면 로그인 화면이 다시 로그인을 요구해 리다이렉트 루프가 된다.
                 authorize("/login", permitAll)
                 authorize("/signup", permitAll)
                 authorize(tokenEndpoint, permitAll)

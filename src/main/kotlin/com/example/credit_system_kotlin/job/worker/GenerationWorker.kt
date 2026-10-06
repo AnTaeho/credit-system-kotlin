@@ -19,6 +19,7 @@ import java.time.Instant
 
 private val log = LoggerFactory.getLogger(GenerationWorker::class.java)
 
+/** HOLDING job 을 주기적으로 집어 워커 풀에 넘긴다. 실제 생성은 [GenerationJobProcessor] 가 한다. */
 @Component
 @ConditionalOnExpression("\${app.scheduling.enabled:true} and \${app.worker.enabled:true}")
 class GenerationWorker(
@@ -33,20 +34,8 @@ class GenerationWorker(
     private val batchSize: Int = workerProperties.batchSize
 
     /**
-     * 빈 슬롯 수만큼만 읽고 선점한다.
-     *
-     * 예전에는 빈 슬롯을 세지 않고 `batchSize` 만큼 읽은 뒤 한 장씩 선점하고 executor 에 넘겼다.
-     * 풀이 꽉 차 있으면 첫 장을 선점한 직후 `execute` 가 거부하고 [rollbackToHolding] 이 되돌린 뒤
-     * 그 주기를 끝냈는데, 다음 폴링에서 같은 job 을 다시 선점하므로 포화 구간 내내 "선점 → 거부 →
-     * 롤백" 이 매 주기 한 번씩 반복됐다. DB UPDATE 두 번이 헛돌고, 그 헛선점이 전부
-     * `worker_claim/applied` 로 세어져 카운터를 처리량으로 읽을 수 없었다.
-     *
-     * **경쟁 조건이 없는 이유.** 이 executor 에 task 를 넣는 스레드는 `@Scheduled` 디스패처
-     * 하나뿐이다(`fixedDelay` 라 이전 실행이 끝나야 다음이 잡히므로 디스패처가 둘 겹치지도 않는다).
-     * 다른 스레드는 task 를 끝내면서 `activeCount` 를 **줄이기만** 한다. 따라서 주기 시작에 읽은
-     * `free` 는 그 주기 동안 과소평가일 수는 있어도 과대평가일 수 없고, 한 주기에 `free` 개
-     * 이하만 넘기면 `maxPoolSize` 를 절대 넘지 않는다. 새 스레드 기동 직후 `activeCount` 가 잠깐
-     * 낮게 읽히는 창이 있더라도, 우리가 제한하는 것은 "이번 주기에 우리가 넘긴 수" 자체다.
+     * 빈 슬롯 수만큼만 선점한다. 풀에 task 를 넣는 스레드는 이 디스패처 하나고 나머지는 끝내면서 슬롯을 비우기만 한다.
+     * 그래서 주기 시작에 읽은 빈 슬롯 수는 실제보다 적을 수는 있어도 많을 수 없고, 풀이 넘치지 않는다.
      */
     @Scheduled(fixedDelayString = "\${app.scheduling.worker-interval-millis:500}")
     fun dispatchPendingJobs() {
@@ -68,6 +57,7 @@ class GenerationWorker(
         }
     }
 
+    /** HOLDING 에서 PROCESSING 으로 올리는 데 성공해야 true 다. 0행이거나 DB 예외면 그 job 만 건너뛴다. */
     private fun claim(job: Job): Boolean {
         return try {
             val updated = jobRepository.startProcessingIfAttemptMatches(
@@ -87,11 +77,7 @@ class GenerationWorker(
         }
     }
 
-    /**
-     * 거부 → 롤백은 **안전망으로만 남겼다.** 슬롯을 세고 넘기므로 정상 경로에서는 여기가 타지 않고,
-     * executor shutdown 중 거부 같은 예외 상황만 남는다. 그래서 이 경로가 실제로 타면
-     * "슬롯 계산이 틀렸다"는 신호이고, 그걸 [DefenseOutcome.ROLLED_BACK] 으로 드러낸다.
-     */
+    /** 슬롯을 세고 넘기므로 거부는 executor 종료 중 같은 예외 상황에서만 난다. 그때는 선점을 되돌리고 이번 주기를 끝낸다. */
     private fun dispatch(job: Job): Boolean {
         return try {
             workerExecutor.execute { jobProcessor.runGeneration(job) }
@@ -107,6 +93,7 @@ class GenerationWorker(
         }
     }
 
+    /** 되돌리기까지 실패하면 job 은 PROCESSING 으로 남고 정체 회수가 가져간다. */
     private fun rollbackToHolding(job: Job) {
         try {
             jobRepository.rollbackToHoldingIfProcessing(job.persistedId, job.attemptNo, Instant.now())

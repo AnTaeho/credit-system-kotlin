@@ -25,6 +25,7 @@ internal object CredentialPolicy {
         }
     }
 
+    /** 하한은 글자 수, 상한은 UTF-8 바이트로 잰다. 한글 비밀번호는 72자보다 훨씬 짧게 끊긴다. */
     fun validatePassword(rawPassword: String) {
         if (rawPassword.length < MIN_PASSWORD_LENGTH) {
             throw InvalidRequestException("비밀번호는 ${MIN_PASSWORD_LENGTH}자 이상이어야 합니다.")

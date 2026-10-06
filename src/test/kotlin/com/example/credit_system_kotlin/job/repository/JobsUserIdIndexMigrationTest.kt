@@ -12,7 +12,6 @@ import org.springframework.test.context.DynamicPropertySource
 
 /**
  * V4 가 실제 MySQL 에 사용자별 job 커서 페이징용 인덱스를 (user_id, id) 순서로 만드는지 확인한다.
- *
  * `ddl-auto: validate` 는 인덱스를 검사하지 않으므로 `information_schema` 로 직접 단언한다.
  */
 @ActiveProfiles("test")

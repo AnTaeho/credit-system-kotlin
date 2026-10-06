@@ -11,13 +11,7 @@ import java.util.concurrent.ScheduledFuture
 
 private val log = LoggerFactory.getLogger(HeartbeatRegistry::class.java)
 
-/**
- * heartbeat 조회의 세 가지 결과.
- *
- * `Boolean` 이 아니라 세 값인 이유는 "heartbeat 가 없다"와 "heartbeat 저장소를 못 봤다"가
- * 전혀 다른 사실이기 때문이다. 둘을 `false` 하나로 뭉치면 Redis 장애가 heartbeat 부재로
- * 둔갑하고, 예외로 뭉치면 Redis 장애가 회수 자체를 막는다. 판단은 호출자가 한다.
- */
+/** heartbeat 가 없는 것과 저장소를 못 본 것을 따로 둔다. 하나로 뭉치면 Redis 장애가 heartbeat 부재로 읽힌다. */
 enum class HeartbeatState {
     /** 만료되지 않은 heartbeat 가 있다. 워커가 살아 있다는 뜻이다 */
     LIVE,
@@ -29,6 +23,7 @@ enum class HeartbeatState {
     UNKNOWN
 }
 
+/** 처리 중인 시도의 heartbeat 를 Redis ZSET 하나에 둔다. score 가 만료 시각(epoch 초)이다. */
 @Component
 class HeartbeatRegistry(
     private val redisTemplate: StringRedisTemplate,
@@ -44,11 +39,13 @@ class HeartbeatRegistry(
         return scheduler.scheduleAtFixedRate({ refreshHeartbeat(attempt) }, Instant.now().plus(interval), interval)
     }
 
+    /** 워커가 처리를 끝낼 때 부른다. 돌고 있는 갱신은 끊지 않고 다음 주기만 취소한 뒤 엔트리를 지운다. */
     fun stopHeartbeat(jobId: Long, attemptNo: Int, future: ScheduledFuture<*>) {
         future.cancel(false)
         removeHeartbeat(jobId, attemptNo)
     }
 
+    /** 만료 시각이 지난 시도를 모은다. 형식이 깨진 멤버는 그 자리에서 지우고 결과에서 뺀다. */
     fun findExpiredAttempts(): Set<JobAttempt> {
         val now = Instant.now().epochSecond.toDouble()
         val expired = redisTemplate.opsForZSet().rangeByScore(KEY, Double.NEGATIVE_INFINITY, now)
@@ -67,11 +64,13 @@ class HeartbeatRegistry(
         return attempts
     }
 
+    /** 남겨 두면 스캔마다 다시 걸리므로 지우고 경고만 남긴다. */
     private fun removeUnparseableMember(member: String) {
         redisTemplate.opsForZSet().remove(KEY, member)
         log.warn("해석할 수 없는 heartbeat 멤버 제거: {}", member)
     }
 
+    /** 만료 시각을 지금 + timeout 으로 다시 쓴다. Redis 가 안 보이면 로그만 남기고 다음 주기에 맡긴다. */
     private fun refreshHeartbeat(attempt: JobAttempt) {
         val expireAt = Instant.now().epochSecond + heartbeatProperties.timeoutSeconds
         try {
@@ -81,11 +80,7 @@ class HeartbeatRegistry(
         }
     }
 
-    /**
-     * Redis 조회 실패를 예외로 던지지 않고 [HeartbeatState.UNKNOWN] 으로 돌려준다.
-     * "Redis 가 안 보인다"는 사실을 호출자가 판단 재료로 쓸 수 있어야 하기 때문이다 —
-     * 예외로 던지면 호출자의 catch 가 회수 로직 전체를 통째로 건너뛴다.
-     */
+    /** Redis 조회가 실패하면 [HeartbeatState.UNKNOWN] 을 돌려준다. 예외로 던지면 호출자의 catch 가 회수를 통째로 건너뛴다. */
     fun heartbeatState(jobId: Long, attemptNo: Int): HeartbeatState {
         val member = JobAttempt(jobId, attemptNo).toMember()
         val score = try {
@@ -102,9 +97,8 @@ class HeartbeatRegistry(
     }
 
     /**
-     * 회수가 끝난 뒤의 뒷정리라 실패해도 상태는 이미 바뀌어 있다. 그래서 예외를 삼킨다.
-     * 지우지 못하고 남은 ZSET 엔트리는 나중에 [findExpiredAttempts] 가 다시 집어 오지만,
-     * 그때 `failIfProcessing` 이 0행을 돌려주므로 아무 일도 일어나지 않고 조용히 소거된다.
+     * 실패해도 예외를 삼킨다. 남은 엔트리는 다음 만료 스캔이 다시 집지만
+     * `failIfProcessing` 이 0행이라 아무 일 없이 지워진다.
      */
     fun removeHeartbeat(jobId: Long, attemptNo: Int) {
         val member = JobAttempt(jobId, attemptNo).toMember()

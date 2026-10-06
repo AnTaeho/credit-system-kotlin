@@ -4,10 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
 
 /**
- * 액세스 JWT 와 리프레시 토큰의 수명·서명 설정.
- *
- * [refreshReuseGrace] 는 이미 회전된 리프레시 토큰이 다시 와도 탈취로 보지 않는 시간이다. 탭 두 개가 같은
- * 토큰을 들고 동시에 갱신을 요청하는 정상 경쟁을 재사용 탐지와 구분하려고 둔다.
+ * 액세스 JWT 와 리프레시 토큰의 수명·서명 설정. [refreshReuseGrace] 안에 다시 온 회전된 토큰은
+ * 탭 두 개의 동시 갱신으로 보고 탈취로 치지 않는다.
  */
 @ConfigurationProperties(prefix = "app.auth.jwt")
 data class JwtProperties(

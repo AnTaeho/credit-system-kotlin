@@ -27,12 +27,7 @@ enum class DefensePoint {
     FINAL_REFUND
 }
 
-/**
- * 방어 지점을 통과한 시도의 결과.
- *
- * [APPLIED] 를 반드시 함께 세야 한다. 막힌 건수만 세면 분모가 없어 비율을 만들 수 없다.
- * `sum by (point)` 가 그 지점을 통과한 전체 시도 수가 되도록 설계했다.
- */
+/** 막힌 것만 세면 분모가 없어 비율을 못 낸다. 통과한 [APPLIED] 도 같이 센다. */
 enum class DefenseOutcome {
     /** 조건부 UPDATE 가 1행을 바꿨다. 이 시도가 이겼다 */
     APPLIED,
@@ -65,16 +60,7 @@ enum class DefenseOutcome {
     ROLLED_BACK
 }
 
-/**
- * 방어 장치가 한 번 가동했음을 알리는 순수 도메인 이벤트다.
- *
- * 새 개념을 만들지 않았다. 이미 코드 곳곳에 있던 `updated == 0` 분기를 이벤트 발행
- * 지점으로 승격했을 뿐이다. 세는 책임은 `observability` 패키지의 리스너가 지고,
- * 이 파일과 발행 지점은 Micrometer 를 모른다.
- *
- * 두 필드 모두 enum 이다. 태그로 나갈 값의 집합이 컴파일 타임에 닫혀 있어야
- * 카디널리티가 자유 문자열로 새지 않는다.
- */
+/** 방어 장치가 한 번 돌 때마다 발행한다. 두 필드가 enum 이라 지표 태그 값이 정해진 것 밖으로 늘지 않는다. */
 data class DefenseTriggered(
     val point: DefensePoint,
     val outcome: DefenseOutcome

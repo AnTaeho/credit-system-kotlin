@@ -11,10 +11,8 @@ import java.time.Duration
 private val log = LoggerFactory.getLogger(RefreshTokenCleanupTask::class.java)
 
 /**
- * 만료된 지 하루가 넘은 리프레시 토큰을 지운다.
- *
- * 만료된 토큰은 어차피 거절되므로 지워도 동작은 같다. 하루를 더 두는 것은 만료 직후의 재사용 시도가
- * "모르는 토큰"이 아니라 어느 사용자의 어느 사슬인지 로그에 남게 하려는 것이다.
+ * 만료된 지 하루가 넘은 리프레시 토큰을 지운다. 하루를 더 두면 만료 직후의 재사용 시도가
+ * 어느 사용자의 어느 사슬인지 로그에 남는다.
  */
 @Component
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)

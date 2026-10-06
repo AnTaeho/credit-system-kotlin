@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
+/** job 생성과 조회. 사용자는 인증된 [CurrentUser] 에서 꺼내고 요청 값으로는 받지 않는다. */
 @RestController
 @RequestMapping("/api/jobs")
 class JobApiController(

@@ -38,11 +38,8 @@ sealed interface RotationResult {
 }
 
 /**
- * 리프레시 토큰을 내고, 돌리고(회전), 폐기한다.
- *
- * 토큰은 쓸 때마다 새 것으로 바뀐다. 같은 토큰이 두 번 오면 한쪽은 훔친 것일 수 있는데, 누가 진짜인지는
- * 알 수 없으므로 그 로그인에서 이어진 사슬([RefreshToken.familyId]) 전체를 폐기해 양쪽 모두 다시 로그인하게 한다.
- * 다만 탭 두 개가 동시에 갱신하는 정상 경쟁까지 로그아웃시키지 않도록 짧은 유예(`refresh-reuse-grace`)를 둔다.
+ * 리프레시 토큰은 쓸 때마다 새 것으로 바뀐다. 이미 쓴 토큰이 다시 오면 어느 쪽이 훔친 것인지 알 수 없어
+ * 그 로그인의 사슬([RefreshToken.familyId])을 통째로 폐기한다. 탭 두 개의 동시 갱신은 유예 시간 안이면 봐준다.
  */
 @Service
 class RefreshTokenService(
@@ -63,16 +60,8 @@ class RefreshTokenService(
     }
 
     /**
-     * **조건부 UPDATE 를 조회보다 먼저 한다.** MySQL(REPEATABLE READ)은 트랜잭션의 첫 SELECT 때 스냅샷을 잡는다.
-     * 먼저 조회하면, 경쟁에서 진 쪽이 UPDATE 0행 뒤에 다시 읽어도 이긴 쪽의 `rotated_at` 이 보이지 않아
-     * 정상 경쟁을 가려내지 못한다. UPDATE 는 항상 최신 행을 보므로 승패를 먼저 가르고, 그 뒤에 읽는다.
-     *
-     * **사슬 폐기와 겹칠 때.** 회전은 쓰던 토큰 행을 조건부 UPDATE 로 잠근 채 새 토큰을 INSERT 하고 한 트랜잭션으로
-     * 커밋한다. 사슬 폐기([RefreshTokenRepository.revokeFamily])는 그 사슬의 폐기되지 않은 행을 모두 고치므로 같은
-     * 행을 잠가야 한다. 그래서 둘은 그 행에서 줄을 선다. 폐기가 먼저면 회전의 UPDATE 가 `revoked_at` 을 보고 0행이
-     * 되어 거절되고, 회전이 먼저면 폐기가 그 커밋을 기다린 뒤 새 토큰까지 고친다. 새 토큰 한 장이 폐기를 피해
-     * 살아남는 일이 없도록 따로 다시 읽지 않는 이유다. `ConcurrentReuseAndRotationTest` 가 MySQL 에서 확인한다.
-     * 회전을 두 트랜잭션으로 쪼개거나 INSERT 를 UPDATE 앞으로 옮기면 이 보장이 깨진다.
+     * 조건부 UPDATE 를 조회보다 먼저 한다. 먼저 읽으면 REPEATABLE READ 스냅샷 탓에 진 쪽이 이긴 쪽의 회전을 못 본다.
+     * UPDATE 와 INSERT 를 쪼개거나 순서를 바꾸면 동시에 도는 사슬 폐기를 새 토큰이 피해 간다(`ConcurrentReuseAndRotationTest`).
      */
     @Transactional
     fun rotate(raw: String): RotationResult {
@@ -100,6 +89,7 @@ class RefreshTokenService(
         log.info("리프레시 사슬 폐기(로그아웃): userId={}, familyId={}, revoked={}", token.userId, token.familyId, revoked)
     }
 
+    /** 회전을 못 차지한 토큰을 가른다. 유예 안이면 동시 갱신으로 봐주고, 넘겼으면 재사용으로 보고 사슬을 폐기한다. */
     private fun classifyUnrotatable(token: RefreshToken, now: Instant): RotationResult {
         val rotatedAt = token.rotatedAt
         if (token.revokedAt != null) {
@@ -124,6 +114,7 @@ class RefreshTokenService(
         return RotationResult.ReuseDetected
     }
 
+    /** 256비트 난수로 원문을 만들고 해시만 저장한다. 원문은 여기서 돌려준 뒤로 다시 얻을 수 없다. */
     private fun save(userId: Long, familyId: String, now: Instant): String {
         val bytes = ByteArray(TOKEN_BYTES).also(secureRandom::nextBytes)
         val raw = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)

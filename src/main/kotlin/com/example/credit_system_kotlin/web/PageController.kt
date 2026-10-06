@@ -13,11 +13,8 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.servlet.ModelAndView
 
 /**
- * 로그인한 사람의 화면. 서버는 첫 화면만 그리고, 이후 변화(요청 접수, 진행 상태, 더 보기, 지급)는
- * `static/js` 가 기존 `/api` 를 불러 처리한다. 화면 전용 API 는 없다.
- *
- * 사용자는 API 와 똑같이 [CurrentUser](인증 주체)로만 받는다. 인증 주체는 사용자 id 와 역할만 알기 때문에
- * 이메일은 사용자 행에서 읽는다.
+ * 로그인한 사람의 화면. 서버는 첫 화면만 그리고 그 뒤 변화는 `static/js` 가 `/api` 를 불러 처리한다.
+ * 화면 전용 API 는 없다.
  */
 @Controller
 class PageController(
@@ -26,6 +23,7 @@ class PageController(
     private val ledgerQueryService: LedgerQueryService
 ) {
 
+    /** 생성 요청 목록은 첫 페이지만 그린다. */
     @GetMapping("/")
     fun home(currentUser: CurrentUser, model: Model): String {
         addLayout(currentUser, model)
@@ -42,6 +40,7 @@ class PageController(
         return "job"
     }
 
+    /** 원장도 첫 페이지만 그린다. */
     @GetMapping("/ledger")
     fun ledger(currentUser: CurrentUser, model: Model): String {
         addLayout(currentUser, model)
@@ -56,6 +55,7 @@ class PageController(
         return "admin"
     }
 
+    /** 모든 화면이 쓰는 머리 값. [CurrentUser] 는 id 와 역할만 알아서 이메일과 잔액은 사용자 행에서 읽는다. */
     private fun addLayout(currentUser: CurrentUser, model: Model) {
         val user = userFinder.getOrThrow(currentUser.userId)
         model.addAttribute("userId", currentUser.userId)

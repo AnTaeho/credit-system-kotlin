@@ -26,9 +26,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 
 /**
  * SecurityConfig 의 규칙이 실제 요청에서 그대로 적용되는지 확인한다.
- *
- * 인증은 두 길로 만든다([TestTokens]). 브라우저처럼 액세스 쿠키를 싣거나, curl 처럼 Bearer 헤더를 싣는다.
- * 둘 다 진짜 액세스 JWT 라 요청은 운영과 같은 필터를 거친다. CSRF 는 쿠키로 인증한 요청에만 걸린다.
+ * 인증은 [TestTokens] 로 만든 액세스 쿠키나 Bearer 헤더로 한다. CSRF 는 쿠키로 인증한 요청에만 걸린다.
  */
 @ActiveProfiles("test")
 @AutoConfigureMockMvc

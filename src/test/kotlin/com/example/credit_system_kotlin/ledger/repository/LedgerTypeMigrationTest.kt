@@ -12,10 +12,7 @@ import org.springframework.test.context.DynamicPropertySource
 
 /**
  * V3 가 실제 MySQL 에서 원장 유형 enum 에 ADMIN_GRANT 를 더하는지 확인한다.
- *
- * H2 는 Hibernate 가 스키마를 만들어 이 마이그레이션을 거치지 않는다. 그리고 `ddl-auto: validate` 통과만으로는
- * enum 값의 나열 순서까지 보장되지 않으므로, V1 이 받아 적은 규약(Hibernate 생성물과 같은 알파벳 순)을
- * `information_schema` 로 직접 단언한다.
+ * `ddl-auto: validate` 는 enum 값의 나열 순서를 보지 않아 `information_schema` 로 직접 단언한다.
  */
 @ActiveProfiles("test")
 @SpringBootTest

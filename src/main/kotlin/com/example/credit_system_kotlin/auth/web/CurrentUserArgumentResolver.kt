@@ -13,11 +13,7 @@ import org.springframework.web.method.support.HandlerMethodArgumentResolver
 import org.springframework.web.method.support.ModelAndViewContainer
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 
-/**
- * 컨트롤러 파라미터 [CurrentUser] 를 인증 주체에서 채운다.
- *
- * 사용자 id 를 요청(헤더·파라미터·본문)에서 받는 길은 없다. 오직 인증 주체에서만 나온다.
- */
+/** 컨트롤러 파라미터 [CurrentUser] 를 인증 주체에서만 채운다. 사용자 id 를 헤더·파라미터·본문에서 받는 길은 없다. */
 class CurrentUserArgumentResolver : HandlerMethodArgumentResolver {
 
     override fun supportsParameter(parameter: MethodParameter): Boolean =

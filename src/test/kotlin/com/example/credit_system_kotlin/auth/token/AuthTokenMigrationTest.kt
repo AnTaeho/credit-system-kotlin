@@ -12,9 +12,7 @@ import org.springframework.test.context.DynamicPropertySource
 
 /**
  * V7(users 의 password_hash·role), V8(refresh_tokens), V9(users 의 google_sub 삭제)가 실제 MySQL 에서 도는지 확인한다.
- *
- * 컨텍스트가 뜨는 것 자체가 `ddl-auto: validate` 통과, 곧 컬럼 타입·폭이 엔티티 매핑과 같다는 증거다.
- * validate 가 보지 않는 것(enum 값의 나열, 기본값, 유니크 키)은 `information_schema` 로 직접 단언한다.
+ * `ddl-auto: validate` 가 보지 않는 enum 값의 나열, 기본값, 유니크 키는 `information_schema` 로 직접 단언한다.
  */
 @ActiveProfiles("test")
 @SpringBootTest

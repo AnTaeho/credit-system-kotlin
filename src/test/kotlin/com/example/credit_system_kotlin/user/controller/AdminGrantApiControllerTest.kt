@@ -116,11 +116,7 @@ class AdminGrantApiControllerTest @Autowired constructor(
         assertThat(balanceOf(target)).isEqualTo(1_000_500L)
     }
 
-    /**
-     * Java 원본은 UserServiceTest 에서 idemKey에 null을 넘겨 이 경계를 확인했다.
-     * Kotlin은 idemKey를 non-null로 닫아(report.md A-4) 그 호출이 컴파일되지 않으므로
-     * 남은 실제 경로 — 필드가 아예 없는 JSON — 를 여기서 확인한다(옛 charge 에서 옮겨 왔다).
-     */
+    /** idemKey 가 non-null 이라 null 을 넘기는 호출은 컴파일되지 않는다. 필드가 아예 없는 JSON 으로 같은 경계를 본다. */
     @Test
     fun `idemKey 필드가 없는 본문은 400으로 거부된다`() {
         val response = grant(admin, target.persistedId, """{"amount":300}""", ErrorResponse::class.java)
@@ -153,11 +149,7 @@ class AdminGrantApiControllerTest @Autowired constructor(
         assertThat(ledgerRepository.findByUserIdOrderByIdDesc(target.persistedId)).isEmpty()
     }
 
-    /**
-     * 미인증 요청은 CSRF 토큰을 실었을 때 인가 단계까지 가서 401 이 된다. 토큰이 없으면 그보다 앞선
-     * CSRF 필터가 403 으로 먼저 막는다. Bearer 헤더가 없는 요청은 쿠키 인증일 수 있어 CSRF 검사를 받는다.
-     * 어느 쪽이든 돈은 움직이지 않는다.
-     */
+    /** CSRF 토큰이 없으면 앞선 CSRF 필터가 403 으로 먼저 막는다. 토큰을 실어야 인가 단계까지 가서 401 이 된다. */
     @Test
     fun `미인증 지급 요청은 CSRF 토큰이 있으면 401 JSON 이다`() {
         val result = mockMvc.perform(

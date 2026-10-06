@@ -39,11 +39,7 @@ class DuplicateIdemKeyTest @Autowired constructor(
         }
     }
 
-    /**
-     * `db_unique` 는 서비스 밖(`GlobalExceptionHandler`)에서 발행된다. 여기서는 HTTP 를 태우는
-     * 대신, 서비스에서 새어 나온 예외를 그 핸들러에 그대로 넘긴다 — DispatcherServlet 이
-     * 하는 일과 같은 호출이다.
-     */
+    /** `db_unique` 는 서비스 밖 `GlobalExceptionHandler` 에서 발행된다. 서비스에서 나온 예외를 그 핸들러에 그대로 넘긴다. */
     @Test
     fun `동일 idemKey로 동시 요청해도 job과 차감은 한 번만 일어난다`() {
         val user = userRepository.save(User("acme", 10_000L))

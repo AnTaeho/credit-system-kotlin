@@ -78,12 +78,7 @@ class UserServiceTest @Autowired constructor(
         assertThat(entries).filteredOn { it.type == LedgerType.ADMIN_GRANT }.hasSize(2)
     }
 
-    /**
-     * Java 원본에는 `charge(id, null, 300L)` 로 null을 넘기는 테스트가 하나 더 있었다.
-     * Kotlin에서 idemKey를 non-null로 닫았으므로(report.md A-4) 그 호출은 컴파일되지 않는다.
-     * 대신 필드가 없는 JSON이 400으로 거부되는지를
-     * AdminGrantApiControllerTest 에서 확인한다(옛 charge 가 grant 로 바뀌었다).
-     */
+    /** idemKey 가 non-null 이라 null 을 넘기는 테스트는 없다. 필드가 없는 JSON 은 AdminGrantApiControllerTest 가 본다. */
     @Test
     fun `idemKey가 공백이면 거부한다`() {
         val user = userRepository.save(User("acme", 500L))

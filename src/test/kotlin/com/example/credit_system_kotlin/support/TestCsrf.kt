@@ -9,13 +9,8 @@ import java.util.UUID
 private val secureRandom = SecureRandom()
 
 /**
- * 브라우저가 하듯 CSRF 토큰을 싣는다. 토큰 쿠키(`XSRF-TOKEN`)와, 화면이 meta·hidden 으로 받아 돌려보내는 값
- * (`X-XSRF-TOKEN` 헤더)을 한 쌍으로 붙인다. 서버는 헤더의 값을 풀어 쿠키와 같은지 본다.
- *
- * **spring-security-test 의 `csrf()` 를 쓰지 않는다.** 그 후처리기는 한 번 쓰이는 순간 컨텍스트의 CSRF 필터가
- * 쥔 저장소를 세션 저장소로 바꿔 끼우고 되돌리지 않는다. 그 뒤로는 같은 컨텍스트의 모든 요청이 세션을 만들고
- * 토큰 쿠키를 받지 못해서, "세션이 생기지 않는다"와 "화면이 토큰 쿠키를 심는다"를 보는 테스트가 실행 순서에 따라 깨진다.
- * 이 함수는 운영과 같은 쿠키 저장소를 그대로 지난다.
+ * 브라우저가 하듯 CSRF 토큰 쿠키(`XSRF-TOKEN`)와 `X-XSRF-TOKEN` 헤더를 한 쌍으로 싣는다.
+ * spring-security-test 의 `csrf()` 는 그 컨텍스트의 CSRF 저장소를 세션 저장소로 바꿔 끼워 뒤따르는 테스트가 순서에 따라 깨지므로 쓰지 않는다.
  */
 fun MockHttpServletRequestBuilder.withCsrfToken(): MockHttpServletRequestBuilder {
     val token = UUID.randomUUID().toString()

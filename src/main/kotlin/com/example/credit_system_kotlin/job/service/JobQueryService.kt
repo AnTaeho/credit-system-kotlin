@@ -10,9 +10,11 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
+/** job 조회 전용. 본인 job 만 보인다. */
 @Service
 class JobQueryService(private val jobRepository: JobRepository) {
 
+    /** 커서가 없으면 첫 페이지다. 다음 페이지가 있는지 알려고 한 건 더 읽는다. */
     @Transactional(readOnly = true)
     fun findByUser(userId: Long, request: CursorRequest): CursorPage<JobResponse> {
         val limit = PageRequest.of(0, request.fetchSize)

@@ -14,13 +14,8 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 도메인 상태 스냅샷을 Micrometer 게이지로 승격한다.
- *
- * 여기가 (다른 두 리스너와 함께) Micrometer 를 아는 유일한 곳이다. 게이지의 상태 객체는
- * 전부 이 싱글턴 빈의 필드다 — Micrometer 가 상태를 약한 참조로만 물기 때문에, 지역 변수를
- * 넘기면 GC 이후 NaN 이 된다.
- *
- * 태그는 붙이지 않는다. 특히 userId 는 카디널리티가 폭발하므로 절대 금지다.
+ * 스냅샷 값을 게이지로 내보낸다. 게이지가 읽는 값은 전부 이 빈의 필드로 둔다.
+ * Micrometer 가 약한 참조로만 잡아서 지역 변수를 넘기면 GC 뒤에 NaN 이 된다. userId 태그는 붙이지 않는다.
  */
 @Component
 class DomainSnapshotMetrics(
@@ -79,6 +74,7 @@ class DomainSnapshotMetrics(
             .register(registry)
     }
 
+    /** 게이지 값을 이번 스냅샷으로 덮어쓴다. 실패한 주기에는 불리지 않아 이전 값이 그대로 남는다. */
     @EventListener
     fun onSnapshotTaken(event: DomainSnapshotTaken) {
         outstandingHoldCount.set(event.outstandingHoldCount)

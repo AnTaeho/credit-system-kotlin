@@ -5,12 +5,8 @@ import org.springframework.core.env.Profiles
 import org.springframework.stereotype.Component
 
 /**
- * 운영(prod)에서 로그인을 무르게 만드는 설정 두 가지를 기동 단계에서 막는다.
- *
- * - `Secure` 없는 로그인 쿠키: 평문 HTTP 요청에도 토큰이 실려 나간다.
- * - 저장소에 공개된 로컬 서명 키: 그 키로는 누구나 운영자 액세스 토큰을 만들 수 있다.
- *
- * 둘 다 조용히 떠서 뒤늦게 드러나는 것보다 부팅에서 죽는 편이 낫다(application-prod.yml 과 같은 원칙).
+ * prod 에서 `Secure` 없는 로그인 쿠키와 저장소에 공개된 로컬 서명 키를 기동 단계에서 막는다.
+ * 앞의 것은 평문 HTTP 에 토큰이 실리고, 뒤의 것은 누구나 운영자 토큰을 만들 수 있다.
  */
 @Component
 class AuthStartupGuard(

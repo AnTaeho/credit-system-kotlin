@@ -11,12 +11,8 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * 운영자 지급. 실제 결제 충전이 붙기 전까지 잔액을 올리는 유일한 길이다.
- *
- * **의도적 예외.** 다른 모든 API 는 사용자를 인증 주체([CurrentUser])로만 받는다. 이 API 만 대상
- * 사용자 id 를 요청 경로에서 받는다 — 운영자가 남에게 지급하는 것이 이 API 의 뜻이기 때문이다.
- * 그래서 `/api/admin` 아래에만 두고, `SecurityConfig` 의 규칙대로 ROLE_ADMIN 만 들어온다.
- * [CurrentUser] 는 누가 지급했는지를 남기는 데 쓴다. 예외 목록은 `ApiIdentitySourceTest` 에 있다.
+ * 운영자가 남에게 지급하는 API 라 여기만 대상 사용자 id 를 경로로 받는다. 다른 API 는 [CurrentUser] 만 쓴다.
+ * ROLE_ADMIN 검사는 `SecurityConfig` 가 `/api/admin` 경로에 걸고, [CurrentUser] 는 지급한 사람을 남기는 데 쓴다.
  */
 @RestController
 @RequestMapping("/api/admin/users")

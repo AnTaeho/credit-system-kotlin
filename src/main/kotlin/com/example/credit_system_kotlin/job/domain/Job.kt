@@ -11,6 +11,7 @@ import jakarta.persistence.Id
 import jakarta.persistence.Index
 import jakarta.persistence.Table
 
+/** 생성 요청 한 건. 상태·시도 번호·결과 URL 은 리포지토리의 조건부 UPDATE 로만 바뀐다. */
 @Entity
 @Table(
     name = "jobs",
@@ -53,6 +54,7 @@ class Job private constructor(
         protected set
 
     companion object {
+        /** HOLDING, 시도 번호 0 으로 만든다. 잔액 차감이 끝난 뒤에 부른다. */
         fun hold(userId: Long, holdAmount: Long, prompt: String): Job =
             Job(userId, holdAmount, prompt)
     }

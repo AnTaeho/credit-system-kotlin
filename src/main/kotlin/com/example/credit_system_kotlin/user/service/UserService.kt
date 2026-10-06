@@ -17,6 +17,7 @@ import java.util.Locale
 
 private val log = LoggerFactory.getLogger(UserService::class.java)
 
+/** 잔액 조회와 운영자 지급. 생성 요청의 차감과 환불은 job 쪽 서비스가 한다. */
 @Service
 class UserService(
     private val userRepository: UserRepository,
@@ -32,10 +33,8 @@ class UserService(
     }
 
     /**
-     * 운영자가 [userId] 에게 크레딧을 지급한다. 결제 없이 잔액을 올리는 유일한 경로다.
-     *
-     * 멱등성은 옛 충전과 같은 방식이다. 1차는 `(userId, idemKey)` 조회, 2차는 원장의 유니크 제약
-     * `uk_ledger_user_idem` 이다. 같은 idemKey 재시도는 잔액을 다시 올리지 않고 duplicate 로 답한다.
+     * 같은 idemKey 로 다시 오면 잔액을 올리지 않고 duplicate 로 답한다.
+     * 조회를 동시에 통과한 두 요청은 원장 유니크 제약 `uk_ledger_user_idem` 이 한쪽을 막고, 그쪽은 잔액도 롤백된다.
      */
     @Transactional
     fun grant(adminUserId: Long, userId: Long, idemKey: String, amount: Long): GrantResponse {
@@ -60,6 +59,7 @@ class UserService(
         return GrantResponse(balance, false)
     }
 
+    /** 잔액을 건드리기 전에 걸러낸다. 금액은 1 이상 `app.admin.max-grant-amount` 이하여야 한다. */
     private fun validateRequest(idemKey: String, amount: Long) {
         validateIdemKey(idemKey)
         if (amount <= 0) {

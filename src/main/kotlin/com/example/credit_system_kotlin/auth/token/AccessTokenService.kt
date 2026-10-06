@@ -27,10 +27,8 @@ private val log = LoggerFactory.getLogger(AccessTokenService::class.java)
 data class AccessPrincipal(val userId: Long, val role: UserRole)
 
 /**
- * 액세스 JWT(HS256)를 내고 확인한다.
- *
- * 토큰은 수명이 짧고(기본 15분) 서버에 저장하지 않는다. 그래서 도중에 무효로 만들 방법이 없고,
- * 로그아웃·역할 변경은 다음 갱신 때 반영된다. 길게 살아야 하는 쪽은 [RefreshTokenService] 가 맡는다.
+ * 액세스 JWT(HS256)를 내고 확인한다. 서버에 저장하지 않아 도중에 무효로 만들 수 없다.
+ * 로그아웃·역할 변경은 다음 갱신 때 반영된다.
  */
 @Service
 class AccessTokenService(
@@ -56,6 +54,7 @@ class AccessTokenService(
         }
     }
 
+    /** 역할을 토큰에 넣어 낸다. 그래서 역할이 바뀌어도 이 토큰이 만료될 때까지는 예전 역할이다. */
     fun issue(userId: Long, role: UserRole): String {
         val now = clock.instant()
         val claims = JwtClaimsSet.builder()
@@ -81,6 +80,7 @@ class AccessTokenService(
         return toPrincipal(jwt)
     }
 
+    /** sub 가 숫자가 아니거나 role 이 모르는 값이면 null. 서명이 맞아도 믿지 않는다. */
     private fun toPrincipal(jwt: Jwt): AccessPrincipal? {
         val userId = jwt.subject?.toLongOrNull()
         val role = UserRole.entries.firstOrNull { it.name == jwt.getClaimAsString(ROLE_CLAIM) }

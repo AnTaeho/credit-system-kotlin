@@ -41,11 +41,7 @@ class HoldServiceTest @Autowired constructor(
         appProperties(), eventPublisher
     )
 
-    /**
-     * 테스트 트랜잭션은 인스턴스 생성이 아니라 @BeforeEach 직전에 열린다.
-     * 프로퍼티 초기화 자리에서 save하면 트랜잭션 밖에서 커밋되어 롤백되지 않으므로
-     * 엔티티 준비는 반드시 @BeforeEach 안에서 한다.
-     */
+    /** 프로퍼티 초기화 자리에서 save 하면 트랜잭션 밖에서 커밋되어 롤백되지 않는다. 엔티티는 @BeforeEach 에서 준비한다. */
     private lateinit var user: User
 
     @BeforeEach

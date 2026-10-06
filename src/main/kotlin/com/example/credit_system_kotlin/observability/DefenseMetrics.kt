@@ -15,15 +15,8 @@ import java.util.concurrent.ConcurrentHashMap
 private val log = LoggerFactory.getLogger(DefenseMetrics::class.java)
 
 /**
- * 방어 장치의 가동 기록을 Micrometer 카운터로 승격한다.
- *
- * 도메인/서비스/스케줄러는 [DefenseTriggered] / [JobRecovered] 이벤트만 발행하고,
- * 세는 책임은 이 컴포넌트가 진다. 여기가 Micrometer 를 아는 유일한 곳이다.
- *
- * [EventListener] 를 쓰고 `@TransactionalEventListener(AFTER_COMMIT)` 는 쓰지 않는다.
- * "조건부 UPDATE 가 0행을 돌려줬다"는 사실은 그 트랜잭션이 커밋되든 롤백되든 참이기 때문이다.
- * AFTER_COMMIT 을 걸면 롤백된 트랜잭션의 이벤트를 조용히 버리는데, 유니크 위반처럼
- * 롤백되는 경우가 오히려 가장 세고 싶은 사건이다.
+ * 방어 장치 이벤트를 카운터로 센다. 리스너를 AFTER_COMMIT 으로 바꾸면 안 된다.
+ * 유니크 위반처럼 롤백되는 트랜잭션의 이벤트가 버려지는데, 그게 가장 세야 하는 사건이다.
  */
 @Component
 class DefenseMetrics(
@@ -47,6 +40,7 @@ class DefenseMetrics(
         }
     }
 
+    /** 미리 등록한 조합이면 카운터만 올린다. 목록에 없는 조합도 버리지 않고 경고와 함께 센다. */
     @EventListener
     fun onDefenseTriggered(event: DefenseTriggered) {
         defenseCounters.computeIfAbsent(event.point to event.outcome) { (point, outcome) ->
@@ -58,6 +52,7 @@ class DefenseMetrics(
         }.increment()
     }
 
+    /** 죽은 job 을 FAILED 로 회수할 때마다 어느 감지 경로가 잡았는지로 나눠 센다. */
     @EventListener
     fun onJobRecovered(event: JobRecovered) {
         log.debug(
