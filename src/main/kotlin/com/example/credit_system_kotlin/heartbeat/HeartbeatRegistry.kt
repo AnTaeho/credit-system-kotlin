@@ -36,13 +36,7 @@ class HeartbeatRegistry(
     @Qualifier("heartbeatScheduler") private val scheduler: TaskScheduler
 ) {
 
-    /**
-     * 첫 갱신은 호출 스레드에서 바로 한다. 생성 호출이 시작되기 전에 heartbeat 가 반드시 있어야
-     * 회수 스캔이 이 attempt 를 죽은 것으로 보지 않는다.
-     *
-     * 주기 작업은 시작 시각을 한 주기 뒤로 줘서 건다. 시작 시각 없이 걸면 스케줄러가 곧바로 한 번 더
-     * 돌려 방금 한 갱신과 겹친다.
-     */
+    /** 첫 갱신은 여기서 바로 하고, 주기 갱신은 한 주기 뒤부터 돈다. */
     fun startHeartbeat(jobId: Long, attemptNo: Int): ScheduledFuture<*> {
         val attempt = JobAttempt(jobId, attemptNo)
         refreshHeartbeat(attempt)

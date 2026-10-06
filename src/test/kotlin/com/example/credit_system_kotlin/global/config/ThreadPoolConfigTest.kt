@@ -13,14 +13,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
-/**
- * 풀 셋이 서로 섞이지 않고 각자 설정을 따르는지 본다.
- *
- * 가장 지키고 싶은 것은 `@Scheduled` 풀과 heartbeat 풀의 분리다. heartbeat 스케줄러를 빈으로 올리면
- * 부트가 자기 `taskScheduler` 를 만들지 않으므로, [ThreadPoolConfig] 가 `taskScheduler` 를 직접
- * 선언하지 않는 순간 `@Scheduled` 가 조용히 heartbeat 풀로 넘어간다. 기동은 멀쩡히 되기 때문에
- * 테스트로 못 박아 둔다.
- */
+/** `taskScheduler` 빈이 빠지면 기동은 되는데 `@Scheduled` 가 heartbeat 풀에서 돈다. 그걸 잡는다. */
 class ThreadPoolConfigTest {
 
     @Test
@@ -85,7 +78,7 @@ class ThreadPoolConfigTest {
             }
     }
 
-    /** `@Scheduled` 메서드가 처음 돈 스레드의 이름을 남긴다. 어느 풀이 이 메서드를 돌렸는지 보려는 것이다 */
+    /** 처음 돈 스레드 이름을 남긴다. */
     open class ThreadNameRecorder {
         val firstThreadName = CompletableFuture<String>()
 
@@ -95,7 +88,7 @@ class ThreadPoolConfigTest {
         }
     }
 
-    /** 부트의 스케줄러 자동 설정은 `@EnableScheduling` 이 켜져 있을 때만 움직인다. 실제 앱과 같은 조건을 만든다 */
+    /** 부트의 스케줄러 자동 설정은 `@EnableScheduling` 이 있어야 켜진다. */
     @Configuration
     @EnableScheduling
     class SchedulingEnabled
