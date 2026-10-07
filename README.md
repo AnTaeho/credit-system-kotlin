@@ -2,7 +2,7 @@
 
 AI 생성 서비스의 **크레딧 과금 백엔드**다. 사용자가 크레딧을 받아 두고, 이미지 생성을 요청하면 잔액에서 비용을 **hold** 한다. 워커가 job 을 집어 생성 스텁을 호출하고, 성공하면 **confirm**, 실패하면 **환불**한다.
 
-돈이 걸린 시스템이라 "두 번 처리됨", "잔액이 음수가 됨", "돈이 묶인 채 사라짐" 이 전부 사고다. 이 저장소의 대부분은 그 사고를 하나씩 막는 장치이고, 그 장치들이 **어떤 순서로 왜 생겼는지**가 [`STEPS.md`](STEPS.md) 의 학습 브랜치 체인에 남아 있다.
+돈이 걸린 시스템이라 "두 번 처리됨", "잔액이 음수가 됨", "돈이 묶인 채 사라짐" 이 전부 사고다. 이 저장소의 대부분은 그 사고를 하나씩 막는 장치다.
 
 Kotlin / Spring Boot / MySQL / Redis. 원본은 별도 Java 프로젝트이고 이 저장소는 그것을 Kotlin 으로 이식한 뒤 독자적으로 자란 것이다.
 
@@ -49,7 +49,7 @@ ADMIN=$(token admin@local.test local-admin-password)
 
 ### 크레딧 얻기 — 운영자 지급
 
-결제 없는 자기 충전은 없다(실제 결제 충전은 [로드맵](docs/roadmap.md) step14). 그전까지 크레딧은 **운영자 지급**으로만 생긴다. 브라우저에서는 운영자로 로그인해 `/admin` 화면의 지급 폼을 쓴다.
+결제 없는 자기 충전은 없다. 크레딧은 **운영자 지급**으로만 생긴다. 브라우저에서는 운영자로 로그인해 `/admin` 화면의 지급 폼을 쓴다.
 
 ```bash
 # 지급할 사용자의 id 를 확인한다 (새 DB 면 dev@local.test 가 1)
@@ -135,7 +135,7 @@ docker compose --profile app up -d --build
 
 `--profile app` 없이 `docker compose up -d` 하면 인프라만 뜬다. 개발 중에는 앱을 자주 재시작하니까 그쪽이 기본이다.
 
-CI 는 GitHub Actions 다. PR 이면 [`ci.yml`](.github/workflows/ci.yml) 이 `test detekt ktlintCheck` 를 돌리고, `develop` push 나 `v*` 태그면 [`image.yml`](.github/workflows/image.yml) 이 검증을 통과한 뒤 GHCR 로 이미지를 올린다. 둘 다 실제 러너에서 돌았다(PR #1·#2, step8 머지 후 GHCR push).
+CI 는 GitHub Actions 다. PR 이면 [`ci.yml`](.github/workflows/ci.yml) 이 `test detekt ktlintCheck` 를 돌리고, `develop` push 나 `v*` 태그면 [`image.yml`](.github/workflows/image.yml) 이 검증을 통과한 뒤 GHCR 로 이미지를 올린다. 둘 다 실제 러너에서 돌았다(PR #1·#2, GHCR push).
 
 ---
 
@@ -187,12 +187,8 @@ Prometheus + 알람 규칙 + 장애 주입 시나리오가 별도 compose 로 �
 
 | | |
 |---|---|
-| [`STEPS.md`](STEPS.md) | 학습 브랜치 체인 전체 지도. step0(방어 없음) → step9(인증) |
-| [`docs/step0-naive.md`](docs/step0-naive.md) … [`docs/step9-auth.md`](docs/step9-auth.md) | 단계별 상세. 실제 코드 인용, 테스트가 무엇을 단언하는지, 무엇이 남았는지 |
-| [`docs/roadmap.md`](docs/roadmap.md) | 앞으로. 지금 무엇이 실서비스 수준이 아닌지의 진단표와 step8~14 의 결정·완료 기록 |
+| [`docs/roadmap.md`](docs/roadmap.md) | 앞으로. 지금 무엇이 실서비스 수준이 아닌지의 진단표와 결정·완료 기록 |
 | [`deploy/observability/README.md`](deploy/observability/README.md) | 관측 스택 띄우기·시나리오 |
-
-읽는 순서를 하나만 고르라면 `STEPS.md` → 관심 가는 단계의 `docs/stepN-*.md` 다.
 
 ---
 
@@ -235,7 +231,7 @@ Prometheus + 알람 규칙 + 장애 주입 시나리오가 별도 compose 로 �
 
 운영은 `prod` 프로파일(`SPRING_PROFILES_ACTIVE=prod`)이다. 이 프로파일의 DB 설정과 JWT 서명 키에는 **기본값이 없다** — 환경변수를 빠뜨리면 앱이 로컬 DB 를 향해 조용히 뜨는 대신 부팅에서 죽는다. 서명 키가 저장소에 공개된 로컬 기본값과 같거나 쿠키 `Secure` 가 꺼져 있어도 기동을 거부한다. 스키마는 어느 프로파일에서든 Flyway 가 만들고 Hibernate 는 `validate` 로 확인만 한다.
 
-저장소에 있는 비밀번호는 local 프로필의 시드 계정 둘과 compose 의 DB 계정뿐이고, 둘 다 로컬 전용이다. 진짜 시크릿 관리는 배포 환경이 정해질 때(로드맵 step10) 붙는다.
+저장소에 있는 비밀번호는 local 프로필의 시드 계정 둘과 compose 의 DB 계정뿐이고, 둘 다 로컬 전용이다. 진짜 시크릿 관리는 배포 환경이 정해질 때 붙는다.
 
 ---
 
@@ -243,7 +239,7 @@ Prometheus + 알람 규칙 + 장애 주입 시나리오가 별도 compose 로 �
 
 - **누구나 가입할 수 있다.** 이메일 인증, 가입·로그인 시도 제한, 비밀번호 재설정은 없다. 가입해도 잔액은 0 이고 크레딧은 운영자 지급으로만 생기므로 돈이 새지는 않는다
 - **로그아웃해도 이미 나간 액세스 토큰은 만료(15분)까지 유효하다.** 서버가 끊는 것은 리프레시 토큰이다. 브라우저에서는 쿠키가 지워져 쓰이지 않는다
-- **크레딧은 운영자 지급으로만 생긴다.** 결제 충전은 step14 다
-- **생성이 스텁이다.** `GenerationStubClient` 는 `Thread.sleep` + 확률적 실패인 인메모리 시뮬레이션이다. 네트워크 너머로 나가는 것은 step11 이다
+- **크레딧은 운영자 지급으로만 생긴다.** 결제 충전은 아직 없다
+- **생성이 스텁이다.** `GenerationStubClient` 는 `Thread.sleep` + 확률적 실패인 인메모리 시뮬레이션이다. 네트워크 너머로 나가지 않는다
 - **인스턴스 1대 전제다.** 회수·대사·멱등키 정리 스케줄러에 분산 락이 없다. 실사용자가 한 명이라 서버도 1대로 운영하기로 했다(로드맵 결정 13)
 - **내가 실제로 쓰는 개인 서비스로 가는 중이다.** 원화로 앱 내 크레딧을 충전(mock)하고, 그 크레딧으로 Claude API 요청을 산다(로드맵 v4). 돈이 걸린 시스템에서 무엇이 깨지고 무엇으로 막는지를 코드와 실측으로 남기는 원칙은 그대로다
