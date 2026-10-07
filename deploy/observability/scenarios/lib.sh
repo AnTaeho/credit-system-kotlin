@@ -178,7 +178,7 @@ kill_app() {
 start_app() { $DC start app >/dev/null; wait_app_up; note "앱 재기동 완료 ($(tstamp))"; }
 
 app_logs()   { $DC logs --no-log-prefix app 2>/dev/null; }
-# 자격증명은 루트 docker-compose.yml 의 계약과 같다(step8-D). 훼손 시나리오의 UPDATE/DELETE 까지
+# 자격증명은 루트 docker-compose.yml 의 계약과 같다. 훼손 시나리오의 UPDATE/DELETE 까지
 # credit 사용자로 충분하다 — MYSQL_USER 는 MYSQL_DATABASE 에 ALL 권한을 받는다.
 DB_USER="${DB_USER:-credit}"; DB_PASSWORD="${DB_PASSWORD:-credit}"; DB_NAME="${DB_NAME:-credit_system}"
 mysql_q()    { $DC exec -T mysql mysql -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -N -B -e "$1" 2>/dev/null; }

@@ -5,25 +5,25 @@ package com.example.credit_system_kotlin.global.event
  * 조건부 UPDATE 를 날리고 영향 행 수를 본다.
  */
 enum class DefensePoint {
-    /** 조건부 잔액 차감(step2). `balance >= cost` 를 WHERE 에 넣은 UPDATE */
+    /** 조건부 잔액 차감. `balance >= cost` 를 WHERE 에 넣은 UPDATE */
     HOLD_BALANCE,
 
-    /** 멱등키(step3). 1차는 애플리케이션 조회, 2차는 DB 유니크 제약 */
+    /** 멱등키. 1차는 애플리케이션 조회, 2차는 DB 유니크 제약 */
     IDEM_KEY,
 
-    /** 워커 선점(step4). HOLDING → PROCESSING 전이를 attemptNo 로 잠근다 */
+    /** 워커 선점. HOLDING → PROCESSING 전이를 attemptNo 로 잠근다 */
     WORKER_CLAIM,
 
-    /** 생성 성공 확정(step4). 낡은 세대의 confirm 을 attemptNo 로 무효화한다 */
+    /** 생성 성공 확정. 낡은 세대의 confirm 을 attemptNo 로 무효화한다 */
     CONFIRM,
 
-    /** 실패 전이(step4). 낡은 세대의 실패 보고를 attemptNo 로 무효화한다 */
+    /** 실패 전이. 낡은 세대의 실패 보고를 attemptNo 로 무효화한다 */
     MARK_FAILED,
 
-    /** 재시도 투입(step5). 같은 FAILED job 을 두 스캐너가 동시에 집는 경쟁 */
+    /** 재시도 투입. 같은 FAILED job 을 두 스캐너가 동시에 집는 경쟁 */
     RETRY_CLAIM,
 
-    /** 최종 환불(step5). 늦게 살아난 워커가 먼저 확정하면 환불을 취소한다 */
+    /** 최종 환불. 늦게 살아난 워커가 먼저 확정하면 환불을 취소한다 */
     FINAL_REFUND
 }
 

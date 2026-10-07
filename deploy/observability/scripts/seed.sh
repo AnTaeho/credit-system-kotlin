@@ -15,7 +15,7 @@ set -euo pipefail
 COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.yml"
 DC="docker compose -f ${COMPOSE_FILE}"
 
-# 루트 docker-compose.yml 의 계약과 같은 자격증명이다(step8-D).
+# 루트 docker-compose.yml 의 계약과 같은 자격증명이다.
 DB_USER="${DB_USER:-credit}"; DB_PASSWORD="${DB_PASSWORD:-credit}"; DB_NAME="${DB_NAME:-credit_system}"
 DEV_EMAIL="${DEV_EMAIL:-dev@local.test}"
 

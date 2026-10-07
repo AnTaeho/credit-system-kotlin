@@ -1,4 +1,4 @@
-# step7 5단계 — 도메인 지표 관측 스택 (MySQL · Redis · 앱 · Prometheus)
+# 도메인 지표 관측 스택 (MySQL · Redis · 앱 · Prometheus)
 #
 # 지표와 알람은 Prometheus 화면에서 본다: http://localhost:9090/graph, /alerts
 #
@@ -10,7 +10,7 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      # 루트 docker-compose.yml·application.yml 과 같은 계약이다(step8-D).
+      # 루트 docker-compose.yml·application.yml 과 같은 계약이다.
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: credit_system
       MYSQL_USER: credit
@@ -35,7 +35,7 @@ services:
 
   app:
     build:
-      # 저장소 루트의 Dockerfile 을 쓴다(step8-C). 이미지 안에서 bootJar 까지 돌므로
+      # 저장소 루트의 Dockerfile 을 쓴다. 이미지 안에서 bootJar 까지 돌므로
       # 예전처럼 호스트에서 ./gradlew bootJar 를 먼저 돌릴 필요가 없다.
       context: ../..
       dockerfile: Dockerfile
@@ -48,7 +48,6 @@ services:
       # 스크립트는 이 계정으로 POST /auth/token 에서 액세스 토큰을 받아 API 를 두드린다.
       SPRING_PROFILES_ACTIVE: local
       # 노출 경계의 실물. 관리 포트를 애플리케이션 포트에서 떼어낸다.
-      # application.yml 에 쓰지 않고 여기서 주는 이유는 docs/step7-observability.md 4단계 참고.
       MANAGEMENT_SERVER_PORT: 8081
       # 6단계 장애 주입용 손잡이. 기본값은 application.yml 과 같으므로,
       # 아무것도 지정하지 않고 올리면 5단계까지와 동일한 스택이다.

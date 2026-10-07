@@ -56,7 +56,7 @@ jobs:
       #   - develop push          → `develop`, `sha-<짧은 sha>`
       #   - v1.2.3 태그 push      → `1.2.3`, `1.2`, `sha-<짧은 sha>`
       # 짧은 sha 는 항상 붙는다. "지금 도는 게 어느 커밋인가"에 답할 수 있어야 한다.
-      # latest 는 붙이지 않는다 — 배포는 step10 이고, 그때 무엇을 latest 로 부를지
+      # latest 는 붙이지 않는다 — 배포는 아직 없고, 그때 무엇을 latest 로 부를지
       # 정하지 않은 채 태그부터 만들면 아무도 못 믿는 이름이 하나 생길 뿐이다.
       - name: derive tags
         id: meta

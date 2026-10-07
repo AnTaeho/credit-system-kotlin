@@ -1,6 +1,6 @@
 # 저장소 루트 이미지 — 소스만 있으면 이 파일 하나로 실행 가능한 이미지가 나온다.
 #
-# step7 의 deploy/observability/Dockerfile 은 호스트가 만든 fat jar 를 COPY 했다.
+# 예전의 deploy/observability/Dockerfile 은 호스트가 만든 fat jar 를 COPY 했다.
 # 관측 스택을 띄우는 게 목적이었으니 그때는 그걸로 충분했지만, CI 는 "내 노트북에서
 # ./gradlew bootJar 를 먼저 돌린다"를 할 수 없다. 그래서 빌드를 이미지 안으로 들인다.
 #

@@ -125,7 +125,7 @@ class SecurityConfig {
     companion object {
         /**
          * 스크립트·스타일은 `static/js`, `static/css` 의 같은 출처 파일만. 인라인은 막는다(XSS 가 새도 실행되지 않게).
-         * 이미지도 같은 출처만 — 생성 결과 URL 은 아직 이미지로 그리지 않는다(step12).
+         * 이미지도 같은 출처만 — 생성 결과 URL 은 아직 이미지로 그리지 않는다.
          */
         const val CONTENT_SECURITY_POLICY =
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; " +
