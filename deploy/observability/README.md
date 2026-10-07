@@ -1,7 +1,6 @@
 # 관측 스택 (Prometheus)
 
-step7 5단계에서 만든 로컬 관측 스택이다. 논지·지표 해석·알람 기준의 상세는
-[`docs/step7-observability.md`](../../docs/step7-observability.md) 의 4·5단계를 봐라.
+로컬 관측 스택이다. 알람 기준은 [`prometheus/rules/credit.rules.yml`](prometheus/rules/credit.rules.yml) 의 주석에 있다.
 
 ## 전제
 
@@ -9,7 +8,6 @@ step7 5단계에서 만든 로컬 관측 스택이다. 논지·지표 해석·�
 
 앱 이미지는 저장소 루트의 `Dockerfile`(멀티스테이지)로 만들어진다. 빌더 스테이지가
 이미지 안에서 `bootJar` 까지 돌리므로 호스트에 JDK 도, 미리 만든 jar 도 필요 없다.
-(step8-C 이전에는 `./gradlew bootJar` 를 먼저 돌려야 했다.)
 
 호스트의 3306(MySQL)·6379(Redis)는 건드리지 않는다 — 스택의 MySQL/Redis 는 포트를
 publish 하지 않고 compose 네트워크 안에서만 산다.
@@ -129,11 +127,10 @@ docker compose -f deploy/observability/docker-compose.yml exec mysql \
 docker compose -f deploy/observability/docker-compose.yml logs -f app
 ```
 
-## 장애 주입 시나리오 (step7 6단계)
+## 장애 주입 시나리오
 
 `scenarios/` 의 7개 스크립트는 사고를 실제로 심고, **어느 지표가 반응하고 어느 지표가
-침묵하는지, 감지까지 몇 초 걸리는지**를 실측한다. 해석과 실측값은
-[`docs/step7-observability.md`](../../docs/step7-observability.md) 의 6단계에 있다.
+침묵하는지, 감지까지 몇 초 걸리는지**를 실측한다.
 
 ```
 # 전체 (30~50분, 마지막에 down -v 까지 한다)

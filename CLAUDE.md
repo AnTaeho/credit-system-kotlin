@@ -1,8 +1,8 @@
 # credit-system-kotlin — 작업 지침
 
 ## 작업 기준
-- step 시리즈(stepN 브랜치)는 버렸다. `step11-external` 코드(타임아웃·절대 상한·backoff·드레인·상관 ID)도 머지하지 않는다. roadmap·credit-todo 문서가 step11 머지를 할 일처럼 적고 있어도 따르지 않는다.
-- 새 작업은 `develop`에 바로 커밋한다. develop 마이그레이션은 V1~V9.
+- step 시리즈(stepN 브랜치)는 버렸고 그 문서(`STEPS.md`, `docs/step*.md`, `docs/roadmap.md`)도 지웠다. 다시 만들지 않는다. `step11-external` 코드(타임아웃·절대 상한·backoff·드레인·상관 ID)도 머지하지 않는다.
+- 새 작업은 `develop`에 바로 커밋한다. develop 마이그레이션은 V1~V10.
 - 포트폴리오 6장의 「외부 호출 타임아웃이 필요합니다」 한계는 그대로 둔다. step10(배포 1대, 도메인 credit.papercut.kr)은 보류.
 
 ## 테스트 함정
