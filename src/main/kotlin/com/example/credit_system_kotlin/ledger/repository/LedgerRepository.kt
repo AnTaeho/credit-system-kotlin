@@ -19,8 +19,10 @@ interface LedgerRepository : JpaRepository<LedgerEntry, Long> {
 
     fun findByUserIdAndIdemKey(userId: Long, idemKey: String): LedgerEntry?
 
-    // 생성자 인스턴스화는 Hibernate 가 FQ 이름을 요구한다. 단순 이름으로 줄이면 부팅 시 SemanticException.
-    /** 대사용. userId 오름차순으로 [lastId] 다음부터 읽는다. 원장이 한 줄도 없는 사용자도 합계 0 으로 나온다. */
+    /**
+     * 대사용. userId 오름차순으로 [lastId] 다음부터 읽는다. 원장이 한 줄도 없는 사용자도 합계 0 으로 나온다.
+     * 생성자 인스턴스화는 Hibernate 가 FQ 이름을 요구한다. 단순 이름으로 줄이면 부팅 시 SemanticException.
+     */
     @Query(
         """
         SELECT new com.example.credit_system_kotlin.ledger.dto.LedgerBalanceCheck(
