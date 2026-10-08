@@ -41,9 +41,8 @@ class JobRepositoryTest @Autowired constructor(
     @Test
     fun `재시도로 올린 attemptNo로도 처리를 시작할 수 있다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
         jobRepository.incrementAttemptForRetry(job.persistedId, 0, Instant.now())
 
         val updated = jobRepository.startProcessingIfAttemptMatches(job.persistedId, 1, Instant.now())
@@ -71,12 +70,9 @@ class JobRepositoryTest @Autowired constructor(
     @Test
     fun `환불된 작업은 같은 attemptNo로 완료할 수 없다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.REFUNDED, JobStatus.FAILED, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
+        jobRepository.refundIfFailed(job.persistedId, 0, Instant.now())
 
         val updated = jobRepository.completeIfAttemptMatches(
             job.persistedId, "https://stub/image/late.png", 0, Instant.now()
@@ -104,18 +100,13 @@ class JobRepositoryTest @Autowired constructor(
     }
 
     @Test
-    fun `상태가 다르면 0행이고 일치하면 전이된다`() {
+    fun `refundIfFailed는 상태가 다르면 0행이고 FAILED면 전이된다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
 
-        val wrongStatus = jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.REFUNDED, JobStatus.COMPLETED, 0, Instant.now()
-        )
-        val match = jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.REFUNDED, JobStatus.FAILED, 0, Instant.now()
-        )
+        val wrongStatus = jobRepository.refundIfFailed(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
+        val match = jobRepository.refundIfFailed(job.persistedId, 0, Instant.now())
 
         assertThat(wrongStatus).isZero()
         assertThat(match).isEqualTo(1)
@@ -130,9 +121,8 @@ class JobRepositoryTest @Autowired constructor(
         val beforeFail = jobRepository.incrementAttemptForRetry(job.persistedId, 0, Instant.now())
         assertThat(beforeFail).isZero()
 
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
         val afterFail = jobRepository.incrementAttemptForRetry(job.persistedId, 0, Instant.now())
 
         val found = jobRepository.findById(job.persistedId).orElseThrow()
@@ -145,9 +135,8 @@ class JobRepositoryTest @Autowired constructor(
     fun `updatedAt이 cutoff 이전인 HOLDING job만 조회된다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
         val staleUpdatedAt = Instant.now().minusSeconds(120)
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.HOLDING, JobStatus.HOLDING, 0, staleUpdatedAt
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.rollbackToHoldingIfProcessing(job.persistedId, 0, staleUpdatedAt)
 
         val caught = jobRepository.findByStatusAndUpdatedAtBeforeOrderByIdAsc(
             JobStatus.HOLDING, Instant.now(), PageRequest.of(0, 10)
@@ -197,9 +186,8 @@ class JobRepositoryTest @Autowired constructor(
     @Test
     fun `refundIfFailed는 FAILED인 job만 REFUNDED로 내린다`() {
         val failedJob = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            failedJob.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(failedJob.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(failedJob.persistedId, 0, Instant.now())
         val holdingJob = jobRepository.save(Job.hold(1L, 100L, "dog"))
 
         val fromFailed = jobRepository.refundIfFailed(failedJob.persistedId, 0, Instant.now())
@@ -211,5 +199,42 @@ class JobRepositoryTest @Autowired constructor(
         assertThat(fromHolding).isZero()
         assertThat(jobRepository.findById(holdingJob.persistedId).orElseThrow().status)
             .isEqualTo(JobStatus.HOLDING)
+    }
+
+    @Test
+    fun `failIfProcessing은 attemptNo가 다르면 0행이며 PROCESSING이 유지된다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+
+        val updated = jobRepository.failIfProcessing(job.persistedId, 5, Instant.now())
+
+        assertThat(updated).isZero()
+        assertThat(jobRepository.findById(job.persistedId).orElseThrow().status)
+            .isEqualTo(JobStatus.PROCESSING)
+    }
+
+    @Test
+    fun `rollbackToHoldingIfProcessing은 attemptNo가 다르면 0행이며 PROCESSING이 유지된다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+
+        val updated = jobRepository.rollbackToHoldingIfProcessing(job.persistedId, 5, Instant.now())
+
+        assertThat(updated).isZero()
+        assertThat(jobRepository.findById(job.persistedId).orElseThrow().status)
+            .isEqualTo(JobStatus.PROCESSING)
+    }
+
+    @Test
+    fun `refundIfFailed는 attemptNo가 다르면 0행이며 FAILED가 유지된다`() {
+        val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
+
+        val updated = jobRepository.refundIfFailed(job.persistedId, 5, Instant.now())
+
+        assertThat(updated).isZero()
+        assertThat(jobRepository.findById(job.persistedId).orElseThrow().status)
+            .isEqualTo(JobStatus.FAILED)
     }
 }

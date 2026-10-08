@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # 시드 계정 dev@local.test 가 id=1 로 만들어졌는지 확인한다. 행을 넣지 않는다.
 #
-# 계정은 앱이 만든다. local 프로필은 기동이 끝난 직후 application-local.yml 의 시드 계정 둘을 순서대로
-# 만든다(dev@local.test → admin@local.test). 새 DB 에서는 dev 가 id=1, admin 이 id=2 가 된다.
+# 계정은 마이그레이션 V2(V2__seed_accounts.sql)가 넣는다(dev@local.test → admin@local.test).
+# 새 DB 에서는 dev 가 id=1, admin 이 id=2 가 된다.
 # 시나리오 SQL 과 지급 경로(/api/admin/users/1/grants)는 전부 users.id=1 을 가정하므로,
 # 그 가정이 맞는지 여기서 한 번 확인하고 틀리면 실패로 끝낸다.
 #
 # 예전에는 이 스크립트가 id=1 행을 직접 INSERT 했다. 지금 그렇게 하면 비밀번호 없는 행이 생겨
 # 그 계정으로 토큰을 받을 수 없다. 그래서 확인만 한다.
 #
-# 시드 계정은 앱이 UP 이 된 뒤에 생기므로, UP 을 기다린 다음 행이 보일 때까지 잠깐 더 기다린다.
+# 마이그레이션은 앱이 뜨는 동안 돌므로, UP 을 기다린 다음 행을 확인한다.
 set -euo pipefail
 
 COMPOSE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-compose.yml"
@@ -42,7 +42,7 @@ for i in $(seq 1 30); do
 done
 
 if [ -z "$row" ]; then
-  echo "시드 계정 ${DEV_EMAIL} 이 없다. 앱이 local 프로필로 떴는지 확인한다(SPRING_PROFILES_ACTIVE=local)." >&2
+  echo "시드 계정 ${DEV_EMAIL} 이 없다. 마이그레이션 V2 가 적용됐는지 확인한다(flyway_schema_history)." >&2
   exit 1
 fi
 

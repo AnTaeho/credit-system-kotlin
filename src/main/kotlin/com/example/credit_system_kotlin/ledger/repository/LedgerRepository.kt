@@ -11,18 +11,12 @@ interface LedgerRepository : JpaRepository<LedgerEntry, Long> {
 
     fun findByUserIdOrderByIdDesc(userId: Long): List<LedgerEntry>
 
-    /** 커서 페이징의 첫 페이지. `Page` 가 아니라 `List` 로 받아 count 쿼리를 피한다. */
     fun findByUserIdOrderByIdDesc(userId: Long, pageable: Pageable): List<LedgerEntry>
 
-    /** 커서 페이징의 다음 페이지. [cursor] 는 배타적 상한 id 다. */
     fun findByUserIdAndIdLessThanOrderByIdDesc(userId: Long, cursor: Long, pageable: Pageable): List<LedgerEntry>
 
     fun findByUserIdAndIdemKey(userId: Long, idemKey: String): LedgerEntry?
 
-    /**
-     * 대사용. userId 오름차순으로 [lastId] 다음부터 읽는다. 원장이 한 줄도 없는 사용자도 합계 0 으로 나온다.
-     * 생성자 인스턴스화는 Hibernate 가 FQ 이름을 요구한다. 단순 이름으로 줄이면 부팅 시 SemanticException.
-     */
     @Query(
         """
         SELECT new com.example.credit_system_kotlin.ledger.dto.LedgerBalanceCheck(

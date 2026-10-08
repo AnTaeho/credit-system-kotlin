@@ -10,10 +10,6 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
-/**
- * 운영자가 남에게 지급하는 API 라 여기만 대상 사용자 id 를 경로로 받는다. 다른 API 는 [CurrentUser] 만 쓴다.
- * ROLE_ADMIN 검사는 `SecurityConfig` 가 `/api/admin` 경로에 걸고, [CurrentUser] 는 지급한 사람을 남기는 데 쓴다.
- */
 @RestController
 @RequestMapping("/api/admin/users")
 class AdminGrantApiController(
@@ -25,5 +21,5 @@ class AdminGrantApiController(
         currentUser: CurrentUser,
         @PathVariable userId: Long,
         @RequestBody request: GrantRequest
-    ): GrantResponse = userService.grant(currentUser.userId, userId, request.idemKey, request.amount)
+    ): GrantResponse = userService.grant(currentUser.userId, userId, request)
 }

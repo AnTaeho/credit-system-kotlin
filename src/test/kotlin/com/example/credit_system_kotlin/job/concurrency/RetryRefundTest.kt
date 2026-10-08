@@ -1,6 +1,7 @@
 package com.example.credit_system_kotlin.job.concurrency
 
 import com.example.credit_system_kotlin.job.domain.JobStatus
+import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.HoldService
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
@@ -45,7 +46,7 @@ class RetryRefundTest @Autowired constructor(
     fun `매번 실패하면 재시도를 모두 소진하고 최종적으로 환불된다`() {
         val user = userRepository.save(User("acme", 1000L))
 
-        val result = holdService.requestGeneration(user.persistedId, "retry-key", "cat")
+        val result = holdService.requestGeneration(user.persistedId, JobCreateRequest("retry-key", "cat"))
 
         await().atMost(30, TimeUnit.SECONDS).untilAsserted {
             val job = jobRepository.findById(result.jobId).orElseThrow()

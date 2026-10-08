@@ -51,23 +51,19 @@ class LedgerEntry private constructor(
 
     companion object {
 
-        /** hold 는 잔액을 묶는 차변이라 음수로 기록된다. */
         fun hold(userId: Long, jobId: Long, cost: Long): LedgerEntry {
             require(cost > 0) { "hold 원장의 cost는 양수여야 합니다: cost=$cost" }
             return LedgerEntry(userId, jobId, LedgerType.HOLD, -cost, null)
         }
 
-        /** confirm 은 hold 를 확정할 뿐 잔액을 움직이지 않아 금액이 0이다. */
         fun confirm(userId: Long, jobId: Long): LedgerEntry =
             LedgerEntry(userId, jobId, LedgerType.CONFIRM, 0, null)
 
-        /** refund 는 묶인 잔액을 되돌려주는 대변이라 양수로 기록된다. */
         fun refund(userId: Long, jobId: Long, amount: Long): LedgerEntry {
             require(amount > 0) { "refund 원장의 amount는 양수여야 합니다: amount=$amount" }
             return LedgerEntry(userId, jobId, LedgerType.REFUND, amount, null)
         }
 
-        /** jobId 없이 `(userId, idemKey)` 유니크 제약으로 중복을 막는다. 금액 부호는 여기서 검사하지 않는다. */
         fun charge(userId: Long, idemKey: String, amount: Long): LedgerEntry {
             require(idemKey.isNotBlank()) {
                 "CHARGE 원장은 idemKey가 비어 있으면 안 됩니다: idemKey=$idemKey"
@@ -75,7 +71,6 @@ class LedgerEntry private constructor(
             return LedgerEntry(userId, null, LedgerType.CHARGE, amount, idemKey)
         }
 
-        /** 운영자 지급은 양수로 기록한다. 대사가 유형을 가리지 않고 `amount` 를 합산해서 부호가 틀리면 바로 불일치다. */
         fun adminGrant(userId: Long, idemKey: String, amount: Long): LedgerEntry {
             require(idemKey.isNotBlank()) {
                 "ADMIN_GRANT 원장은 idemKey가 비어 있으면 안 됩니다: idemKey=$idemKey"

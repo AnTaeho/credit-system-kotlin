@@ -1,6 +1,7 @@
 package com.example.credit_system_kotlin.job.concurrency
 
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
+import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.service.HoldService
 import com.example.credit_system_kotlin.support.DefenseCounters
 import com.example.credit_system_kotlin.user.domain.User
@@ -44,7 +45,7 @@ class ConcurrentHoldTest @Autowired constructor(
 
         runConcurrently(threadCount) { idx ->
             try {
-                holdService.requestGeneration(user.persistedId, "concurrent-key-$idx", "cat")
+                holdService.requestGeneration(user.persistedId, JobCreateRequest("concurrent-key-$idx", "cat"))
                 successCount.incrementAndGet()
             } catch (e: InsufficientBalanceException) {
                 rejectedCount.incrementAndGet()

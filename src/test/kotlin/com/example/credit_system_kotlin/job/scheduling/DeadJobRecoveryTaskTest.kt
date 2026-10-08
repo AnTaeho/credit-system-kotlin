@@ -46,7 +46,7 @@ class DeadJobRecoveryTaskTest {
         eventPublisher.clear()
         task = DeadJobRecoveryTask(
             heartbeatRegistry, jobRepository, jobLifecycleService,
-            appProperties(processing = AppProperties.Processing(timeoutSeconds = 60)),
+            appProperties(processing = AppProperties.Processing(timeoutSeconds = TIMEOUT_SECONDS)),
             eventPublisher
         )
         whenever(heartbeatRegistry.findExpiredAttempts()).thenReturn(emptySet())
@@ -56,6 +56,7 @@ class DeadJobRecoveryTaskTest {
         val job = Job.hold(1L, 100L, "cat")
         ReflectionTestUtils.setField(job, "id", id)
         ReflectionTestUtils.setField(job, "status", JobStatus.PROCESSING)
+        ReflectionTestUtils.setField(job, "attemptNo", STALE_ATTEMPT_NO)
         return job
     }
 
@@ -75,20 +76,21 @@ class DeadJobRecoveryTaskTest {
                 eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
             )
         ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.heartbeatState(20L, 0)).thenReturn(HeartbeatState.ABSENT)
+        whenever(heartbeatRegistry.heartbeatState(20L, STALE_ATTEMPT_NO)).thenReturn(HeartbeatState.ABSENT)
         whenever(
             jobRepository.failIfProcessing(eq(20L), any(), any<Instant>())
         ).thenReturn(1)
 
         task.scan()
 
-        verify(jobRepository).failIfProcessing(eq(20L), eq(0), any<Instant>())
-        verify(heartbeatRegistry).removeHeartbeat(20L, 0)
+        verify(jobRepository).failIfProcessing(eq(20L), eq(STALE_ATTEMPT_NO), any<Instant>())
+        verify(heartbeatRegistry).removeHeartbeat(20L, STALE_ATTEMPT_NO)
         assertThat(eventPublisher.recoveryEvents())
             .singleElement()
             .satisfies({
                 assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP)
                 assertThat(it.jobId).isEqualTo(20L)
+                assertThat(it.attemptNo).isEqualTo(STALE_ATTEMPT_NO)
             })
     }
 
@@ -100,7 +102,7 @@ class DeadJobRecoveryTaskTest {
                 eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
             )
         ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.heartbeatState(21L, 0)).thenReturn(HeartbeatState.LIVE)
+        whenever(heartbeatRegistry.heartbeatState(21L, STALE_ATTEMPT_NO)).thenReturn(HeartbeatState.LIVE)
 
         task.scan()
 
@@ -214,6 +216,20 @@ class DeadJobRecoveryTaskTest {
     }
 
     @Test
+    fun `정체 조회의 기준 시각은 지금에서 처리 제한 시간을 뺀 값이다`() {
+        val before = Instant.now()
+
+        task.scan()
+
+        val cutoff = argumentCaptor<Instant>()
+        verify(jobRepository).findByStatusAndUpdatedAtBeforeOrderByIdAsc(
+            eq(JobStatus.PROCESSING), cutoff.capture(), any<Pageable>()
+        )
+        assertThat(cutoff.firstValue)
+            .isBetween(before.minusSeconds(TIMEOUT_SECONDS), Instant.now().minusSeconds(TIMEOUT_SECONDS))
+    }
+
+    @Test
     fun `heartbeat 저장소를 못 보면 updatedAt 만으로 회수하고 BACKSTOP_BLIND로 발행한다`() {
         val job = staleProcessingJob(64L)
         whenever(
@@ -221,17 +237,18 @@ class DeadJobRecoveryTaskTest {
                 eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
             )
         ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.heartbeatState(64L, 0)).thenReturn(HeartbeatState.UNKNOWN)
-        whenever(jobRepository.failIfProcessing(eq(64L), eq(0), any<Instant>())).thenReturn(1)
+        whenever(heartbeatRegistry.heartbeatState(64L, STALE_ATTEMPT_NO)).thenReturn(HeartbeatState.UNKNOWN)
+        whenever(jobRepository.failIfProcessing(eq(64L), eq(STALE_ATTEMPT_NO), any<Instant>())).thenReturn(1)
 
         task.scan()
 
-        verify(jobRepository).failIfProcessing(eq(64L), eq(0), any<Instant>())
+        verify(jobRepository).failIfProcessing(eq(64L), eq(STALE_ATTEMPT_NO), any<Instant>())
         assertThat(eventPublisher.recoveryEvents())
             .singleElement()
             .satisfies({
                 assertThat(it.detector).isEqualTo(RecoveryDetector.BACKSTOP_BLIND)
                 assertThat(it.jobId).isEqualTo(64L)
+                assertThat(it.attemptNo).isEqualTo(STALE_ATTEMPT_NO)
             })
     }
 
@@ -243,9 +260,9 @@ class DeadJobRecoveryTaskTest {
                 eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
             )
         ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.heartbeatState(65L, 0)).thenReturn(HeartbeatState.UNKNOWN)
-        whenever(jobRepository.failIfProcessing(eq(65L), eq(0), any<Instant>())).thenReturn(1)
-        doThrow(RuntimeException("redis down")).whenever(heartbeatRegistry).removeHeartbeat(65L, 0)
+        whenever(heartbeatRegistry.heartbeatState(65L, STALE_ATTEMPT_NO)).thenReturn(HeartbeatState.UNKNOWN)
+        whenever(jobRepository.failIfProcessing(eq(65L), eq(STALE_ATTEMPT_NO), any<Instant>())).thenReturn(1)
+        doThrow(RuntimeException("redis down")).whenever(heartbeatRegistry).removeHeartbeat(65L, STALE_ATTEMPT_NO)
 
         task.scan()
 
@@ -263,11 +280,16 @@ class DeadJobRecoveryTaskTest {
                 eq(JobStatus.PROCESSING), any<Instant>(), any<Pageable>()
             )
         ).thenReturn(listOf(job))
-        whenever(heartbeatRegistry.heartbeatState(63L, 0)).thenReturn(HeartbeatState.ABSENT)
+        whenever(heartbeatRegistry.heartbeatState(63L, STALE_ATTEMPT_NO)).thenReturn(HeartbeatState.ABSENT)
         // failIfProcessing 은 스텁하지 않는다 — mock 의 Int 기본값 0이 곧 "회수 실패"다.
 
         task.scan()
 
         assertThat(eventPublisher.recoveryEvents()).isEmpty()
+    }
+
+    companion object {
+        private const val TIMEOUT_SECONDS = 60L
+        private const val STALE_ATTEMPT_NO = 2
     }
 }

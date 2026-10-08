@@ -84,11 +84,11 @@ class GlobalExceptionHandlerTest {
 
     @Test
     fun `잘못된 요청은 400과 코드를 반환한다`() {
-        val response = handler.handleInvalidRequest(InvalidRequestException("잘못된 요청"))
+        val response = handler.handleInvalidRequest(InvalidRequestException.promptRequired())
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         assertThat(response.body!!.code).isEqualTo("INVALID_REQUEST")
-        assertThat(response.body!!.message).isEqualTo("잘못된 요청")
+        assertThat(response.body!!.message).isEqualTo("prompt는 필수입니다.")
     }
 
     @Test

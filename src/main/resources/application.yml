@@ -2,13 +2,9 @@ spring:
   application:
     name: credit_system
   autoconfigure:
-    # 사용자는 users 테이블에만 있다. 이 자동 설정을 두면 부트가 메모리 사용자를 하나 만들고 임의 비밀번호를
-    # 기동 로그에 찍는다. 폼 로그인·HTTP Basic 을 쓰지 않아 그 계정으로 들어올 길은 없지만, 로그에 비밀번호처럼
-    # 보이는 줄이 남을 이유가 없어 끈다.
+    # users 테이블을 사용하므로 기본 메모리 사용자 생성과 임시 비밀번호 로깅을 비활성화한다.
     exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
-  # 여기 적힌 값은 로컬 개발용 기본값이다. 루트 docker-compose 가 띄우는 DB 와 같은 계약
-  # (credit_system / credit / credit)을 쓴다. 다른 환경에서는 Spring 표준 환경변수
-  # (SPRING_DATASOURCE_URL, SPRING_DATASOURCE_USERNAME, SPRING_DATASOURCE_PASSWORD)로 덮어쓴다.
+  # 루트 Compose와 같은 로컬 DB 기본값이며, 다른 환경은 SPRING_DATASOURCE_* 환경변수로 덮어쓴다.
   datasource:
     url: jdbc:mysql://localhost:3306/credit_system
     username: credit
@@ -36,28 +32,19 @@ spring:
 
 app:
   auth:
-    # 로그인 쿠키(credit_at, credit_rt)와 CSRF 토큰 쿠키에 Secure 를 붙일지. HTTPS 인 운영에서만 켠다
-    # (application-prod.yml). prod 에서 꺼져 있으면 기동이 거부된다.
+    # HTTPS 사용 시 로그인·CSRF 쿠키에 Secure를 설정한다.
     cookie-secure: false
-    # 기동할 때 맞춰 두는 계정. 운영자 계정은 이 길로만 생긴다(가입은 항상 일반 사용자다).
-    # 그 이메일의 행이 없으면 만들고, 있으면 역할과 비밀번호를 여기 값으로 덮는다. 기본은 비어 있다.
-    # 운영은 환경변수로 채운다: APP_AUTH_SEEDACCOUNTS_0_EMAIL, APP_AUTH_SEEDACCOUNTS_0_PASSWORD,
-    # APP_AUTH_SEEDACCOUNTS_0_ROLE(USER 또는 ADMIN). 비밀번호는 가입과 같은 규칙(8자 이상, 72바이트 이하)이다.
-    seed-accounts: []
     jwt:
-      # 액세스 JWT 서명 키(HS256, 32바이트 이상). 여기 적힌 기본값은 로컬 전용이다 — 저장소에 공개된 값이라
-      # 이 키로 서명한 토큰은 누구나 만들 수 있다. 운영은 application-prod.yml 이 기본값 없이 덮어써서
-      # 값이 없으면 부팅에서 죽는다.
-      secret: ${APP_AUTH_JWT_SECRET:local-only-jwt-secret-do-not-use-in-prod}
+      # HS256 서명 키는 32바이트 이상이며, 기본값은 로컬 전용이다.
+      secret: ${APP_AUTH_JWT_SECRET:local-only-jwt-secret-for-development}
       issuer: credit
-      access-ttl: 15m
+      access-ttl: 1h
       refresh-ttl: 14d
   scheduling:
     enabled: true
     reconciliation-interval-millis: 60000
     snapshot-interval-millis: 15000
     idempotency-cleanup-cron: "0 0 2 * * *"
-    refresh-token-cleanup-cron: "0 0 3 * * *"
     timezone: Asia/Seoul
   idempotency:
     retention-days: 7
@@ -96,7 +83,5 @@ logging:
     com.example.credit_system_kotlin: info
 
 server:
-  # SIGTERM 이 오면 새 요청 접수를 멈추고 진행 중 요청을 끝낸 뒤 내려간다. 이 설정이 없으면
-  # 웹서버가 즉시 끊겨, 응답을 기다리던 hold 요청이 "돈은 묶였는데 jobId 는 못 받은" 상태로
-  # 남는다.
+  # SIGTERM 시 진행 중 요청의 응답을 마친 뒤 종료해 hold 결과 유실을 방지한다.
   shutdown: graceful

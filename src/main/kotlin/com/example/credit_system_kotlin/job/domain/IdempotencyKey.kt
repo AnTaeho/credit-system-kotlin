@@ -26,9 +26,8 @@ class IdempotencyKey(
     @Column(nullable = false, length = 100)
     val idemKey: String,
 
-    /** 요청 내용(prompt)의 SHA-256 hex. V6 이전에 저장된 키는 NULL 이고, 그 키는 내용을 비교하지 않는다. */
-    @Column(length = 64)
-    val requestHash: String? = null
+    @Column(nullable = false, length = 64)
+    val requestHash: String
 
 ) {
 

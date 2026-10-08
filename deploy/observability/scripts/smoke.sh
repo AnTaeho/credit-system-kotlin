@@ -9,15 +9,15 @@ set -euo pipefail
 
 API="${API:-http://localhost:8080}"
 PROM="${PROM:-http://localhost:9090}"
-# 신원은 Bearer 액세스 토큰으로 댄다. 계정은 local 프로필이 기동 때 만드는 시드 계정이다
-# (application-local.yml). dev@local.test 는 일반 사용자(새 DB 에서 id=1), admin@local.test 는 운영자다.
-# 크레딧은 운영자 지급으로만 생긴다. 비밀번호는 로컬 전용 고정값이고 환경변수로 덮을 수 있다.
+# 신원은 Bearer 액세스 토큰으로 댄다. 계정은 마이그레이션 V2 가 넣는 시드 계정이다
+# (V2__seed_accounts.sql). dev@local.test 는 일반 사용자(새 DB 에서 id=1), admin@local.test 는 운영자다.
+# 크레딧은 운영자 지급으로만 생긴다. 비밀번호는 저장소에 공개된 고정값이고 환경변수로 덮을 수 있다.
 DEV_EMAIL="${DEV_EMAIL:-dev@local.test}";       DEV_PASSWORD="${DEV_PASSWORD:-local-dev-password}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@local.test}"; ADMIN_PASSWORD="${ADMIN_PASSWORD:-local-admin-password}"
 STAMP="$(date +%s)"
 
 # fetch_token 이메일 비밀번호 → 액세스 JWT. 1초 간격으로 최대 15번 시도한다.
-# 시드 계정은 앱이 UP 이 된 직후에 만들어져서, 기동 직후에는 잠깐 401 이 난다.
+# 앱이 아직 뜨는 중이면 연결이 실패하므로 다시 시도한다.
 fetch_token() {
   local email="$1" password="$2" i out code="" body="" token
   for i in $(seq 1 15); do
@@ -34,7 +34,7 @@ fetch_token() {
   return 1
 }
 
-# 이 스크립트는 몇 초면 끝난다. 토큰 수명(15분) 안이라 처음에 한 번만 받는다.
+# 이 스크립트는 몇 초면 끝난다. 토큰 수명(1시간) 안이라 처음에 한 번만 받는다.
 USER_HEADER="Authorization: Bearer $(fetch_token "$DEV_EMAIL" "$DEV_PASSWORD")"
 ADMIN_HEADER="Authorization: Bearer $(fetch_token "$ADMIN_EMAIL" "$ADMIN_PASSWORD")"
 

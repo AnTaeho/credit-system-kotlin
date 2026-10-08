@@ -135,6 +135,18 @@ class HeartbeatRegistryTest {
     }
 
     @Test
+    fun `findExpiredAttempts는 지금 시각까지 만료된 heartbeat를 조회한다`() {
+        whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
+        val before = Instant.now().epochSecond
+
+        registry.findExpiredAttempts()
+
+        val upperBound = argumentCaptor<Double>()
+        verify(zSetOperations).rangeByScore(eq(KEY), eq(Double.NEGATIVE_INFINITY), upperBound.capture())
+        assertThat(upperBound.firstValue).isBetween(before.toDouble(), Instant.now().epochSecond.toDouble())
+    }
+
+    @Test
     fun `findExpiredAttempts는 깨진 멤버를 zset에서 제거하고 정상 멤버만 돌려준다`() {
         whenever(redisTemplate.opsForZSet()).thenReturn(zSetOperations)
         whenever(zSetOperations.rangeByScore(eq(KEY), eq(Double.NEGATIVE_INFINITY), any<Double>()))

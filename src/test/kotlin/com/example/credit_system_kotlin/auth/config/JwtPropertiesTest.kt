@@ -19,7 +19,7 @@ class JwtPropertiesTest {
         val properties = JwtProperties(secret = "a".repeat(32))
 
         assertThat(properties.issuer).isEqualTo("credit")
-        assertThat(properties.accessTtl).isEqualTo(Duration.ofMinutes(15))
+        assertThat(properties.accessTtl).isEqualTo(Duration.ofHours(1))
         assertThat(properties.refreshTtl).isEqualTo(Duration.ofDays(14))
         assertThat(properties.toString()).doesNotContain("a".repeat(32))
     }

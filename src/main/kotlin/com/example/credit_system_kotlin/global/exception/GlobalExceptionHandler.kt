@@ -42,24 +42,20 @@ class GlobalExceptionHandler(
     fun handleInvalidRequest(e: InvalidRequestException): ResponseEntity<ErrorResponse> =
         ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", e.message))
 
-    /** 파서가 낸 원인 메시지는 로그에만 남기고 응답에는 고정 문구를 준다. */
+    // JSON 문법이 깨지는 등 문제 발생.
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun handleNotReadable(e: HttpMessageNotReadableException): ResponseEntity<ErrorResponse> {
         log.info("요청 본문 해석 실패: {}", e.message)
         return ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", "요청 본문의 형식이 올바르지 않습니다."))
     }
 
-    /** 경로·쿼리 파라미터 타입이 안 맞는 요청(예: `/api/jobs/abc`)도 다른 400 과 같은 본문으로 돌려준다. */
     @ExceptionHandler(MethodArgumentTypeMismatchException::class)
     fun handleTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<ErrorResponse> =
         ResponseEntity.badRequest().body(ErrorResponse("INVALID_REQUEST", "${e.name} 값의 형식이 올바르지 않습니다."))
 
-    /** 유니크 위반은 어느 제약인지 가리지 않고 멱등키 경쟁으로 세고 409 로 답한다. 그 밖의 무결성 위반은 500 이다. */
     @ExceptionHandler(DataIntegrityViolationException::class)
     fun handleDataIntegrityViolation(e: DataIntegrityViolationException): ResponseEntity<ErrorResponse> {
         if (isUniqueConstraintViolation(e)) {
-            // 유니크 위반은 @Transactional 서비스 밖으로 예외가 나온 뒤 여기서 잡힌다.
-            // 즉 롤백이 이미 끝난 시점이라, AFTER_COMMIT 리스너였다면 이 이벤트는 버려졌을 것이다.
             eventPublisher.publishEvent(DefenseTriggered(DefensePoint.IDEM_KEY, DefenseOutcome.DB_UNIQUE))
             return conflict("DUPLICATE_IN_PROGRESS", "동일한 요청이 동시에 처리 중입니다. 잠시 후 다시 시도해주세요.")
         }

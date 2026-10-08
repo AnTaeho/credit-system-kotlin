@@ -12,23 +12,78 @@ import java.time.Instant
 
 interface JobRepository : JpaRepository<Job, Long> {
 
-    /** 워커의 선점. HOLDING 인 시도만 PROCESSING 으로 올리고, 0행이면 다른 쪽이 먼저 가져간 것이다. */
-    fun startProcessingIfAttemptMatches(jobId: Long, attemptNo: Int, now: Instant): Int =
-        transitionIfStatusAndAttemptMatch(jobId, JobStatus.PROCESSING, JobStatus.HOLDING, attemptNo, now)
+    // HOLDING 을 PROCESSING 으로 올린다. 0행이면 상태나 시도 번호가 달라 처리를 시작하지 못한 것이다.
+    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        """
+        UPDATE Job j
+        SET j.status = JobStatus.PROCESSING, j.updatedAt = :now
+        WHERE j.id = :jobId
+          AND j.status = JobStatus.HOLDING
+          AND j.attemptNo = :attemptNo
+        """
+    )
+    fun startProcessingIfAttemptMatches(
+        @Param("jobId") jobId: Long,
+        @Param("attemptNo") attemptNo: Int,
+        @Param("now") now: Instant
+    ): Int
 
-    /** PROCESSING 인 시도만 FAILED 로 내린다. */
-    fun failIfProcessing(jobId: Long, attemptNo: Int, now: Instant): Int =
-        transitionIfStatusAndAttemptMatch(jobId, JobStatus.FAILED, JobStatus.PROCESSING, attemptNo, now)
+    // PROCESSING 을 FAILED 로 내린다. 0행이면 이미 끝났거나 다른 시도가 잡은 작업이라 실패로 적지 않는다.
+    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        """
+        UPDATE Job j
+        SET j.status = JobStatus.FAILED, j.updatedAt = :now
+        WHERE j.id = :jobId
+          AND j.status = JobStatus.PROCESSING
+          AND j.attemptNo = :attemptNo
+        """
+    )
+    fun failIfProcessing(
+        @Param("jobId") jobId: Long,
+        @Param("attemptNo") attemptNo: Int,
+        @Param("now") now: Instant
+    ): Int
 
-    /** 선점을 되돌린다. PROCESSING 인 시도만 HOLDING 으로 돌린다. */
-    fun rollbackToHoldingIfProcessing(jobId: Long, attemptNo: Int, now: Instant): Int =
-        transitionIfStatusAndAttemptMatch(jobId, JobStatus.HOLDING, JobStatus.PROCESSING, attemptNo, now)
+    // PROCESSING 을 HOLDING 으로 되돌린다. 0행이면 그 시도가 이미 PROCESSING 을 벗어나 되돌릴 것이 없다.
+    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        """
+        UPDATE Job j
+        SET j.status = JobStatus.HOLDING, j.updatedAt = :now
+        WHERE j.id = :jobId
+          AND j.status = JobStatus.PROCESSING
+          AND j.attemptNo = :attemptNo
+        """
+    )
+    fun rollbackToHoldingIfProcessing(
+        @Param("jobId") jobId: Long,
+        @Param("attemptNo") attemptNo: Int,
+        @Param("now") now: Instant
+    ): Int
 
-    /** FAILED 인 시도만 REFUNDED 로 내린다. */
-    fun refundIfFailed(jobId: Long, attemptNo: Int, now: Instant): Int =
-        transitionIfStatusAndAttemptMatch(jobId, JobStatus.REFUNDED, JobStatus.FAILED, attemptNo, now)
+    // FAILED 를 REFUNDED 로 닫는다. 0행이면 다른 쪽이 먼저 환불했거나 재시도로 넘어가 환불하지 않는다.
+    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        """
+        UPDATE Job j
+        SET j.status = JobStatus.REFUNDED, j.updatedAt = :now
+        WHERE j.id = :jobId
+          AND j.status = JobStatus.FAILED
+          AND j.attemptNo = :attemptNo
+        """
+    )
+    fun refundIfFailed(
+        @Param("jobId") jobId: Long,
+        @Param("attemptNo") attemptNo: Int,
+        @Param("now") now: Instant
+    ): Int
 
-    /** PROCESSING 이고 시도 번호가 같을 때만 완료로 바꾼다. 회수된 뒤 늦게 온 워커는 0행을 받는다. */
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
@@ -48,25 +103,6 @@ interface JobRepository : JpaRepository<Job, Long> {
         @Param("now") now: Instant
     ): Int
 
-    /** 위 네 전이의 공통 UPDATE. 기대 상태나 시도 번호가 어긋나면 0행이고, 호출자는 그걸로 경쟁에서 진 것을 안다. */
-    @Transactional
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(
-        """
-        UPDATE Job j
-        SET j.status = :newStatus, j.updatedAt = :now
-        WHERE j.id = :jobId AND j.status = :expectedStatus AND j.attemptNo = :attemptNo
-        """
-    )
-    fun transitionIfStatusAndAttemptMatch(
-        @Param("jobId") jobId: Long,
-        @Param("newStatus") newStatus: JobStatus,
-        @Param("expectedStatus") expectedStatus: JobStatus,
-        @Param("attemptNo") attemptNo: Int,
-        @Param("now") now: Instant
-    ): Int
-
-    /** FAILED 인 시도를 HOLDING 으로 되돌리며 시도 번호를 올린다. 번호가 바뀌어 이전 시도의 늦은 UPDATE 는 0행이 된다. */
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
@@ -90,24 +126,16 @@ interface JobRepository : JpaRepository<Job, Long> {
 
     fun findByUserIdOrderByIdDesc(userId: Long): List<Job>
 
-    /** 커서 페이징의 첫 페이지. `Page` 가 아니라 `List` 로 받아 count 쿼리를 피한다. */
     fun findByUserIdOrderByIdDesc(userId: Long, pageable: Pageable): List<Job>
 
-    /** 커서 페이징의 다음 페이지. [cursor] 는 배타적 상한 id 다. */
     fun findByUserIdAndIdLessThanOrderByIdDesc(userId: Long, cursor: Long, pageable: Pageable): List<Job>
 
-    /** 남의 job 은 없는 job 과 똑같이 null 이다. 가져와서 비교하지 않고 조건 하나로 거른다. */
     fun findByIdAndUserId(id: Long, userId: Long): Job?
 
     fun findByStatusAndUpdatedAtBeforeOrderByIdAsc(status: JobStatus, cutoff: Instant, pageable: Pageable): List<Job>
 
-    /**
-     * 미결 job 수. 미결은 `status NOT IN (COMPLETED, REFUNDED)` 로, FAILED 도 포함한다 —
-     * 재시도나 환불을 기다리는 중이고 돈이 아직 묶여 있기 때문이다.
-     */
     fun countByStatusNotIn(statuses: Collection<JobStatus>): Long
 
-    /** 미결 job 에 묶여 있는 홀드 금액의 합. 미결이 없으면 0 이다. */
     @Query(
         """
         SELECT COALESCE(SUM(j.holdAmount), 0L) FROM Job j
@@ -116,10 +144,6 @@ interface JobRepository : JpaRepository<Job, Long> {
     )
     fun sumHoldAmountByStatusNotIn(@Param("statuses") statuses: Collection<JobStatus>): Long
 
-    /**
-     * 가장 오래된 미결 job 의 생성 시각. 미결이 없으면 null 이다.
-     * 재시도로 `updatedAt` 이 바뀌어도 돈은 생성 때부터 묶여 있어 `createdAt` 을 본다.
-     */
     @Query(
         """
         SELECT MIN(j.createdAt) FROM Job j
@@ -128,7 +152,6 @@ interface JobRepository : JpaRepository<Job, Long> {
     )
     fun findOldestCreatedAtByStatusNotIn(@Param("statuses") statuses: Collection<JobStatus>): Instant?
 
-    /** HOLD 원장 없이 존재하는 job 수. 불변식이라 0 이어야 한다. */
     @Query(
         """
         SELECT COUNT(j) FROM Job j
@@ -140,10 +163,6 @@ interface JobRepository : JpaRepository<Job, Long> {
     )
     fun countJobsWithoutHoldEntry(): Long
 
-    /**
-     * 종결 상태인데 정산 원장이 없는 job 수. COMPLETED 인데 CONFIRM 이 없거나,
-     * REFUNDED 인데 REFUND 가 없는 경우다. 불변식이라 0 이어야 한다.
-     */
     @Query(
         """
         SELECT COUNT(j) FROM Job j

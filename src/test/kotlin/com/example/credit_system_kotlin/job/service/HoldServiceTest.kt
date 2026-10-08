@@ -7,8 +7,7 @@ import com.example.credit_system_kotlin.global.exception.IdempotencyKeyReusedExc
 import com.example.credit_system_kotlin.global.exception.InsufficientBalanceException
 import com.example.credit_system_kotlin.global.exception.InvalidRequestException
 import com.example.credit_system_kotlin.global.exception.UserNotFoundException
-import com.example.credit_system_kotlin.job.domain.IdempotencyKey
-import com.example.credit_system_kotlin.job.domain.Job
+import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.repository.IdempotencyKeyRepository
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
@@ -52,7 +51,7 @@ class HoldServiceTest @Autowired constructor(
 
     @Test
     fun `정상 요청은 잔액을 차감하고 job과 ledger를 생성한다`() {
-        val result = holdService.requestGeneration(user.persistedId, "key-1", "a cat")
+        val result = holdService.requestGeneration(user.persistedId, JobCreateRequest("key-1", "a cat"))
 
         val found = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(result.duplicate).isFalse()
@@ -64,8 +63,8 @@ class HoldServiceTest @Autowired constructor(
 
     @Test
     fun `동일 idemKey로 재요청하면 같은 job을 반환하고 잔액이 추가로 차감되지 않는다`() {
-        val first = holdService.requestGeneration(user.persistedId, "key-1", "a cat")
-        val second = holdService.requestGeneration(user.persistedId, "key-1", "a cat")
+        val first = holdService.requestGeneration(user.persistedId, JobCreateRequest("key-1", "a cat"))
+        val second = holdService.requestGeneration(user.persistedId, JobCreateRequest("key-1", "a cat"))
 
         val found = userRepository.findById(user.persistedId).orElseThrow()
         assertThat(second.duplicate).isTrue()
@@ -79,8 +78,9 @@ class HoldServiceTest @Autowired constructor(
     fun `잔액이 부족하면 예외가 발생하고 job이 생성되지 않는다`() {
         val poor = userRepository.save(User("poor", 50L))
 
-        assertThatThrownBy { holdService.requestGeneration(poor.persistedId, "key-2", "a cat") }
+        assertThatThrownBy { holdService.requestGeneration(poor.persistedId, JobCreateRequest("key-2", "a cat")) }
             .isInstanceOf(InsufficientBalanceException::class.java)
+            .hasMessage("잔액이 부족합니다. balance=50, required=100")
 
         assertThat(jobRepository.findByUserIdOrderByIdDesc(poor.persistedId)).isEmpty()
         assertThat(ledgerRepository.findByUserIdOrderByIdDesc(poor.persistedId)).isEmpty()
@@ -90,11 +90,11 @@ class HoldServiceTest @Autowired constructor(
 
     @Test
     fun `필수값이 없거나 길이 제한을 넘으면 요청을 거부한다`() {
-        assertThatThrownBy { holdService.requestGeneration(user.persistedId, " ", "cat") }
+        assertThatThrownBy { holdService.requestGeneration(user.persistedId, JobCreateRequest(" ", "cat")) }
             .isInstanceOf(InvalidRequestException::class.java)
             .hasMessage("idemKey는 필수입니다.")
         assertThatThrownBy {
-            holdService.requestGeneration(user.persistedId, "key", "a".repeat(1001))
+            holdService.requestGeneration(user.persistedId, JobCreateRequest("key", "a".repeat(1001)))
         }
             .isInstanceOf(InvalidRequestException::class.java)
             .hasMessage("prompt는 1000자를 초과할 수 없습니다.")
@@ -103,9 +103,25 @@ class HoldServiceTest @Autowired constructor(
     }
 
     @Test
+    fun `prompt가 비어 있거나 공백뿐이면 거절하고 어떤 데이터도 변경하지 않는다`() {
+        listOf("", " ", " \t\n").forEach { blank ->
+            assertThatThrownBy { holdService.requestGeneration(user.persistedId, JobCreateRequest("key", blank)) }
+                .`as`("'$blank'")
+                .isInstanceOf(InvalidRequestException::class.java)
+                .hasMessage("prompt는 필수입니다.")
+        }
+
+        assertThat(userRepository.findById(user.persistedId).orElseThrow().balance)
+            .isEqualTo(1000L)
+        assertThat(idempotencyKeyRepository.count()).isZero()
+        assertThat(jobRepository.count()).isZero()
+        assertThat(ledgerRepository.count()).isZero()
+    }
+
+    @Test
     fun `idemKey와 prompt의 최대 길이는 허용한다`() {
         val result = holdService.requestGeneration(
-            user.persistedId, "k".repeat(100), "p".repeat(1000)
+            user.persistedId, JobCreateRequest("k".repeat(100), "p".repeat(1000))
         )
 
         assertThat(result.duplicate).isFalse()
@@ -115,7 +131,7 @@ class HoldServiceTest @Autowired constructor(
     @Test
     fun `idemKey가 최대 길이를 넘으면 어떤 데이터도 변경하지 않는다`() {
         assertThatThrownBy {
-            holdService.requestGeneration(user.persistedId, "k".repeat(101), "cat")
+            holdService.requestGeneration(user.persistedId, JobCreateRequest("k".repeat(101), "cat"))
         }
             .isInstanceOf(InvalidRequestException::class.java)
             .hasMessage("idemKey는 100자를 초과할 수 없습니다.")
@@ -132,7 +148,7 @@ class HoldServiceTest @Autowired constructor(
         val missingUserId = user.persistedId + 999_999L
 
         assertThatThrownBy {
-            holdService.requestGeneration(missingUserId, "key-3", "a cat")
+            holdService.requestGeneration(missingUserId, JobCreateRequest("key-3", "a cat"))
         }
             .isInstanceOf(UserNotFoundException::class.java)
             .hasMessage("존재하지 않는 user: $missingUserId")
@@ -143,7 +159,7 @@ class HoldServiceTest @Autowired constructor(
 
     @Test
     fun `새 멱등키에는 prompt 의 SHA-256 hex 가 함께 저장된다`() {
-        holdService.requestGeneration(user.persistedId, "key-1", "a cat")
+        holdService.requestGeneration(user.persistedId, JobCreateRequest("key-1", "a cat"))
 
         val stored = requireNotNull(idempotencyKeyRepository.findByUserIdAndIdemKey(user.persistedId, "key-1"))
         // printf 'a cat' | shasum -a 256
@@ -152,10 +168,10 @@ class HoldServiceTest @Autowired constructor(
 
     @Test
     fun `같은 idemKey에 다른 prompt면 거절하고 잔액 job 원장을 바꾸지 않는다`() {
-        val first = holdService.requestGeneration(user.persistedId, "key-1", "a cat")
+        val first = holdService.requestGeneration(user.persistedId, JobCreateRequest("key-1", "a cat"))
         eventPublisher.clear()
 
-        assertThatThrownBy { holdService.requestGeneration(user.persistedId, "key-1", "a dog") }
+        assertThatThrownBy { holdService.requestGeneration(user.persistedId, JobCreateRequest("key-1", "a dog")) }
             .isInstanceOf(IdempotencyKeyReusedException::class.java)
 
         assertThat(userRepository.findById(user.persistedId).orElseThrow().balance).isEqualTo(900L)
@@ -166,20 +182,5 @@ class HoldServiceTest @Autowired constructor(
         assertThat(eventPublisher.countOf(DefensePoint.IDEM_KEY, DefenseOutcome.MISMATCH)).isEqualTo(1)
         assertThat(eventPublisher.countOf(DefensePoint.IDEM_KEY, DefenseOutcome.APP_HIT)).isZero()
         assertThat(eventPublisher.countOf(DefensePoint.HOLD_BALANCE, DefenseOutcome.APPLIED)).isZero()
-    }
-
-    @Test
-    fun `내용 해시가 없는 옛 멱등키는 prompt가 달라도 기존 job을 돌려준다`() {
-        idempotencyKeyRepository.save(IdempotencyKey(user.persistedId, "legacy-key"))
-        val legacyJob = jobRepository.save(Job.hold(user.persistedId, 100L, "a cat"))
-        idempotencyKeyRepository.attachJobId(user.persistedId, "legacy-key", legacyJob.persistedId)
-
-        val result = holdService.requestGeneration(user.persistedId, "legacy-key", "a dog")
-
-        assertThat(result.duplicate).isTrue()
-        assertThat(result.jobId).isEqualTo(legacyJob.persistedId)
-        assertThat(userRepository.findById(user.persistedId).orElseThrow().balance).isEqualTo(1000L)
-        assertThat(ledgerRepository.findByUserIdOrderByIdDesc(user.persistedId)).isEmpty()
-        assertThat(eventPublisher.countOf(DefensePoint.IDEM_KEY, DefenseOutcome.APP_HIT)).isEqualTo(1)
     }
 }

@@ -12,10 +12,6 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.servlet.ModelAndView
 
-/**
- * 로그인한 사람의 화면. 서버는 첫 화면만 그리고 그 뒤 변화는 `static/js` 가 `/api` 를 불러 처리한다.
- * 화면 전용 API 는 없다.
- */
 @Controller
 class PageController(
     private val userFinder: UserFinder,
@@ -23,7 +19,6 @@ class PageController(
     private val ledgerQueryService: LedgerQueryService
 ) {
 
-    /** 생성 요청 목록은 첫 페이지만 그린다. */
     @GetMapping("/")
     fun home(currentUser: CurrentUser, model: Model): String {
         addLayout(currentUser, model)
@@ -31,7 +26,6 @@ class PageController(
         return "home"
     }
 
-    /** 남의 job·없는 job·숫자가 아닌 id 는 모두 같은 404 화면이다. 존재 여부를 흘리지 않는다. */
     @GetMapping("/jobs/{id}")
     fun job(currentUser: CurrentUser, @PathVariable id: String, model: Model): Any {
         val jobId = id.toLongOrNull() ?: return notFound()
@@ -40,7 +34,6 @@ class PageController(
         return "job"
     }
 
-    /** 원장도 첫 페이지만 그린다. */
     @GetMapping("/ledger")
     fun ledger(currentUser: CurrentUser, model: Model): String {
         addLayout(currentUser, model)
@@ -48,14 +41,12 @@ class PageController(
         return "ledger"
     }
 
-    /** 운영자 지급 화면. ROLE_ADMIN 검사는 SecurityConfig 가 한다. 운영자 자신의 userId 를 보여 줘 자기에게도 지급할 수 있게 한다. */
     @GetMapping("/admin")
     fun admin(currentUser: CurrentUser, model: Model): String {
         addLayout(currentUser, model)
         return "admin"
     }
 
-    /** 모든 화면이 쓰는 머리 값. [CurrentUser] 는 id 와 역할만 알아서 이메일과 잔액은 사용자 행에서 읽는다. */
     private fun addLayout(currentUser: CurrentUser, model: Model) {
         val user = userFinder.getOrThrow(currentUser.userId)
         model.addAttribute("userId", currentUser.userId)

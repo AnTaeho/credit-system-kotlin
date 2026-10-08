@@ -1,6 +1,7 @@
 package com.example.credit_system_kotlin.job.concurrency
 
 import com.example.credit_system_kotlin.job.domain.JobStatus
+import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.HoldService
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
@@ -45,7 +46,7 @@ class GenerationPipelineEndToEndTest @Autowired constructor(
         val user = userRepository.save(User("acme", 1000L))
 
         val result = holdService.requestGeneration(
-            user.persistedId, "e2e-key", "a cat wearing sunglasses"
+            user.persistedId, JobCreateRequest("e2e-key", "a cat wearing sunglasses")
         )
 
         await().atMost(20, TimeUnit.SECONDS).untilAsserted {

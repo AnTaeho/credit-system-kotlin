@@ -13,10 +13,6 @@ import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * 스냅샷 값을 게이지로 내보낸다. 게이지가 읽는 값은 전부 이 빈의 필드로 둔다.
- * Micrometer 가 약한 참조로만 잡아서 지역 변수를 넘기면 GC 뒤에 NaN 이 된다. userId 태그는 붙이지 않는다.
- */
 @Component
 class DomainSnapshotMetrics(
     registry: MeterRegistry,
@@ -48,9 +44,6 @@ class DomainSnapshotMetrics(
             .description("미결 job 에 묶여 있는 크레딧 합계")
             .register(registry)
 
-        // 이 단계의 단일 최중요 지표다. 워커가 죽든, 스케줄러가 죽든, Redis 가 죽든,
-        // 스텁 API 가 무한히 지연되든 파이프라인이 멈추면 이 값 하나가 무한히 오른다.
-        // 카운터로는 만들 수 없는 지표다 — 아무 코드도 안 불리는 채로 늙어가는 것을 재기 때문이다.
         Gauge.builder(OLDEST_PENDING_AGE_METRIC, oldestPendingAgeSeconds) { it.get().toDouble() }
             .description("가장 오래된 미결 job 의 나이(초). createdAt 기준이라 재시도로 리셋되지 않는다")
             .baseUnit("seconds")
@@ -74,7 +67,6 @@ class DomainSnapshotMetrics(
             .register(registry)
     }
 
-    /** 게이지 값을 이번 스냅샷으로 덮어쓴다. 실패한 주기에는 불리지 않아 이전 값이 그대로 남는다. */
     @EventListener
     fun onSnapshotTaken(event: DomainSnapshotTaken) {
         outstandingHoldCount.set(event.outstandingHoldCount)
@@ -88,7 +80,6 @@ class DomainSnapshotMetrics(
         lastTakenAt.set(event.takenAt)
     }
 
-    /** 아직 한 번도 스냅샷이 찍히지 않았으면 -1을 반환한다. 0은 "방금 성공"과 구분되지 않는다. */
     private fun stalenessSeconds(): Double {
         val last = lastTakenAt.get() ?: return -1.0
         return Duration.between(last, clock.instant()).toMillis() / MILLIS_PER_SECOND

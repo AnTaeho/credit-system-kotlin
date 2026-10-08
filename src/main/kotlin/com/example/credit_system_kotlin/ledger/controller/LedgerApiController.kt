@@ -2,27 +2,24 @@ package com.example.credit_system_kotlin.ledger.controller
 
 import com.example.credit_system_kotlin.auth.CurrentUser
 import com.example.credit_system_kotlin.global.paging.CursorPage
-import com.example.credit_system_kotlin.global.paging.CursorRequest
+import com.example.credit_system_kotlin.global.paging.dto.CursorPageRequest
 import com.example.credit_system_kotlin.ledger.dto.LedgerResponse
 import com.example.credit_system_kotlin.ledger.service.LedgerQueryService
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.ModelAttribute
 import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
-/** 로그인한 사용자 자신의 원장만 보여 준다. 남의 userId 를 받는 파라미터가 없다. */
 @RestController
 @RequestMapping("/api/ledger")
 class LedgerApiController(
     private val ledgerQueryService: LedgerQueryService
 ) {
 
-    /** 페이지 파라미터는 문자열로 받는다. 해석과 검증은 [CursorRequest] 가 한다. */
     @GetMapping
     fun list(
         currentUser: CurrentUser,
-        @RequestParam(required = false) cursor: String?,
-        @RequestParam(required = false) size: String?
+        @ModelAttribute request: CursorPageRequest
     ): CursorPage<LedgerResponse> =
-        ledgerQueryService.findByUser(currentUser.userId, CursorRequest.of(cursor, size))
+        ledgerQueryService.findByUser(currentUser.userId, request.toCursorRequest())
 }

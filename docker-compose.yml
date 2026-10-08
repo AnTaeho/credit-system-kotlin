@@ -1,19 +1,4 @@
-# 로컬 개발 인프라 — MySQL 과 Redis 만 띄운다.
-#
-# 기본 사용법은 "인프라는 컨테이너, 앱은 호스트"다. 앱을 IDE 나 ./gradlew bootRun 으로
-# 띄우면 application.yml 의 기본값(localhost:3306 / localhost:6379, credit_system,
-# credit/credit)이 그대로 맞는다. 컨테이너 안의 값과 그 기본값은 같은 계약이다.
-#
-#   docker compose up -d                  # MySQL + Redis
-#   ./gradlew bootRun                     # 앱은 호스트에서
-#   docker compose down -v                # 데이터까지 버리고 내리기
-#
-# 앱까지 컨테이너로 확인하고 싶으면 profile 을 켠다. 이때는 호스트명이 달라지므로
-# Spring 표준 환경변수로 덮어쓴다 — application.yml 은 건드리지 않는다.
-#
-#   docker compose --profile app up -d --build
-#
-# 관측 스택(Prometheus 포함)은 별도다: deploy/observability/docker-compose.yml
+# 로컬 MySQL·Redis는 docker compose up -d로, 앱 포함 시 --profile app up -d --build로 실행한다(관측 스택: deploy/observability/docker-compose.yml).
 
 services:
 
@@ -26,8 +11,7 @@ services:
       MYSQL_PASSWORD: credit
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     ports:
-      # 관측 스택과 달리 여기서는 publish 한다. 호스트의 앱이 붙어야 하기 때문이다.
-      # 로컬에 이미 MySQL 이 3306 을 쓰고 있으면 그쪽을 내리거나 이 줄을 바꿔라.
+      # 호스트 앱 접속용 3306 포트이며, 로컬 MySQL과 충돌하면 포트를 변경한다.
       - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
@@ -48,7 +32,7 @@ services:
       retries: 20
 
   app:
-    # 기본 up 에는 안 뜬다. --profile app 을 줘야 뜬다.
+    # --profile app을 지정할 때만 실행한다.
     profiles: ["app"]
     build:
       context: .
@@ -58,7 +42,7 @@ services:
       SPRING_DATASOURCE_USERNAME: credit
       SPRING_DATASOURCE_PASSWORD: credit
       SPRING_DATA_REDIS_HOST: redis
-      # local 프로필은 기동 때 시드 계정 둘(dev@local.test, admin@local.test)을 만든다. application-local.yml 참고.
+      # local 프로필은 관리 포트를 8081 로 뗀다(application-local.yml). 시드 계정은 마이그레이션 V2 가 넣는다.
       SPRING_PROFILES_ACTIVE: local
       # 관리 포트를 애플리케이션 포트에서 떼어낸다.
       MANAGEMENT_SERVER_PORT: 8081

@@ -64,12 +64,9 @@ class JobLifecycleServiceTest @Autowired constructor(
     @Test
     fun `환불된 작업의 늦은 confirm은 무시한다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.REFUNDED, JobStatus.FAILED, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
+        jobRepository.refundIfFailed(job.persistedId, 0, Instant.now())
 
         jobLifecycleService.confirm(job, "https://stub/late.png")
 
@@ -102,6 +99,8 @@ class JobLifecycleServiceTest @Autowired constructor(
 
         assertThat(jobRepository.findById(job.persistedId).orElseThrow().status)
             .isEqualTo(JobStatus.FAILED)
+        assertThat(eventPublisher.countOf(DefensePoint.MARK_FAILED, DefenseOutcome.APPLIED)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.MARK_FAILED, DefenseOutcome.STALE)).isZero()
     }
 
     @Test
@@ -134,9 +133,8 @@ class JobLifecycleServiceTest @Autowired constructor(
     @Test
     fun `FAILED 상태의 job은 attemptNo가 증가하고 다시 대기한다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
 
         jobLifecycleService.retry(jobRepository.findById(job.persistedId).orElseThrow())
 
@@ -159,9 +157,8 @@ class JobLifecycleServiceTest @Autowired constructor(
     fun `FAILED job은 REFUNDED로 전이되고 잔액이 복구된다`() {
         val user = userRepository.save(User("acme", 700L))
         val job = jobRepository.save(Job.hold(user.persistedId, 300L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
 
         jobLifecycleService.finalRefund(jobRepository.findById(job.persistedId).orElseThrow())
 
@@ -188,9 +185,8 @@ class JobLifecycleServiceTest @Autowired constructor(
     fun `같은 작업을 두 번 환불해도 잔액과 원장은 한 번만 반영된다`() {
         val user = userRepository.save(User("acme", 700L))
         val job = jobRepository.save(Job.hold(user.persistedId, 300L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
         val failed = jobRepository.findById(job.persistedId).orElseThrow()
 
         jobLifecycleService.finalRefund(failed)
@@ -207,9 +203,8 @@ class JobLifecycleServiceTest @Autowired constructor(
     @Test
     fun `재시도 투입에 밀리면 RETRY_CLAIM LOST를 발행한다`() {
         val job = jobRepository.save(Job.hold(1L, 100L, "cat"))
-        jobRepository.transitionIfStatusAndAttemptMatch(
-            job.persistedId, JobStatus.FAILED, JobStatus.HOLDING, 0, Instant.now()
-        )
+        jobRepository.startProcessingIfAttemptMatches(job.persistedId, 0, Instant.now())
+        jobRepository.failIfProcessing(job.persistedId, 0, Instant.now())
         val failed = jobRepository.findById(job.persistedId).orElseThrow()
 
         jobLifecycleService.retry(failed)

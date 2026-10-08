@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.Mock
 import org.mockito.junit.jupiter.MockitoExtension
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.never
@@ -39,7 +40,8 @@ class GenerationJobProcessorTest {
         processor = GenerationJobProcessor(heartbeatRegistry, stubClient, jobLifecycleService)
         job = Job.hold(10L, 100L, "cat")
         ReflectionTestUtils.setField(job, "id", 1L)
-        doReturn(heartbeatFuture).whenever(heartbeatRegistry).startHeartbeat(1L, 0)
+        ReflectionTestUtils.setField(job, "attemptNo", ATTEMPT_NO)
+        doReturn(heartbeatFuture).whenever(heartbeatRegistry).startHeartbeat(1L, ATTEMPT_NO)
     }
 
     @Test
@@ -49,7 +51,7 @@ class GenerationJobProcessorTest {
         processor.runGeneration(job)
 
         verify(jobLifecycleService).confirm(job, "https://example.test/cat.png")
-        verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
+        verify(heartbeatRegistry).stopHeartbeat(1L, ATTEMPT_NO, heartbeatFuture)
     }
 
     @Test
@@ -58,9 +60,9 @@ class GenerationJobProcessorTest {
 
         processor.runGeneration(job)
 
-        verify(jobLifecycleService).markFailed(1L, 0)
-        verify(jobLifecycleService, never()).confirm(job, "https://example.test/cat.png")
-        verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
+        verify(jobLifecycleService).markFailed(1L, ATTEMPT_NO)
+        verify(jobLifecycleService, never()).confirm(anyOrNull(), anyOrNull())
+        verify(heartbeatRegistry).stopHeartbeat(1L, ATTEMPT_NO, heartbeatFuture)
     }
 
     @Test
@@ -69,9 +71,9 @@ class GenerationJobProcessorTest {
 
         processor.runGeneration(job)
 
-        verify(jobLifecycleService).markFailed(1L, 0)
-        verify(jobLifecycleService, never()).confirm(job, "https://example.test/cat.png")
-        verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
+        verify(jobLifecycleService).markFailed(1L, ATTEMPT_NO)
+        verify(jobLifecycleService, never()).confirm(anyOrNull(), anyOrNull())
+        verify(heartbeatRegistry).stopHeartbeat(1L, ATTEMPT_NO, heartbeatFuture)
     }
 
     @Test
@@ -82,7 +84,11 @@ class GenerationJobProcessorTest {
 
         assertThatCode { processor.runGeneration(job) }.doesNotThrowAnyException()
 
-        verify(jobLifecycleService, never()).markFailed(1L, 0)
-        verify(heartbeatRegistry).stopHeartbeat(1L, 0, heartbeatFuture)
+        verify(jobLifecycleService, never()).markFailed(1L, ATTEMPT_NO)
+        verify(heartbeatRegistry).stopHeartbeat(1L, ATTEMPT_NO, heartbeatFuture)
+    }
+
+    companion object {
+        private const val ATTEMPT_NO = 2
     }
 }

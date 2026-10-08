@@ -17,23 +17,23 @@ class IdempotencyKeyRepositoryTest @Autowired constructor(
 
     @Test
     fun `동일 사용자 동일 키는 유니크 제약으로 거부된다`() {
-        idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1"))
+        idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1", "hash"))
 
-        assertThatThrownBy { idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1")) }
+        assertThatThrownBy { idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1", "hash")) }
             .isInstanceOf(DataIntegrityViolationException::class.java)
     }
 
     @Test
     fun `다른 사용자는 같은 키를 사용할 수 있다`() {
-        idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1"))
-        idempotencyKeyRepository.saveAndFlush(IdempotencyKey(2L, "key-1"))
+        idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1", "hash"))
+        idempotencyKeyRepository.saveAndFlush(IdempotencyKey(2L, "key-1", "hash"))
 
         assertThat(idempotencyKeyRepository.count()).isEqualTo(2)
     }
 
     @Test
     fun `attachJobId로 job을 연결할 수 있다`() {
-        idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1"))
+        idempotencyKeyRepository.saveAndFlush(IdempotencyKey(1L, "key-1", "hash"))
 
         val updated = idempotencyKeyRepository.attachJobId(1L, "key-1", 42L)
 

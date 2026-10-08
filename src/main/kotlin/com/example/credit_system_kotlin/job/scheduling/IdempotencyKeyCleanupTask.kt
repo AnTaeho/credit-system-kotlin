@@ -12,7 +12,6 @@ import java.time.temporal.ChronoUnit
 
 private val log = LoggerFactory.getLogger(IdempotencyKeyCleanupTask::class.java)
 
-/** 보존 기간이 지난 멱등키를 지운다. 지워진 키로 다시 보내면 새 요청으로 보고 또 차감한다. */
 @Component
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class IdempotencyKeyCleanupTask(
@@ -20,8 +19,6 @@ class IdempotencyKeyCleanupTask(
     private val appProperties: AppProperties
 ) {
 
-    // 보존 기간이 7일이라 하루 한 번이면 충분하다. 트래픽이 한산한 시각에 돌려 삭제 락이
-    // 멱등키 INSERT 와 부딪힐 여지를 줄인다.
     @Scheduled(
         cron = $$"${app.scheduling.idempotency-cleanup-cron:0 0 2 * * *}",
         zone = $$"${app.scheduling.timezone:Asia/Seoul}"

@@ -1,9 +1,4 @@
-# 도메인 지표 관측 스택 (MySQL · Redis · 앱 · Prometheus)
-#
-# 지표와 알람은 Prometheus 화면에서 본다: http://localhost:9090/graph, /alerts
-#
-# 올리기:  docker compose -f deploy/observability/docker-compose.yml up -d --build
-# 내리기:  docker compose -f deploy/observability/docker-compose.yml down -v
+# MySQL·Redis·앱·Prometheus 관측 스택으로, 지표와 알람은 localhost:9090의 /graph·/alerts에서 확인한다.
 
 services:
 
@@ -16,8 +11,7 @@ services:
       MYSQL_USER: credit
       MYSQL_PASSWORD: credit
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    # 포트를 publish 하지 않는다. 개발 머신의 로컬 MySQL(3306)과 충돌하기 때문이다.
-    # 디버깅은 docker compose exec mysql mysql -ucredit -pcredit credit_system 으로 한다.
+    # 로컬 MySQL과의 포트 충돌을 피하고 docker compose exec mysql로 디버깅한다.
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
       interval: 5s
@@ -35,8 +29,7 @@ services:
 
   app:
     build:
-      # 저장소 루트의 Dockerfile 을 쓴다. 이미지 안에서 bootJar 까지 돌므로
-      # 예전처럼 호스트에서 ./gradlew bootJar 를 먼저 돌릴 필요가 없다.
+      # 루트 Dockerfile에서 bootJar까지 빌드하므로 호스트의 사전 빌드는 필요 없다.
       context: ../..
       dockerfile: Dockerfile
     environment:
@@ -44,22 +37,18 @@ services:
       SPRING_DATASOURCE_USERNAME: credit
       SPRING_DATASOURCE_PASSWORD: credit
       SPRING_DATA_REDIS_HOST: redis
-      # local 프로필은 기동 때 시드 계정 둘(dev@local.test, admin@local.test)을 만든다(application-local.yml).
-      # 스크립트는 이 계정으로 POST /auth/token 에서 액세스 토큰을 받아 API 를 두드린다.
+      # local 프로필은 관리 포트를 8081 로 뗀다(application-local.yml). 시드 계정은 마이그레이션 V2 가 넣는다.
       SPRING_PROFILES_ACTIVE: local
-      # 노출 경계의 실물. 관리 포트를 애플리케이션 포트에서 떼어낸다.
+      # 애플리케이션 포트와 관리 포트를 분리한다.
       MANAGEMENT_SERVER_PORT: 8081
-      # 6단계 장애 주입용 손잡이. 기본값은 application.yml 과 같으므로,
-      # 아무것도 지정하지 않고 올리면 5단계까지와 동일한 스택이다.
-      # 스케줄러·워커는 런타임 토글이 불가능하므로(@ConditionalOnProperty) 재기동으로 바꾼다.
+      # 장애 주입 설정의 기본값은 application.yml과 같으며, 스케줄러·워커 변경에는 재기동이 필요하다.
       APP_SCHEDULING_ENABLED: ${APP_SCHEDULING_ENABLED:-true}
       APP_WORKER_ENABLED: ${APP_WORKER_ENABLED:-true}
       APP_STUB_FAILURE_RATE: ${APP_STUB_FAILURE_RATE:-0.3}
       APP_STUB_MIN_DELAY_MILLIS: ${APP_STUB_MIN_DELAY_MILLIS:-3000}
       APP_STUB_MAX_DELAY_MILLIS: ${APP_STUB_MAX_DELAY_MILLIS:-7000}
     ports:
-      # 8080 만 호스트로 나간다. 8081 은 compose 네트워크 안에서만 보이고,
-      # Prometheus 가 app:8081 로 긁는다. 호스트에서는 /actuator/* 에 닿을 수 없다.
+      # 8080만 공개하고 액추에이터는 내부 관리 포트 app:8081에서 Prometheus가 수집한다.
       - "8080:8080"
     depends_on:
       mysql:
@@ -67,8 +56,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      # 헬스체크가 관리 포트에 의존한다. 관리 포트가 죽으면 컨테이너는 unhealthy 가 되는데,
-      # 이건 트레이드오프다(docs 5단계 참고).
+      # 관리 포트 장애 시 컨테이너도 unhealthy로 판정한다(docs 5단계).
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
       interval: 5s
       timeout: 5s

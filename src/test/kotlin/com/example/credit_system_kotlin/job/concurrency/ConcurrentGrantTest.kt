@@ -3,6 +3,7 @@ package com.example.credit_system_kotlin.job.concurrency
 import com.example.credit_system_kotlin.ledger.domain.LedgerType
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.dto.GrantRequest
 import com.example.credit_system_kotlin.user.repository.UserRepository
 import com.example.credit_system_kotlin.user.service.UserService
 import org.assertj.core.api.Assertions.assertThat
@@ -39,7 +40,7 @@ class ConcurrentGrantTest @Autowired constructor(
 
         runConcurrently(10) {
             try {
-                userService.grant(ADMIN_ID, user.persistedId, idemKey, 300L)
+                userService.grant(ADMIN_ID, user.persistedId, GrantRequest(idemKey, 300L))
             } catch (e: DataIntegrityViolationException) {
                 // 유니크 제약에서 밀린 쪽. 잔액이 오르지 않는 것이 정상이므로 무시한다.
             }

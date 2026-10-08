@@ -14,7 +14,6 @@ import java.time.Instant
 
 private val log = LoggerFactory.getLogger(LedgerReconciliationTask::class.java)
 
-/** 사용자마다 `initialBalance + 원장 합계` 가 `balance` 와 같은지 주기적으로 맞춰 본다. 어긋나도 고치지 않고 알리기만 한다. */
 @Component
 @ConditionalOnProperty(prefix = "app.scheduling", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class LedgerReconciliationTask(
@@ -22,7 +21,6 @@ class LedgerReconciliationTask(
     private val eventPublisher: ApplicationEventPublisher
 ) {
 
-    /** 사용자를 id 순으로 [RECONCILE_BATCH_SIZE]명씩 끝까지 훑는다. 한 명에서 예외가 나면 그 사람만 건너뛰고, 다 돌면 결과를 이벤트로 낸다. */
     @Scheduled(fixedDelayString = $$"${app.scheduling.reconciliation-interval-millis:60000}")
     fun reconcile() {
         val startedAt = Instant.now()
@@ -55,7 +53,6 @@ class LedgerReconciliationTask(
         )
     }
 
-    /** 어긋나면 사용자와 차액을 ERROR 로 남긴다. 지표에는 건수만 나가서 누가 틀렸는지는 이 로그에만 있다. */
     private fun isBalanceConsistent(balanceCheck: LedgerBalanceCheck): Boolean {
         val expected = balanceCheck.initialBalance + balanceCheck.ledgerSum
         if (expected == balanceCheck.balance) {

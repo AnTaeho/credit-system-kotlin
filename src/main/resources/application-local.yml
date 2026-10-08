@@ -1,22 +1,4 @@
-# 로컬 개발용. docker-compose 의 app 서비스와 `SPRING_PROFILES_ACTIVE=local ./gradlew bootRun` 이 쓴다.
-#
-# 기동하면 아래 두 계정이 만들어져 있다. 화면은 /login 에서 이 계정으로 들어가고, curl 은 토큰을 받아 쓴다.
-#   TOKEN=$(curl -s localhost:8080/auth/token -H 'Content-Type: application/json' \
-#     -d '{"email":"dev@local.test","password":"local-dev-password"}' | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')
-#   curl -H "Authorization: Bearer $TOKEN" localhost:8080/api/users/me/balance
-
-app:
-  auth:
-    # 비밀번호는 로컬 전용 고정값이다. 저장소에 공개돼 있으므로 이 프로필을 바깥에 열린 서버에 쓰지 않는다.
-    seed-accounts:
-      - email: dev@local.test
-        password: local-dev-password
-        role: USER
-      - email: admin@local.test
-        password: local-admin-password
-        role: ADMIN
-
-# 액추에이터는 관리 포트가 따로일 때만 인증 없이 열린다(SecurityConfig). 로컬도 운영과 같은 모양으로 둔다.
+# 로컬 프로필은 인증 없이 액추에이터에 접근하도록 관리 포트를 분리한다(SecurityConfig).
 management:
   server:
     port: 8081

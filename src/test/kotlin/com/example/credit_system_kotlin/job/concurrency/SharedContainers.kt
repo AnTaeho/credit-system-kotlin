@@ -46,6 +46,11 @@ object SharedContainers {
         // 확인하는 자리가 이 테스트들뿐이다.
         registry.add("spring.flyway.enabled") { "true" }
         registry.add("spring.jpa.hibernate.ddl-auto") { "validate" }
+        registerRedis(registry)
+    }
+
+    // DB 는 H2 그대로 두고 Redis 만 컨테이너로 돌린다. 리프레시 토큰처럼 Redis 실물이 필요한 H2 테스트가 쓴다.
+    fun registerRedis(registry: DynamicPropertyRegistry) {
         registry.add("spring.data.redis.host") { redis.host }
         registry.add("spring.data.redis.port") { redis.getMappedPort(REDIS_PORT) }
     }

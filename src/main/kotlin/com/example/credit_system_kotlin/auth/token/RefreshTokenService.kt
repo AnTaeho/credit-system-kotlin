@@ -3,64 +3,63 @@ package com.example.credit_system_kotlin.auth.token
 import com.example.credit_system_kotlin.auth.config.JwtProperties
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
-import java.security.MessageDigest
-import java.security.SecureRandom
-import java.time.Clock
-import java.util.Base64
-import java.util.HexFormat
+import java.util.UUID
 
 private val log = LoggerFactory.getLogger(RefreshTokenService::class.java)
 
-/** 리프레시 토큰은 로그인할 때 한 장 낸다. 만료되거나 로그아웃으로 지워질 때까지 그 한 장으로 액세스를 새로 받는다. */
+// 리프레시 토큰을 확인한 결과다. Redis 를 못 봐서 모르는 경우(Unavailable)를 무효(Invalid)와 구분한다.
+sealed interface RefreshCheck {
+    data class Valid(val userId: Long) : RefreshCheck
+    data object Invalid : RefreshCheck
+    data object Unavailable : RefreshCheck
+}
+
+// 리프레시 토큰은 jti 를 가진 JWT 이고, 그 jti 가 Redis 에 남아 있는 동안만 유효하다.
 @Service
 class RefreshTokenService(
-    private val refreshTokenRepository: RefreshTokenRepository,
-    private val jwtProperties: JwtProperties,
-    private val clock: Clock
+    private val jwtCodec: JwtCodec,
+    private val refreshTokenStore: RefreshTokenStore,
+    private val jwtProperties: JwtProperties
 ) {
 
-    private val secureRandom = SecureRandom()
-
-    /** 256비트 난수로 원문을 만들어 돌려주고 DB 에는 해시만 남긴다. 원문은 이 뒤로 다시 얻을 수 없다. */
-    @Transactional
+    // 로그인마다 새 jti 로 한 장을 낸다. Redis 저장이 실패하면 예외가 그대로 올라가 로그인이 실패한다.
     fun issue(userId: Long): String {
-        val bytes = ByteArray(TOKEN_BYTES).also(secureRandom::nextBytes)
-        val raw = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-        refreshTokenRepository.save(
-            RefreshToken(userId, sha256Hex(raw), clock.instant().plus(jwtProperties.refreshTtl))
-        )
+        val jti = UUID.randomUUID().toString()
+        refreshTokenStore.save(jti, userId, jwtProperties.refreshTtl)
         log.info("리프레시 토큰 발급: userId={}", userId)
-        return raw
+        return jwtCodec.encode(TokenType.REFRESH, userId, jwtProperties.refreshTtl) { id(jti) }
     }
 
-    /** 유효한 토큰이면 그 주인의 id 를 준다. 모르는 토큰이거나 만료됐으면 null 이다. */
-    @Transactional(readOnly = true)
-    fun userIdOf(raw: String): Long? {
-        val token = refreshTokenRepository.findByTokenHash(sha256Hex(raw))
-        if (token == null) {
-            log.info("리프레시 거절: 모르는 토큰")
-            return null
+    // JWT 의 서명·만료·종류를 본 뒤 Redis 에 그 jti 가 같은 사용자 id 로 남아 있는지 확인한다.
+    fun check(token: String): RefreshCheck {
+        val jwt = jwtCodec.decode(token, TokenType.REFRESH)
+        val jti = jwt?.id
+        val userId = jwt?.subject?.toLongOrNull()
+        if (jti == null || userId == null) {
+            log.info("리프레시 거절: JWT 가 유효하지 않음")
+            return RefreshCheck.Invalid
         }
-        if (token.expiresAt <= clock.instant()) {
-            log.info("리프레시 거절: 만료된 토큰, userId={}", token.userId)
-            return null
+        val stored = try {
+            refreshTokenStore.findUserId(jti)
+        } catch (e: RuntimeException) {
+            log.warn("리프레시 토큰 조회 실패, 확인할 수 없음으로 처리: userId={}", userId, e)
+            return RefreshCheck.Unavailable
         }
-        return token.userId
+        if (stored != userId.toString()) {
+            log.info("리프레시 거절: Redis 에 없는 토큰, userId={}", userId)
+            return RefreshCheck.Invalid
+        }
+        return RefreshCheck.Valid(userId)
     }
 
-    /** 로그아웃. 그 토큰 한 장을 지운다. 모르는 토큰이면 할 일이 없다. */
-    @Transactional
-    fun delete(raw: String) {
-        val deleted = refreshTokenRepository.deleteByTokenHash(sha256Hex(raw))
-        log.info("리프레시 토큰 삭제(로그아웃): deleted={}", deleted)
-    }
-
-    companion object {
-        private const val TOKEN_BYTES = 32
-
-        /** 원문은 256비트 난수라 무차별 대입이 불가능하다. 느린 해시(BCrypt)가 필요 없고, 조회 키로 쓸 수 있어야 한다. */
-        fun sha256Hex(raw: String): String =
-            HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)))
+    // 로그아웃한 토큰의 jti 를 Redis 에서 지운다. 서명이 틀리거나 만료된 토큰은 지울 것이 없다.
+    fun delete(token: String) {
+        val jti = jwtCodec.decode(token, TokenType.REFRESH)?.id ?: return
+        try {
+            val deleted = refreshTokenStore.delete(jti)
+            log.info("리프레시 토큰 삭제(로그아웃): deleted={}", deleted)
+        } catch (e: RuntimeException) {
+            log.warn("리프레시 토큰 삭제 실패, Redis 에 만료까지 남는다", e)
+        }
     }
 }

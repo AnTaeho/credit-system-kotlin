@@ -9,6 +9,7 @@ import com.example.credit_system_kotlin.ledger.domain.LedgerEntry
 import com.example.credit_system_kotlin.ledger.event.LedgerReconciliationCompleted
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
 import com.example.credit_system_kotlin.user.domain.User
+import com.example.credit_system_kotlin.user.dto.GrantRequest
 import com.example.credit_system_kotlin.user.repository.UserRepository
 import com.example.credit_system_kotlin.user.service.UserFinder
 import com.example.credit_system_kotlin.user.service.UserService
@@ -148,8 +149,8 @@ class LedgerReconciliationTaskTest @Autowired constructor(
     fun `운영자 지급 뒤에도 대사 불일치가 없다`() {
         val user = userRepository.save(User("acme", 1000L))
         val userService = UserService(userRepository, UserFinder(userRepository), ledgerRepository, appProperties())
-        userService.grant(adminUserId = 1L, userId = user.persistedId, idemKey = "grant-key-1", amount = 700L)
-        userService.grant(adminUserId = 1L, userId = user.persistedId, idemKey = "grant-key-1", amount = 700L)
+        userService.grant(adminUserId = 1L, userId = user.persistedId, request = GrantRequest("grant-key-1", 700L))
+        userService.grant(adminUserId = 1L, userId = user.persistedId, request = GrantRequest("grant-key-1", 700L))
         ledgerRepository.save(LedgerEntry.hold(user.persistedId, 1L, 100L))
         userRepository.addBalance(user.persistedId, -100L, Instant.now())
         userRepository.flush()

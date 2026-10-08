@@ -2,6 +2,7 @@ package com.example.credit_system_kotlin.job.concurrency
 
 import com.example.credit_system_kotlin.global.exception.DuplicateRequestInProgressException
 import com.example.credit_system_kotlin.global.exception.GlobalExceptionHandler
+import com.example.credit_system_kotlin.job.dto.JobCreateRequest
 import com.example.credit_system_kotlin.job.repository.JobRepository
 import com.example.credit_system_kotlin.job.service.HoldService
 import com.example.credit_system_kotlin.ledger.repository.LedgerRepository
@@ -52,7 +53,7 @@ class DuplicateIdemKeyTest @Autowired constructor(
 
         runConcurrently(10) {
             try {
-                holdService.requestGeneration(user.persistedId, idemKey, "cat")
+                holdService.requestGeneration(user.persistedId, JobCreateRequest(idemKey, "cat"))
             } catch (e: DuplicateRequestInProgressException) {
                 // 선점한 쪽이 아직 jobId를 붙이기 전에 들어온 요청. 정상 경로다.
             } catch (e: DataIntegrityViolationException) {

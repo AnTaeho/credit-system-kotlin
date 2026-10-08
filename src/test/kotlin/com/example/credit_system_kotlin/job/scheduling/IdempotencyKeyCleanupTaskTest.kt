@@ -25,7 +25,7 @@ class IdempotencyKeyCleanupTaskTest @Autowired constructor(
     )
 
     private fun saveExpired(idemKey: String): IdempotencyKey {
-        val key = idempotencyKeyRepository.save(IdempotencyKey(1L, idemKey))
+        val key = idempotencyKeyRepository.save(IdempotencyKey(1L, idemKey, "hash"))
         ReflectionTestUtils.setField(key, "createdAt", Instant.now().minus(8, ChronoUnit.DAYS))
         return idempotencyKeyRepository.save(key)
     }
@@ -41,7 +41,7 @@ class IdempotencyKeyCleanupTaskTest @Autowired constructor(
 
     @Test
     fun `보존 기간 안의 키는 남는다`() {
-        val key = idempotencyKeyRepository.save(IdempotencyKey(1L, "recent-key"))
+        val key = idempotencyKeyRepository.save(IdempotencyKey(1L, "recent-key", "hash"))
 
         task.cleanup()
 

@@ -6,7 +6,6 @@ import com.example.credit_system_kotlin.user.domain.User
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.stereotype.Component
 
-/** 비밀번호 확인을 통과한 사람을 브라우저에 로그인시킨다. 액세스와 리프레시를 새로 내고 쿠키로 심는다. */
 @Component
 class TokenLogin(
     private val accessTokenService: AccessTokenService,
@@ -16,7 +15,9 @@ class TokenLogin(
 
     fun logIn(user: User, response: HttpServletResponse) {
         val userId = user.persistedId
+        // 리프레시를 먼저 낸다. Redis 저장이 실패하면 쿠키를 하나도 쓰지 않은 채 예외가 올라간다.
+        val refreshToken = refreshTokenService.issue(userId)
         cookies.writeAccess(response, accessTokenService.issue(userId, user.role))
-        cookies.writeRefresh(response, refreshTokenService.issue(userId))
+        cookies.writeRefresh(response, refreshToken)
     }
 }

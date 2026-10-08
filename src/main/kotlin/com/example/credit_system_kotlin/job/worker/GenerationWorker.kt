@@ -19,7 +19,6 @@ import java.time.Instant
 
 private val log = LoggerFactory.getLogger(GenerationWorker::class.java)
 
-/** HOLDING job 을 주기적으로 집어 워커 풀에 넘긴다. 실제 생성은 [GenerationJobProcessor] 가 한다. */
 @Component
 @ConditionalOnExpression("\${app.scheduling.enabled:true} and \${app.worker.enabled:true}")
 class GenerationWorker(
@@ -33,15 +32,10 @@ class GenerationWorker(
 
     private val batchSize: Int = workerProperties.batchSize
 
-    /**
-     * 빈 슬롯 수만큼만 선점한다. 풀에 task 를 넣는 스레드는 이 디스패처 하나고 나머지는 끝내면서 슬롯을 비우기만 한다.
-     * 그래서 주기 시작에 읽은 빈 슬롯 수는 실제보다 적을 수는 있어도 많을 수 없고, 풀이 넘치지 않는다.
-     */
     @Scheduled(fixedDelayString = "\${app.scheduling.worker-interval-millis:500}")
     fun dispatchPendingJobs() {
         val free = workerSlots.free()
         if (free <= 0) {
-            // 넘길 곳이 없으면 조회조차 하지 않는다. 포화 구간의 폴링 비용까지 없앤다.
             return
         }
         val jobs = jobRepository.findByStatusOrderByIdAsc(
@@ -57,7 +51,6 @@ class GenerationWorker(
         }
     }
 
-    /** HOLDING 에서 PROCESSING 으로 올리는 데 성공해야 true 다. 0행이거나 DB 예외면 그 job 만 건너뛴다. */
     private fun claim(job: Job): Boolean {
         return try {
             val updated = jobRepository.startProcessingIfAttemptMatches(
@@ -77,7 +70,6 @@ class GenerationWorker(
         }
     }
 
-    /** 슬롯을 세고 넘기므로 거부는 executor 종료 중 같은 예외 상황에서만 난다. 그때는 선점을 되돌리고 이번 주기를 끝낸다. */
     private fun dispatch(job: Job): Boolean {
         return try {
             workerExecutor.execute { jobProcessor.runGeneration(job) }
@@ -93,7 +85,6 @@ class GenerationWorker(
         }
     }
 
-    /** 되돌리기까지 실패하면 job 은 PROCESSING 으로 남고 정체 회수가 가져간다. */
     private fun rollbackToHolding(job: Job) {
         try {
             jobRepository.rollbackToHoldingIfProcessing(job.persistedId, job.attemptNo, Instant.now())

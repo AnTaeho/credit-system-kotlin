@@ -10,7 +10,6 @@ import org.springframework.stereotype.Component
 
 private val log = LoggerFactory.getLogger(GenerationJobProcessor::class.java)
 
-/** 워커 풀 스레드에서 job 하나를 생성부터 결과 반영까지 처리한다. */
 @Component
 class GenerationJobProcessor(
     private val heartbeatRegistry: HeartbeatRegistry,
@@ -18,7 +17,6 @@ class GenerationJobProcessor(
     private val jobLifecycleService: JobLifecycleService
 ) {
 
-    /** 처리하는 동안 heartbeat 를 돌리고, 성공하든 실패하든 끝나면 멈춘다. */
     fun runGeneration(job: Job) {
         val jobId = job.persistedId
         val attemptNo = job.attemptNo
@@ -31,7 +29,6 @@ class GenerationJobProcessor(
         }
     }
 
-    /** 생성에 성공하면 resultUrl, 실패하면 FAILED로 기록하고 null */
     private fun generateOrMarkFailed(job: Job): String? =
         try {
             stubClient.generate(job.prompt)
@@ -44,7 +41,6 @@ class GenerationJobProcessor(
             null
         }
 
-    /** 결과 반영에 실패하면 job 은 PROCESSING 으로 남아 정체 회수 대상이 된다. */
     private fun confirm(job: Job, resultUrl: String) {
         try {
             jobLifecycleService.confirm(job, resultUrl)

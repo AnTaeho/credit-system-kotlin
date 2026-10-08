@@ -11,7 +11,7 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 
 /**
- * V3 가 실제 MySQL 에서 원장 유형 enum 에 ADMIN_GRANT 를 더하는지 확인한다.
+ * baseline이 실제 MySQL 에서 원장 유형 enum 에 ADMIN_GRANT 를 포함하는지 확인한다.
  * `ddl-auto: validate` 는 enum 값의 나열 순서를 보지 않아 `information_schema` 로 직접 단언한다.
  */
 @ActiveProfiles("test")
@@ -29,7 +29,7 @@ class LedgerTypeMigrationTest @Autowired constructor(
     }
 
     @Test
-    fun `V3 뒤 원장 유형 컬럼은 ADMIN_GRANT 를 포함한 알파벳 순 네이티브 enum 이다`() {
+    fun `baseline 적용 후 원장 유형 컬럼은 ADMIN_GRANT 를 포함한 알파벳 순 네이티브 enum 이다`() {
         val columnType = jdbcTemplate.queryForObject(
             """
             SELECT COLUMN_TYPE FROM information_schema.COLUMNS

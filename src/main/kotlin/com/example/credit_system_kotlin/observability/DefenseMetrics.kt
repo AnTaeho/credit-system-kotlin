@@ -14,10 +14,6 @@ import java.util.concurrent.ConcurrentHashMap
 
 private val log = LoggerFactory.getLogger(DefenseMetrics::class.java)
 
-/**
- * 방어 장치 이벤트를 카운터로 센다. 리스너를 AFTER_COMMIT 으로 바꾸면 안 된다.
- * 유니크 위반처럼 롤백되는 트랜잭션의 이벤트가 버려지는데, 그게 가장 세야 하는 사건이다.
- */
 @Component
 class DefenseMetrics(
     private val registry: MeterRegistry
@@ -27,9 +23,6 @@ class DefenseMetrics(
     private val recoveryCounters = ConcurrentHashMap<RecoveryDetector, Counter>()
 
     init {
-        // 한 번도 발생하지 않은 조합을 lazy 등록에 맡기면 스크레이프에 시계열 자체가 없다.
-        // Prometheus 의 rate()/increase() 는 "없는 시계열"과 "0인 시계열"을 다르게 다루므로,
-        // 알람 규칙이 처음부터 성립하도록 유효 조합 전부를 0으로 깔아 둔다.
         for ((point, outcomes) in VALID_COMBINATIONS) {
             for (outcome in outcomes) {
                 defenseCounters[point to outcome] = registerDefenseCounter(point, outcome)
@@ -40,19 +33,14 @@ class DefenseMetrics(
         }
     }
 
-    /** 미리 등록한 조합이면 카운터만 올린다. 목록에 없는 조합도 버리지 않고 경고와 함께 센다. */
     @EventListener
     fun onDefenseTriggered(event: DefenseTriggered) {
         defenseCounters.computeIfAbsent(event.point to event.outcome) { (point, outcome) ->
-            // 사전 등록 목록에 없는 조합이 들어왔다는 것은 코드가 바뀌었는데 이 목록이 안 따라온
-            // 것이다. 예외를 던져 요청 흐름을 죽이는 것보다, 세면서 경고를 남기는 편이 낫다 —
-            // 관측 코드가 도메인 동작을 망가뜨려서는 안 된다.
             log.warn("사전 등록되지 않은 방어 조합: point={}, outcome={}", point, outcome)
             registerDefenseCounter(point, outcome)
         }.increment()
     }
 
-    /** 죽은 job 을 FAILED 로 회수할 때마다 어느 감지 경로가 잡았는지로 나눠 센다. */
     @EventListener
     fun onJobRecovered(event: JobRecovered) {
         log.debug(
@@ -82,7 +70,6 @@ class DefenseMetrics(
         const val DEFENSE_METRIC = "credit.defense"
         const val RECOVERY_METRIC = "credit.job.recovery"
 
-        /** 각 방어 지점이 실제로 낼 수 있는 결과만 담는다. 여기 없는 조합은 코드상 발생하지 않는다. */
         val VALID_COMBINATIONS: Map<DefensePoint, Set<DefenseOutcome>> = mapOf(
             DefensePoint.HOLD_BALANCE to setOf(DefenseOutcome.APPLIED, DefenseOutcome.REJECTED),
             DefensePoint.IDEM_KEY to setOf(DefenseOutcome.APP_HIT, DefenseOutcome.DB_UNIQUE, DefenseOutcome.MISMATCH),

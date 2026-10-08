@@ -9,10 +9,6 @@ import java.time.Instant
 
 interface UserRepository : JpaRepository<User, Long> {
 
-    /**
-     * 잔액이 [amount] 이상일 때만 깎아서 동시 요청에도 음수가 되지 않는다. 0행이면 잔액 부족이거나 없는 사용자다.
-     * 실행 뒤 영속성 컨텍스트를 비우므로 먼저 읽어 둔 `User` 의 잔액은 낡은 값이다. 필요하면 다시 읽는다.
-     */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
         """
@@ -27,7 +23,6 @@ interface UserRepository : JpaRepository<User, Long> {
         @Param("now") now: Instant
     ): Int
 
-    /** 조건 없이 더한다. 0행이면 없는 사용자다. [deductBalance] 처럼 실행 뒤 영속성 컨텍스트를 비운다. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
         """
@@ -44,6 +39,5 @@ interface UserRepository : JpaRepository<User, Long> {
 
     fun findByEmail(email: String): User?
 
-    /** 잔액이 음수인 사용자 수. 불변식이라 0 이 아니면 즉시 사고다. */
     fun countByBalanceLessThan(balance: Long): Long
 }
