@@ -16,7 +16,7 @@ Kotlin / Spring Boot / MySQL / Redis. 원본은 별도 Java 프로젝트이고 �
 # 1) 로컬 인프라 — MySQL 8.4 + Redis 7
 docker compose up -d
 
-# 2) 앱 — local 프로필(시드 계정 둘). DB·Redis 는 application.yml 의 기본값이 위 컨테이너와 같은 계약이라 설정 없이 붙는다
+# 2) 앱 — local 프로필(관리 포트 8081). DB·Redis 는 application.yml 의 기본값이 위 컨테이너와 같은 계약이라 설정 없이 붙는다
 SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 ```
 
@@ -26,15 +26,15 @@ SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 
 모든 API 와 화면은 로그인이 필요하다. 이메일과 비밀번호로 로그인하고, 누구나 <http://localhost:8080/signup> 에서 가입할 수 있다. 가입하면 항상 일반 사용자이고 잔액은 0 이다.
 
-`local` 프로필은 기동할 때 계정 둘을 만들어 둔다([`application-local.yml`](src/main/resources/application-local.yml) 의 `app.auth.seed-accounts`). 비밀번호는 저장소에 공개된 로컬 전용 값이다.
+마이그레이션 V2 가 계정 둘을 넣어 둔다([`V2__seed_accounts.sql`](src/main/resources/db/migration/V2__seed_accounts.sql)). 프로필과 상관없이 들어간다. 비밀번호는 저장소에 공개된 값이라, 서버를 외부에 열기 전에 두 계정의 `password_hash` 를 반드시 바꾼다.
 
 | 이메일 | 비밀번호 | 권한 |
 |---|---|---|
 | `dev@local.test` | `local-dev-password` | 일반 사용자 |
 | `admin@local.test` | `local-admin-password` | 운영자(`ROLE_ADMIN`) — 크레딧 지급 |
 
-- **브라우저:** <http://localhost:8080/login> 에서 로그인한다. 로그인은 쿠키 두 개로 유지된다. 액세스 JWT(15분)와 리프레시 토큰(14일)이고, 액세스가 만료되면 서버가 리프레시로 조용히 갱신한다. 세션은 없다. 쓰기 요청에는 CSRF 토큰이 필요하다(화면이 알아서 싣는다)
-- **curl:** `POST /auth/token` 으로 액세스 토큰을 받아 `Authorization: Bearer` 헤더에 싣는다. 이 요청은 CSRF 검사에서 빠진다. 토큰은 15분 뒤 만료되므로 그때 다시 받는다
+- **브라우저:** <http://localhost:8080/login> 에서 로그인한다. 로그인은 쿠키 두 개로 유지된다. 액세스 JWT(1시간)와 리프레시 JWT(14일)이고, 액세스가 만료되면 서버가 리프레시로 조용히 갱신한다. 리프레시는 Redis 에 저장돼 있는 동안만 통하고, 로그아웃하면 Redis 에서 지워진다. 세션은 없다. 쓰기 요청에는 CSRF 토큰이 필요하다(화면이 알아서 싣는다)
+- **curl:** `POST /auth/token` 으로 액세스 토큰을 받아 `Authorization: Bearer` 헤더에 싣는다. 이 요청은 CSRF 검사에서 빠진다. 토큰은 1시간 뒤 만료되므로 그때 다시 받는다
 
 ```bash
 token() {
@@ -45,7 +45,7 @@ DEV=$(token dev@local.test local-dev-password)
 ADMIN=$(token admin@local.test local-admin-password)
 ```
 
-운영자는 가입으로 만들 수 없다. 운영자 계정은 `app.auth.seed-accounts` 에 적어 두면 기동할 때 만들어진다. 같은 이메일로 먼저 가입한 사람이 있어도 기동 뒤에는 설정의 역할과 비밀번호로 덮인다.
+운영자는 가입으로 만들 수 없고, 역할은 한 번 정해지면 바뀌지 않는다. 운영자 계정은 마이그레이션 V2 가 넣는 `admin@local.test` 하나다. 같은 이메일의 행이 이미 있는 DB 에서는 V2 가 그 행을 건드리지 않는다.
 
 ### 크레딧 얻기 — 운영자 지급
 
@@ -155,8 +155,8 @@ Prometheus + 알람 규칙 + 장애 주입 시나리오가 별도 compose 로 �
 
 | 바깥 | 무엇을 맡기나 | 닿는 방법 | 끊기면 |
 |---|---|---|---|
-| **MySQL 8.4** | 잔액, 원장, job, 멱등키, 리프레시 토큰. 사실의 전부다 | JDBC `3306`. 스키마는 기동할 때 Flyway 가 맞춘다 | 서비스가 선다. 요청은 실패하고 기동도 되지 않는다. 스케줄러는 그 주기를 실패로 남기고 다음 주기에 다시 돈다. 돈은 마지막 커밋 상태 그대로다 |
-| **Redis 7** | 워커가 살아 있다는 표시(ZSET `heartbeats`) 하나. 세션도 캐시도 두지 않는다 | `6379`, 연결·명령 타임아웃 2초 | 서비스는 계속 돈다. 하트비트 갱신은 경고 로그만 남기고, 죽은 job 회수는 DB 의 `updatedAt` 60초 기준으로 내려간다(`backstop_blind`). 살아 있는 job 을 잘못 회수해도 `attemptNo` 가 달라 돈은 한 번만 움직인다 |
+| **MySQL 8.4** | 잔액, 원장, job, 멱등키. 돈에 관한 사실의 전부다 | JDBC `3306`. 스키마는 기동할 때 Flyway 가 맞춘다 | 서비스가 선다. 요청은 실패하고 기동도 되지 않는다. 스케줄러는 그 주기를 실패로 남기고 다음 주기에 다시 돈다. 돈은 마지막 커밋 상태 그대로다 |
+| **Redis 7** | 워커가 살아 있다는 표시(ZSET `heartbeats`)와 리프레시 토큰(`refresh:{jti}` → 사용자 id, TTL 14일). 세션도 캐시도 두지 않는다 | `6379`, 연결·명령 타임아웃 2초 | 서비스는 계속 돈다. 다만 로그인 갱신이 안 된다. 새 로그인은 실패하고, 액세스 토큰이 만료된 브라우저는 Redis 가 돌아올 때까지 미인증이다(쿠키는 남아 있어 돌아오면 이어진다). 아직 유효한 액세스 토큰과 Bearer 요청은 그대로 된다. 하트비트 갱신은 경고 로그만 남기고, 죽은 job 회수는 DB 의 `updatedAt` 60초 기준으로 내려간다(`backstop_blind`). 살아 있는 job 을 잘못 회수해도 `attemptNo` 가 달라 돈은 한 번만 움직인다 |
 | **생성 호출** | 결과물을 만드는 일 | 지금은 프로세스 안의 스텁이다. 네트워크로 나가지 않는다. 3~7초 뒤 30% 확률로 실패하고, 성공하면 존재하지 않는 주소(`https://stub-images.local/…`)를 돌려준다 | 실패하면 재시도 뒤 환불로 끝난다. **돌아오지 않으면 돈이 묶인다.** 호출에 타임아웃이 없고, 워커가 살아 하트비트를 계속 보내므로 회수도 일어나지 않는다. 알아챌 길은 가장 오래된 미결 나이가 5분을 넘을 때 뜨는 `CreditPipelineStalled` 뿐이다 |
 | **Prometheus** | 지표를 모으고 알람을 낸다 | Prometheus 가 관리 포트(`8081`)의 `/actuator/prometheus` 를 5초마다 긁는다. 앱은 Prometheus 를 모른다 | 서비스와 돈은 그대로다. 사고가 나도 알람이 오지 않는다 |
 
@@ -203,8 +203,8 @@ Prometheus + 알람 규칙 + 장애 주입 시나리오가 별도 compose 로 �
 | 스텁 지연 / 실패율 | 3~7초 / 0.3 |
 | heartbeat timeout / 갱신 주기 | 10초 / 5초 |
 | 처리 상한(회수) | 60초 |
-| 액세스 토큰 / 리프레시 토큰 수명 | 15분 / 14일 |
-| 시드 계정 | 없음. local 프로필은 `dev@local.test` / `admin@local.test` |
+| 액세스 토큰 / 리프레시 토큰 수명 | 1시간 / 14일 |
+| 시드 계정 | `dev@local.test` / `admin@local.test` (마이그레이션 V2) |
 | 운영자 지급 1회 상한 | 1,000,000 |
 
 환경별로 바꿀 때는 환경변수로 덮어쓴다. `application.yml` 은 건드리지 않는다.
@@ -213,31 +213,31 @@ Prometheus + 알람 규칙 + 장애 주입 시나리오가 별도 compose 로 �
 |---|---|
 | `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | MySQL 접속 |
 | `SPRING_DATA_REDIS_HOST` / `_PORT` | Redis 접속 |
-| `SPRING_PROFILES_ACTIVE` | `local`(시드 계정, 관리 포트 8081) 또는 `prod` |
+| `SPRING_PROFILES_ACTIVE` | `local`(관리 포트 8081) |
 | `MANAGEMENT_SERVER_PORT` | 관리 포트. 따로 주지 않으면 액추에이터가 전부 막힌다 |
 | `APP_WORKER_ENABLED` / `APP_SCHEDULING_ENABLED` | 워커와 스케줄러를 끈다. 런타임에 바꿀 수 없어 재기동이 필요하다 |
 | `APP_STUB_FAILURE_RATE` / `APP_STUB_MIN_DELAY_MILLIS` / `APP_STUB_MAX_DELAY_MILLIS` | 생성 스텁의 실패율과 지연 |
+
+마이그레이션은 현재 스키마를 담은 `V1__baseline.sql`로 통합했다. 이전 V1~V10을 적용한 로컬 DB는 재생성한 뒤 실행해야 한다. `V2__seed_accounts.sql` 은 시드 계정 둘을 넣는다. V3 은 리프레시 토큰을 Redis 로 옮기면서 남은 테이블을 지운다. V4 는 멱등키의 요청 해시를 NOT NULL 로 바꾼다. 이후 스키마 변경은 V5부터 추가한다.
 
 ### 로그인 설정
 
 | 환경변수 | 뜻 |
 |---|---|
-| `APP_AUTH_JWT_SECRET` | 액세스 JWT 서명 키(HS256, 32바이트 이상) |
-| `APP_AUTH_COOKIESECURE` | 로그인 쿠키에 `Secure` 를 붙일지. 운영은 `true` |
-| `APP_AUTH_SEEDACCOUNTS_0_EMAIL` / `_PASSWORD` / `_ROLE` | 기동할 때 맞출 계정. 운영자 계정을 만드는 유일한 길이다. 번호를 늘려 여러 개 적는다 |
+| `APP_AUTH_JWT_SECRET` | 액세스·리프레시 JWT 서명 키(HS256, 32바이트 이상) |
+| `APP_AUTH_COOKIESECURE` | 로그인 쿠키에 `Secure` 를 붙일지. HTTPS 사용 시 `true` |
 
-뒤의 둘은 속성(`app.auth.cookie-secure`, `app.auth.seed-accounts[0].email`)의 대시가 빠진 이름이다 — Spring 완화 바인딩의 규칙이다. 로컬에서 서명 키를 안 주면 `application.yml` 에 적힌 로컬 전용 기본값을 쓴다.
+뒤의 것은 속성(`app.auth.cookie-secure`)의 대시가 빠진 이름이다 — Spring 완화 바인딩의 규칙이다. 로컬에서 서명 키를 안 주면 `application.yml` 에 적힌 로컬 전용 기본값을 쓴다.
 
-운영은 `prod` 프로파일(`SPRING_PROFILES_ACTIVE=prod`)이다. 이 프로파일의 DB 설정과 JWT 서명 키에는 **기본값이 없다** — 환경변수를 빠뜨리면 앱이 로컬 DB 를 향해 조용히 뜨는 대신 부팅에서 죽는다. 서명 키가 저장소에 공개된 로컬 기본값과 같거나 쿠키 `Secure` 가 꺼져 있어도 기동을 거부한다. 스키마는 어느 프로파일에서든 Flyway 가 만들고 Hibernate 는 `validate` 로 확인만 한다.
-
-저장소에 있는 비밀번호는 local 프로필의 시드 계정 둘과 compose 의 DB 계정뿐이고, 둘 다 로컬 전용이다. 진짜 시크릿 관리는 배포 환경이 정해질 때 붙는다.
+저장소에 있는 비밀번호는 마이그레이션 V2 의 시드 계정 둘과 compose 의 DB 계정뿐이다. 시드 계정은 어느 환경의 DB 에나 들어가므로 외부에 열기 전에 비밀번호를 바꾼다. 진짜 시크릿 관리는 배포 환경이 정해질 때 붙는다.
 
 ---
 
 ## 알아 둘 것
 
 - **누구나 가입할 수 있다.** 이메일 인증, 가입·로그인 시도 제한, 비밀번호 재설정은 없다. 가입해도 잔액은 0 이고 크레딧은 운영자 지급으로만 생기므로 돈이 새지는 않는다
-- **로그아웃해도 이미 나간 액세스 토큰은 만료(15분)까지 유효하다.** 서버가 끊는 것은 리프레시 토큰이다. 브라우저에서는 쿠키가 지워져 쓰이지 않는다
+- **로그아웃해도 이미 나간 액세스 토큰은 만료(1시간)까지 유효하다.** 서버가 끊는 것은 리프레시 토큰이다(Redis 에서 지운다). 브라우저에서는 쿠키가 지워져 쓰이지 않는다
+- **Redis 가 비면 모두 다시 로그인한다.** 리프레시 토큰이 Redis 에만 있어서다. Redis 를 초기화하거나 볼륨 없이 재시작하면 액세스 토큰이 만료되는 대로 로그인 화면으로 간다
 - **크레딧은 운영자 지급으로만 생긴다.** 결제 충전은 아직 없다
 - **생성이 스텁이다.** `GenerationStubClient` 는 `Thread.sleep` + 확률적 실패인 인메모리 시뮬레이션이다. 네트워크 너머로 나가지 않는다
 - **인스턴스 1대 전제다.** 회수·대사·멱등키 정리 스케줄러에 분산 락이 없다. 실사용자가 한 명이라 서버도 1대로 운영하기로 했다
