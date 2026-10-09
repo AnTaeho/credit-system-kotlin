@@ -1,0 +1,209 @@
+package com.example.credit_system_kotlin.unit.job.worker
+
+import com.example.credit_system_kotlin.global.config.WorkerProperties
+import com.example.credit_system_kotlin.global.event.DefenseOutcome
+import com.example.credit_system_kotlin.global.event.DefensePoint
+import com.example.credit_system_kotlin.job.domain.Job
+import com.example.credit_system_kotlin.job.domain.JobStatus
+import com.example.credit_system_kotlin.job.repository.JobRepository
+import com.example.credit_system_kotlin.job.worker.GenerationJobProcessor
+import com.example.credit_system_kotlin.job.worker.GenerationWorker
+import com.example.credit_system_kotlin.job.worker.WorkerSlots
+import com.example.credit_system_kotlin.support.RecordingEventPublisher
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatCode
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.mockito.Mock
+import org.mockito.junit.jupiter.MockitoExtension
+import org.mockito.kotlin.any
+import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.doReturn
+import org.mockito.kotlin.doThrow
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.never
+import org.mockito.kotlin.verify
+import org.mockito.kotlin.whenever
+import org.springframework.core.task.SyncTaskExecutor
+import org.springframework.core.task.TaskExecutor
+import org.springframework.core.task.TaskRejectedException
+import org.springframework.dao.QueryTimeoutException
+import org.springframework.data.domain.Pageable
+import org.springframework.test.util.ReflectionTestUtils
+import java.time.Instant
+
+@ExtendWith(MockitoExtension::class)
+class GenerationWorkerUnitTest {
+
+    @Mock lateinit var jobRepository: JobRepository
+
+    @Mock lateinit var jobProcessor: GenerationJobProcessor
+
+    private lateinit var worker: GenerationWorker
+    private lateinit var job: Job
+
+    private val eventPublisher = RecordingEventPublisher()
+
+    @BeforeEach
+    fun setUp() {
+        eventPublisher.clear()
+        worker = GenerationWorker(
+            jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
+            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
+        )
+        job = Job.hold(10L, 100L, "cat")
+        ReflectionTestUtils.setField(job, "id", 1L)
+    }
+
+    @Test
+    fun `다른 워커가 선점한 작업은 외부 처리기로 넘기지 않는다`() {
+        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(0).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+
+        worker.dispatchPendingJobs()
+
+        verify(jobProcessor, never()).runGeneration(job)
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.LOST)).isEqualTo(1)
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isZero()
+    }
+
+    @Test
+    fun `선점 UPDATE가 반복 실패해도 이후 주기에서 다시 처리한다`() {
+        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doThrow(QueryTimeoutException("db unavailable"))
+            .whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+
+        repeat(CONCURRENCY + 2) { worker.dispatchPendingJobs() }
+
+        verify(jobProcessor, never()).runGeneration(job)
+
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+
+        worker.dispatchPendingJobs()
+
+        verify(jobProcessor).runGeneration(job)
+    }
+
+    @Test
+    fun `executor 위임과 롤백이 모두 실패해도 예외가 새어나가지 않는다`() {
+        val rejectingWorker = GenerationWorker(
+            jobRepository, jobProcessor,
+            TaskExecutor { throw IllegalStateException("executor shutdown") }, eventPublisher,
+            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
+        )
+        doReturn(listOf(job)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+        doThrow(QueryTimeoutException("db unavailable")).whenever(jobRepository)
+            .rollbackToHoldingIfProcessing(eq(1L), eq(0), any<Instant>())
+
+        assertThatCode { rejectingWorker.dispatchPendingJobs() }.doesNotThrowAnyException()
+
+        verify(jobProcessor, never()).runGeneration(job)
+    }
+
+    @Test
+    fun `한 작업의 선점 실패가 같은 배치의 나머지 작업을 막지 않는다`() {
+        val second = Job.hold(10L, 100L, "dog")
+        ReflectionTestUtils.setField(second, "id", 2L)
+        doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doThrow(QueryTimeoutException("db unavailable"))
+            .whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(2L), eq(0), any<Instant>())
+
+        worker.dispatchPendingJobs()
+
+        verify(jobProcessor).runGeneration(second)
+    }
+
+    @Test
+    fun `executor가 거부하면 선점을 롤백하고 이번 주기를 중단한다`() {
+        val second = Job.hold(10L, 100L, "dog")
+        ReflectionTestUtils.setField(second, "id", 2L)
+        val rejectingWorker = GenerationWorker(
+            jobRepository, jobProcessor,
+            TaskExecutor { throw TaskRejectedException("pool exhausted") }, eventPublisher,
+            UNLIMITED_SLOTS, WorkerProperties(true, 20, CONCURRENCY)
+        )
+        doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+
+        rejectingWorker.dispatchPendingJobs()
+
+        verify(jobRepository).rollbackToHoldingIfProcessing(eq(1L), eq(0), any<Instant>())
+        verify(jobRepository, never()).startProcessingIfAttemptMatches(eq(2L), any<Int>(), any<Instant>())
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.ROLLED_BACK))
+            .describedAs("슬롯을 세고 넘기므로 이 경로가 타면 계산에 구멍이 있다는 신호다")
+            .isEqualTo(1)
+    }
+
+    @Test
+    fun `dispatch에 성공하면 같은 배치의 다음 작업도 처리한다`() {
+        val second = Job.hold(10L, 100L, "dog")
+        ReflectionTestUtils.setField(second, "id", 2L)
+        doReturn(listOf(job, second)).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(1L), eq(0), any<Instant>())
+        doReturn(1).whenever(jobRepository).startProcessingIfAttemptMatches(eq(2L), eq(0), any<Instant>())
+
+        worker.dispatchPendingJobs()
+
+        verify(jobProcessor).runGeneration(job)
+        verify(jobProcessor).runGeneration(second)
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isEqualTo(2)
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.LOST)).isZero()
+    }
+
+    @Test
+    fun `빈 슬롯이 없으면 DB 조회도 선점도 하지 않는다`() {
+        val fullWorker = GenerationWorker(
+            jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
+            WorkerSlots { 0 }, WorkerProperties(true, 3, CONCURRENCY)
+        )
+
+        fullWorker.dispatchPendingJobs()
+
+        verify(jobRepository, never()).findByStatusOrderByIdAsc(any(), any())
+        verify(jobRepository, never()).startProcessingIfAttemptMatches(any(), any(), any<Instant>())
+        assertThat(eventPublisher.countOf(DefensePoint.WORKER_CLAIM, DefenseOutcome.APPLIED)).isZero()
+    }
+
+    @Test
+    fun `빈 슬롯이 batchSize보다 적으면 슬롯 수만큼만 읽는다`() {
+        val slotWorker = GenerationWorker(
+            jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
+            WorkerSlots { 2 }, WorkerProperties(true, 3, CONCURRENCY)
+        )
+        doReturn(emptyList<Job>()).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+
+        slotWorker.dispatchPendingJobs()
+
+        assertThat(capturedPageSize()).isEqualTo(2)
+    }
+
+    @Test
+    fun `빈 슬롯이 batchSize보다 많으면 batchSize가 상한이다`() {
+        val slotWorker = GenerationWorker(
+            jobRepository, jobProcessor, SyncTaskExecutor(), eventPublisher,
+            WorkerSlots { 5 }, WorkerProperties(true, 3, CONCURRENCY)
+        )
+        doReturn(emptyList<Job>()).whenever(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), any())
+
+        slotWorker.dispatchPendingJobs()
+
+        assertThat(capturedPageSize()).isEqualTo(3)
+    }
+
+    private fun capturedPageSize(): Int {
+        val captor = argumentCaptor<Pageable>()
+        verify(jobRepository).findByStatusOrderByIdAsc(eq(JobStatus.HOLDING), captor.capture())
+        assertThat(captor.firstValue.pageNumber).isZero()
+        return captor.firstValue.pageSize
+    }
+
+    companion object {
+        private const val CONCURRENCY = 3
+
+        /** 슬롯 계산과 무관한 기존 단언들이 예전과 똑같이 돌도록 슬롯을 무제한으로 둔다. */
+        private val UNLIMITED_SLOTS = WorkerSlots { Int.MAX_VALUE }
+    }
+}

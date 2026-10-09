@@ -151,14 +151,11 @@ pitest {
     // SharedContainers 를 쓰는 테스트. Docker 가 없으면 실패하고, PIT 는 테스트 전체가 초록이어야 돈다.
     excludedTestClasses.set(
         listOf(
-            "com.example.credit_system_kotlin.job.concurrency.*",
-            "com.example.credit_system_kotlin.auth.account.InitialAccountsMigrationTest",
-            "com.example.credit_system_kotlin.auth.token.AuthTokenMigrationTest",
-            "com.example.credit_system_kotlin.auth.token.RefreshTokenServiceTest",
-            "com.example.credit_system_kotlin.job.repository.JobsUserIdIndexMigrationTest",
-            "com.example.credit_system_kotlin.ledger.repository.LedgerJobGuardMigrationTest",
-            "com.example.credit_system_kotlin.ledger.repository.LedgerTypeMigrationTest",
-            "com.example.credit_system_kotlin.web.LoginFlowTest"
+            "com.example.credit_system_kotlin.integration.job.concurrency.*",
+            "com.example.credit_system_kotlin.integration.auth.account.InitialAccountsMigrationTest",
+            "com.example.credit_system_kotlin.integration.auth.token.RefreshTokenServiceTest",
+            "com.example.credit_system_kotlin.integration.ledger.repository.LedgerJobGuardMigrationTest",
+            "com.example.credit_system_kotlin.integration.web.LoginFlowTest"
         )
     )
     // 기본 묶음. 다른 묶음은 `./gradlew pitest -Ppit.mutators=STRONGER` 처럼 쉼표로 이어 준다.
